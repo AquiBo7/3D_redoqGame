@@ -368,6 +368,8 @@ export class WorldApp {
             postprocessing: this.composer !== null,
             bloomThreshold: this.bloomPass?.threshold ?? null,
             bloomStrength: this.bloomPass?.strength ?? null,
+            bloomBuffer: this.bloomPass ? [this.bloomPass.renderTargetBright.width, this.bloomPass.renderTargetBright.height] : null,
+            postprocessingPasses: this.composer?.passes.length ?? 0,
             airParticles: this.airParticles?.geometry.getAttribute('position').count ?? 0,
             renderCalls: this.renderer.info.render.calls,
             renderTriangles: this.renderer.info.render.triangles,
@@ -553,7 +555,7 @@ export class WorldApp {
       format: THREE.RGBAFormat,
       colorSpace: THREE.LinearSRGBColorSpace,
       depthBuffer: true,
-      samples: Math.min(4, this.renderer.capabilities.maxSamples),
+      samples: Math.min(2, this.renderer.capabilities.maxSamples),
     });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -738,8 +740,7 @@ export class WorldApp {
     const sun = new THREE.DirectionalLight(0xffd29b, 2.05);
     sun.position.copy(SUN_DIRECTION).multiplyScalar(16);
     sun.castShadow = true;
-    const shadowSize = window.matchMedia('(pointer: coarse)').matches ? 1024 : 2048;
-    sun.shadow.mapSize.set(shadowSize, shadowSize);
+    sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 40;
     sun.shadow.camera.left = -14;
@@ -779,6 +780,8 @@ export class WorldApp {
     const height = window.innerHeight;
     this.renderer.setSize(width, height);
     this.composer?.setSize(width, height);
+    const ratio = this.renderer.getPixelRatio();
+    this.bloomPass?.setSize(Math.round(width * ratio * 0.5), Math.round(height * ratio * 0.5));
     this.updateCameraProjection(width, height);
   };
 

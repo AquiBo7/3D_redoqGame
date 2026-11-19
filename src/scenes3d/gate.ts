@@ -384,6 +384,11 @@ function buildGateCampusDetails(
   gateDetailInstances(parent, 'gate-detail-cycle-frames-and-street-metal', new THREE.CylinderGeometry(1, 1, 1, 7), dark, tubes);
   gateDetailInstances(parent, 'gate-detail-cycle-wheels', new THREE.TorusGeometry(0.337, 0.028, 5, 20), dark, wheels);
   gateDetailSigns(parent, 'gate-detail-welcome-labels', '欢迎新同学', 1.5, 0.48, welcomeSigns, '#f0e5cb', '#9e573e');
+  const grassCount = meadowBeds.reduce((sum, bed) => sum + Math.floor(bed.width * bed.depth * (bed.density ?? 22)), 0);
+  for (const bed of meadowBeds) {
+    bed.density = (bed.density ?? 22) * 3000 / grassCount;
+    bed.bladeWidth = 1.25;
+  }
   createCampusMeadow(parent, 'gate-meadow', meadowBeds, gateWindTime);
 }
 

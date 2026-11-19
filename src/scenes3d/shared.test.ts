@@ -14,6 +14,20 @@ function collectMeshes(root: THREE.Object3D): THREE.Mesh[] {
 }
 
 describe('createCharacterActor', () => {
+  it.each(['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale', 'volunteer'] as const)('%s 占位与道具仅叙事主角投影，全员接收阴影', (id) => {
+    const actor = createCharacterActor(id, 1.7, 0xffffff, { props: [{ kind: 'phone' }] });
+    const expected = ['linxia', 'father', 'fatherCarry'].includes(id);
+    for (const mesh of collectMeshes(actor)) {
+      expect(mesh.castShadow).toBe(expected);
+      expect(mesh.receiveShadow).toBe(true);
+    }
+  });
+
+  it('可显式关闭主角投影且不影响接收阴影', () => {
+    const actor = createCharacterActor('linxia', 1.62, 0xffffff, { castShadow: false, props: [{ kind: 'phone' }] });
+    expect(collectMeshes(actor).every((mesh) => !mesh.castShadow && mesh.receiveShadow)).toBe(true);
+  });
+
   it('模型未预载时回退胶囊体，不抛错且外层朝向默认 0（面向 +Z）', () => {
     const actor = createCharacterActor('linxia', 1.62, 0xd9c98f);
     expect(actor).toBeInstanceOf(THREE.Group);

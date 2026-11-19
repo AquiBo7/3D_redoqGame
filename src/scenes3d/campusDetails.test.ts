@@ -90,7 +90,13 @@ describe('校园精装几何与运行契约', () => {
     const meadows = root.children.filter((child) => child.userData.meadow) as THREE.InstancedMesh[];
     expect(meadows).toHaveLength(2);
     expect(meadows.map((mesh) => mesh.userData.meadow).sort()).toEqual(['flowers', 'grass']);
-    expect(meadows.find((mesh) => mesh.userData.meadow === 'grass')!.count).toBeGreaterThan(1000);
+    const grass = meadows.find((mesh) => mesh.userData.meadow === 'grass')!;
+    expect(grass.count).toBeGreaterThan(1000);
+    if (id === 'S5') {
+      expect(grass.count).toBeGreaterThanOrEqual(2800);
+      expect(grass.count).toBeLessThanOrEqual(3200);
+      expect(grass.count * grass.geometry.getAttribute('position').count / 3).toBeLessThan(29000);
+    }
     expect(meadows.find((mesh) => mesh.userData.meadow === 'flowers')!.count).toBeGreaterThan(50);
     const material = meadows[0].material as THREE.Material;
     const time = material.userData.windTime as { value: number };

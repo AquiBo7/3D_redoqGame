@@ -7,7 +7,7 @@ const browser = await chromium.launch({
   executablePath: 'C:/Users/AnQi/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe',
   headless: true,
 });
-const report = { scope: ['M1: 模块1、2', 'M2: 模块3、4'], checks: [], screenshots: [], problems: [], diagnostics: {} };
+const report = { scope: ['M1: 模块1、2', 'M2: 模块3、4', 'M3: 模块5、6、7'], checks: [], screenshots: [], problems: [], diagnostics: {} };
 function check(name, ok, detail) {
   report.checks.push({ name, ok, detail });
   assert.ok(ok, `${name}: ${JSON.stringify(detail)}`);
@@ -29,18 +29,13 @@ async function shot(page, name) {
   report.screenshots.push(path);
 }
 async function settleAssets(page) {
-  await page.waitForFunction(() => {
-    if (!window.__worldApp) return true;
-    const models = {
-      S4: ['volunteer', 'ayuan', 'linxia', 'father'],
-      S5: ['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale'],
-      S6: ['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale'],
-      S7: ['volunteer', 'linxia', 'father'],
-      S8: ['linxia', 'father', 'studentFemale', 'studentMale'],
-      S9: ['linxia', 'father', 'studentFemale', 'studentMale'],
-    };
-    return (models[window.__worldApp.getSceneId()] ?? []).every((id) => window.__worldApp.hasModel(id));
-  }, null, { timeout: 60000 });
+  const models = await page.evaluate(async () => {
+    if (!window.__worldApp) return [];
+    const { getSceneDefinition } = await import('/src/scenes3d/index.ts');
+    const required = getSceneDefinition(window.__worldApp.getSceneId()).requiredModels ?? [];
+    return window.__worldApp.getSceneId() === 'S4' ? [...required, 'linxia', 'father'] : required;
+  });
+  await page.waitForFunction((ids) => ids.every((id) => window.__worldApp.hasModel(id)), models, { timeout: 60000 });
   await page.waitForLoadState('networkidle');
 }
 async function enter(page, sceneId) {
@@ -164,6 +159,12 @@ async function gateChecks(page) {
       hotspot: definition.hotspots.find((hotspot) => hotspot.id === 'typer').position,
       walkers: GATE_WALKERS.map((path) => ({ ...path, position: actors[path.id].position.toArray(), nativeModel: !!actors[path.id].getObjectByName('actor-pose') })),
       crowdYaw: [0, 1, 2, 3].map((i) => actors[`crowd-${i}`].rotation.y),
+      grass: root.getObjectByName('gate-meadow-wind-grass').count,
+      actorShadows: Object.values(actors).filter((actor) => actor.userData.actorModelId).map((actor) => {
+        const meshes = [];
+        actor.traverse((object) => { if (object instanceof THREE.Mesh) meshes.push({ cast: object.castShadow, receive: object.receiveShadow }); });
+        return { model: actor.userData.actorModelId, meshes };
+      }),
     };
     const { SHARED_RESOURCE_FLAG } = await import('/src/scenes3d/materials.ts');
     root.traverse((object) => {
@@ -179,6 +180,8 @@ async function gateChecks(page) {
   check('S5 男生光点随真实站位迁移', geometry.position[0] === geometry.hotspot.x && geometry.position[2] === geometry.hotspot.z, geometry.hotspot);
   check('S5 两侧路人真实模型走向校内远处', geometry.walkers.length === 2 && geometry.walkers.every((path) => path.nativeModel && Math.abs(path.x) === 2.85 && path.endZ <= -20 && path.endZ >= -24), geometry.walkers);
   check('S5 围观人群存在错落朝向', Math.max(...geometry.crowdYaw) - Math.min(...geometry.crowdYaw) > 1.5, geometry.crowdYaw);
+  check('S5 草海保留2800–3200簇', geometry.grass >= 2800 && geometry.grass <= 3200, geometry.grass);
+  check('S5 群众不投影而主角投影，全员接收阴影', geometry.actorShadows.length > 0 && geometry.actorShadows.every((actor) => actor.meshes.length > 0 && actor.meshes.every((mesh) => mesh.receive && mesh.cast === ['linxia', 'father', 'fatherCarry'].includes(actor.model))), geometry.actorShadows);
   await page.evaluate(() => window.__worldApp.teleport(0, 7.6, 0));
   await shot(page, 'S5-front-no-typer');
   await page.evaluate(async () => {
@@ -199,6 +202,97 @@ async function gateChecks(page) {
   check('S5 路人终点在校内且脚底贴平台', arrived.every((position) => Math.abs(position[1] - .42) < 1e-6), arrived);
   await page.evaluate(() => window.__worldApp.teleport(0, 2.75, 0));
   await shot(page, 'S5-walkers-inside');
+}
+async function deskChecks(page) {
+  const details = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/.vite/deps/three.js');
+    const { getSceneDefinition } = await import('/src/scenes3d/index.ts');
+    const root = new THREE.Group();
+    const definition = getSceneDefinition('S7');
+    const { actors } = definition.build(root);
+    root.updateMatrixWorld(true);
+    const named = [];
+    root.traverse((object) => { if (object.name) named.push(object.name); });
+    const result = {
+      volunteer: actors.volunteer.position.toArray(),
+      collision: definition.nav.obstacles.find((box) => box.id === 'desk-volunteer'),
+      medicine: definition.interactables.find((item) => item.id === 'medicine-bag').position,
+      form: definition.hotspots.find((item) => item.id === 'reason-form').position,
+      models: definition.requiredModels,
+      students: Object.values(actors).filter((actor) => ['studentFemale', 'studentMale'].includes(actor.userData.actorModelId)).map((actor) => ({ model: actor.userData.actorModelId, position: actor.position.toArray(), loaded: !!actor.getObjectByName('actor-pose') })),
+      named,
+      tentPosts: root.getObjectByName('desk-tent-posts').count,
+      braces: root.getObjectByName('desk-tent-cross-braces').count,
+      clothVertices: root.getObjectByName('desk-tablecloth-front').geometry.getAttribute('position').count,
+      stationery: root.getObjectByName('desk-cup-stationery').count,
+      guidePages: ['teal', 'ochre'].map((color) => root.getObjectByName(`desk-guide-${color}-white-pages`).count),
+      supplyOpening: new THREE.Raycaster(new THREE.Vector3(-2.55, 1.5, -4.25), new THREE.Vector3(0, -1, 0)).intersectObject(root.getObjectByName('desk-open-supply-box'), true)[0]?.object.name,
+      schoolWindows: root.getObjectByName('desk-school-reflective-glass').count,
+      warmWindows: root.getObjectByName('desk-school-warm-interior-windows').count,
+      lamps: root.getObjectByName('desk-courtyard-lamp-poles').count,
+      trees: root.getObjectByName('desk-campus-tree-trunks').count,
+    };
+    const { SHARED_RESOURCE_FLAG } = await import('/src/world/resources.ts');
+    const geometries = new Set(), materials = new Set();
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh || object instanceof THREE.Points)) return;
+      if (!object.geometry.userData[SHARED_RESOURCE_FLAG]) geometries.add(object.geometry);
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) if (!material.userData[SHARED_RESOURCE_FLAG]) materials.add(material);
+    });
+    geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose());
+    return result;
+  });
+  report.diagnostics.desk = details;
+  check('S7 志愿者紧贴桌后且碰撞同步', details.volunteer[0] === 0 && details.volunteer[2] === -4.68 && details.collision.minZ === -5 && details.collision.maxZ === -4.35, details);
+  check('S7 登记表和药袋交互锚点保持原位', details.form.x === 0 && details.form.z === -3.56 && details.medicine.x === 1.15 && details.medicine.y === .09 && details.medicine.z === -3.15, details);
+  check('S7 校内背景同学使用既有真实模型', details.students.length >= 1 && details.students.length <= 2 && details.students.every((student) => student.loaded && student.position[2] < -9), details.students);
+  check('S7 帐篷骨架与褶皱桌布为完整实体', details.tentPosts === 4 && details.braces === 9 && details.clothVertices > 100, details);
+  check('S7 两摞指南、文具、挂绳杯板齐备且纸箱真实开口', details.guidePages.every((count) => count === 3) && details.stationery === 8 && details.supplyOpening === 'desk-supply-bottom' && ['desk-lanyard-box', 'desk-volunteer-flask', 'desk-volunteer-clipboard', 'desk-welcome-rollup'].every((name) => details.named.includes(name)), details);
+  check('S7 校园背景三层反光窗、暖窗、树灯与围墙完整', details.schoolWindows === 43 && details.warmWindows === 11 && details.lamps === 6 && details.trees === 8 && details.named.includes('desk-campus-enclosing-walls'), details);
+  await page.evaluate(() => window.__worldApp.teleport(0, -1.6, 0));
+  await shot(page, 'S7-welcome-registration');
+  await page.evaluate(() => window.__worldApp.teleport(-3.3, -2, -35));
+  await shot(page, 'S7-tent-desk-details');
+  await page.evaluate(() => window.__worldApp.teleport(3.3, -3, 25));
+  await shot(page, 'S7-campus-background');
+}
+async function horizonChecks(page) {
+  const details = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/.vite/deps/three.js');
+    const { getSceneDefinition } = await import('/src/scenes3d/index.ts');
+    const root = new THREE.Group();
+    getSceneDefinition('S8').build(root);
+    root.updateMatrixWorld(true);
+    const rings = [];
+    root.traverse((object) => { if (object.userData.horizonRing) rings.push(object); });
+    const ring = rings[0];
+    const bounds = ring ? new THREE.Box3().setFromObject(ring) : null;
+    const coverage = [];
+    if (ring) for (const z of [-1, -20, -43]) for (let yaw = 0; yaw < 360; yaw += 15) {
+      const angle = yaw * Math.PI / 180;
+      const ray = new THREE.Raycaster(new THREE.Vector3(0, 1.6, z), new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle)), 0, 160);
+      coverage.push({ z, yaw, hit: ray.intersectObject(ring, true).length > 0 });
+    }
+    const result = { rings: rings.length, instanced: ring instanceof THREE.InstancedMesh, count: ring?.count, bounds: bounds ? { min: bounds.min.toArray(), max: bounds.max.toArray() } : null, coverage };
+    const { SHARED_RESOURCE_FLAG } = await import('/src/world/resources.ts');
+    const geometries = new Set(), materials = new Set();
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      if (!object.geometry.userData[SHARED_RESOURCE_FLAG]) geometries.add(object.geometry);
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) if (!material.userData[SHARED_RESOURCE_FLAG]) materials.add(material);
+    });
+    geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose());
+    return result;
+  });
+  report.diagnostics.horizon = details;
+  check('S8 层叠远山单实例批次覆盖校园四周', details.rings === 1 && details.instanced && details.count >= 48 && details.bounds.min[0] < -55 && details.bounds.max[0] > 55 && details.bounds.min[2] < -70 && details.bounds.max[2] > 25, details);
+  check('S8 起中终点每15度树缝视线均有远山封边', details.coverage.length === 72 && details.coverage.every((sample) => sample.hit), details.coverage.filter((sample) => !sample.hit));
+  await page.evaluate(() => window.__worldApp.teleport(0, -39.5, 0));
+  await shot(page, 'S8-linked-corridors');
+  for (const [name, yaw] of [['west', 90], ['east', -90], ['rear', 180]]) {
+    await page.evaluate((yaw) => window.__worldApp.teleport(0, -20, yaw), yaw);
+    await shot(page, `S8-horizon-${name}`);
+  }
 }
 try {
   const entryHtml = readFileSync('dist/index.html', 'utf8');
@@ -283,10 +377,12 @@ try {
   await enter(page, 'S7');
   await dialogue(page);
   await waitObjective(page, 'S7');
+  await deskChecks(page);
   await enter(page, 'S8');
   await dialogue(page);
   await page.getByRole('button', { name: '我陪你走一段。', exact: true }).click();
   await waitObjective(page, 'S8');
+  await horizonChecks(page);
   await page.waitForLoadState('networkidle');
   await page.close();
 

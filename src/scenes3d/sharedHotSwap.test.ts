@@ -93,6 +93,38 @@ describe('createCharacterActor 异步热替换', () => {
     expect(shadowCasters).toBeGreaterThanOrEqual(1);
   });
 
+  it.each(['ayuan', 'studentFemale', 'studentMale', 'volunteer'] as const)('%s 热替换保持不投影且道具与模型完整接收阴影', async (id) => {
+    const scene = new THREE.Scene();
+    const actor = createCharacterActor(id, 1.7, 0xffffff, { props: [{ kind: 'phone' }] });
+    scene.add(actor);
+    h.complete?.();
+    await flushMicrotasks();
+    expect(findByName(actor, 'actor-pose')).not.toBeNull();
+    let meshes = 0;
+    actor.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      meshes += 1;
+      expect(object.castShadow).toBe(false);
+      expect(object.receiveShadow).toBe(true);
+    });
+    expect(meshes).toBe(2);
+  });
+
+  it('显式关闭主角投影在热替换后仍保持，手持道具同样不投影', async () => {
+    const scene = new THREE.Scene();
+    const actor = createCharacterActor('linxia', 1.62, 0xffffff, { castShadow: false, props: [{ kind: 'phone' }] });
+    scene.add(actor);
+    h.complete?.();
+    await flushMicrotasks();
+    expect(findByName(actor, 'actor-pose')).not.toBeNull();
+    actor.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        expect(object.castShadow).toBe(false);
+        expect(object.receiveShadow).toBe(true);
+      }
+    });
+  });
+
   it('角色已脱离场景树时，异步结果到达后不再替换（防止切场景后回填幽灵节点）', async () => {
     const actor = createCharacterActor('father', 1.78, 0x8f8578);
     expect(findByName(actor, 'actor-fallback')).not.toBeNull();

@@ -93,6 +93,24 @@ describe('实例植被顶点风场', () => {
     }
   });
 
+  it('精简草海可只加宽草簇而不改变花朵、位置、草高与实例数', () => {
+    const bed = { x: 7, z: -10, width: 4, depth: 5, y: 0, density: 15, flowers: 8 };
+    const regular = createCampusMeadow(new THREE.Group(), 'regular', [bed], { value: 0 });
+    const wider = createCampusMeadow(new THREE.Group(), 'wider', [{ ...bed, bladeWidth: 1.25 }], { value: 0 });
+    expect(wider.grass.count).toBe(regular.grass.count);
+    expect(wider.flowers.instanceMatrix.array).toEqual(regular.flowers.instanceMatrix.array);
+    for (let i = 0; i < wider.grass.count; i += 1) {
+      const first = new THREE.Matrix4(), second = new THREE.Matrix4();
+      regular.grass.getMatrixAt(i, first); wider.grass.getMatrixAt(i, second);
+      const a = new THREE.Vector3().setFromMatrixScale(first), b = new THREE.Vector3().setFromMatrixScale(second);
+      expect(b.x / a.x).toBeCloseTo(1.25); expect(b.z / a.z).toBeCloseTo(1.25); expect(b.y).toBeCloseTo(a.y);
+      expect(new THREE.Vector3().setFromMatrixPosition(first).equals(new THREE.Vector3().setFromMatrixPosition(second))).toBe(true);
+    }
+    for (const meadow of [regular, wider]) for (const mesh of Object.values(meadow)) {
+      mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose();
+    }
+  });
+
   it('固定种子生成同一分布，草花边缘与摆幅保留中央通廊', () => {
     const bed = { x: 3, z: -4, width: 2, depth: 3, y: 0, density: 24, flowers: 8 };
     const a = createCampusMeadow(new THREE.Group(), 'a', [bed], { value: 0 });

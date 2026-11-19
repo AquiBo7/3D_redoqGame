@@ -10,6 +10,7 @@ export interface MeadowBed {
   y: number;
   density?: number;
   flowers?: number;
+  bladeWidth?: number;
 }
 interface WindOptions {
   base?: number;
@@ -174,7 +175,7 @@ export function createCampusMeadow(
           bed.z + (meadowRandom(seed + 1) - 0.5) * Math.max(0, bed.depth - 0.48),
         );
         const height = (flowers ? 0.48 : 0.3) + meadowRandom(seed + 2) * 0.24;
-        const spread = (flowers ? 0.85 : 0.65) + meadowRandom(seed + 3) * 0.4;
+        const spread = ((flowers ? 0.85 : 0.65) + meadowRandom(seed + 3) * 0.4) * (flowers ? 1 : bed.bladeWidth ?? 1);
         transform.scale.set(spread, height, spread);
         transform.rotation.set(0, meadowRandom(seed + 4) * Math.PI * 2, 0);
         transform.updateMatrix();

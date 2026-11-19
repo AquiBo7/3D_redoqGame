@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 
 const base = process.env.CAMPUS_URL ?? 'http://127.0.0.1:5174/';
-const browser = await chromium.launch({
+const launchOptions = {
   executablePath: 'C:/Users/AnQi/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe',
-  headless: true,
-});
+  headless: false,
+};
+let browser = await chromium.launch(launchOptions);
 const report = { checks: [], problems: [], diagnostics: {} };
 
 async function trackDraws(page) {
@@ -33,6 +34,21 @@ async function trackDraws(page) {
 }
 
 async function frames(page, name, count = 90) {
+  await page.bringToFront();
+  await settle(page);
+  const renderBudget = await page.evaluate(() => ({
+    ...window.__worldApp.getVisualDiagnostics(),
+    canvas: [document.querySelector('canvas').width, document.querySelector('canvas').height],
+  }));
+  check(`${name} 渲染预算与后处理通道符合配置`, name.includes('Mobile')
+    ? renderBudget.postprocessingPasses === 0
+    : renderBudget.postprocessingPasses === 3 && renderBudget.bloomBuffer.every((size, index) => size === Math.round(renderBudget.canvas[index] / 4)), renderBudget);
+  const warmupFrames = name.startsWith('S6') ? 15 : 120;
+  await page.evaluate((count) => new Promise((resolve) => {
+    let frames = 0;
+    const warm = () => { if (++frames < count) requestAnimationFrame(warm); else resolve(); };
+    requestAnimationFrame(warm);
+  }), warmupFrames);
   const result = await page.evaluate((count) => new Promise((resolve) => {
     const intervals = [];
     let previous;
@@ -55,9 +71,45 @@ async function frames(page, name, count = 90) {
     };
     requestAnimationFrame(sample);
   }), count);
+  const gpu = await page.evaluate(() => new Promise((resolve) => {
+    const gl = document.querySelector('canvas').getContext('webgl2');
+    const extension = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    if (!extension) return resolve({ supported: false });
+    const pending = [], durations = [];
+    let active = null, samples = 0, disjoint = false;
+    const sample = () => {
+      if (active) {
+        gl.endQuery(extension.TIME_ELAPSED_EXT);
+        pending.push(active);
+        active = null;
+      }
+      disjoint ||= gl.getParameter(extension.GPU_DISJOINT_EXT);
+      for (let i = pending.length - 1; i >= 0; i -= 1) {
+        const query = pending[i];
+        if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) continue;
+        durations.push(gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6);
+        gl.deleteQuery(query);
+        pending.splice(i, 1);
+      }
+      if (samples < 30) {
+        active = gl.createQuery();
+        gl.beginQuery(extension.TIME_ELAPSED_EXT, active);
+        samples += 1;
+      }
+      if (samples < 30 || active || pending.length) return requestAnimationFrame(sample);
+      durations.sort((a, b) => a - b);
+      resolve({ supported: true, disjoint, samples: durations.length, medianMs: durations[Math.floor(durations.length / 2)], p95Ms: durations[Math.floor(durations.length * .95)] });
+    };
+    requestAnimationFrame(sample);
+  }));
+  result.gpu = gpu;
+  result.warmupFrames = warmupFrames;
+  result.measurement = name.includes('Mobile') ? '可见 Chromium，本机 GPU 上的移动视口仿真，非手机实机' : '可见 Chromium，本机浏览器 GPU';
   report.diagnostics[name] = result;
   console.log(`PERF ${name} ${JSON.stringify(result)}`);
-  check(`${name} 持续帧时间无明显卡顿`, result.medianMs < 40 && result.p95Ms < 80, result);
+  check(`${name} 接近60fps且帧时间稳定`, result.fps >= 57 && result.p95Ms < 34, result);
+  // 高刷新屏的 rAF 间隔被刷新步进量化；GPU 预算独立采样，不把诊断查询开销算入正常帧率。
+  check(`${name} 硬件GPU中位渲染耗时不超过18ms`, gpu.supported && !gpu.disjoint && gpu.samples === 30 && gpu.medianMs <= 18, gpu);
 }
 
 async function campusGeometry(page, id) {
@@ -135,12 +187,22 @@ async function campusGeometry(page, id) {
     for (const material of materials) material.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
-    return { violations, details, instances, hits, meadowCalls, meadowCounts, changed };
+    const actorShadows = Object.entries(built.actors).filter(([, actor]) => actor.userData.actorModelId).map(([id, actor]) => {
+      const meshes = [];
+      actor.traverse((object) => { if (object instanceof THREE.Mesh) meshes.push({ cast: object.castShadow, receive: object.receiveShadow }); });
+      return { id, model: actor.userData.actorModelId, meshes };
+    });
+    return { violations, details, instances, hits, meadowCalls, meadowCounts, changed, actorShadows };
   }, id);
   report.diagnostics[`${id}Geometry`] = result;
   check(`${id} 新增布景完整包围盒避开中央通廊`, result.details > 5 && result.violations.length === 0, result);
   check(`${id} 草花实测合计两个 DrawCall`, result.meadowCalls === 2, result.meadowCounts);
   check(`${id} 风场时钟改变实际渲染像素`, result.changed, result);
+  check(`${id} 真实角色仅主角投影且全员接收阴影`, result.actorShadows.length > 0 && result.actorShadows.every((actor) => actor.meshes.length > 0 && actor.meshes.every((mesh) => mesh.receive && mesh.cast === ['linxia', 'father', 'fatherCarry'].includes(actor.model))), result.actorShadows);
+  if (id === 'S5') {
+    const grass = result.meadowCounts.find((mesh) => mesh.name === 'gate-meadow-wind-grass');
+    check('S5 草海精简至2800–3200簇', grass.count >= 2800 && grass.count <= 3200, grass);
+  }
   if (id === 'S8') check('回头看爸爸的全程中央视线无布景遮挡', result.hits.length === 0, result.hits);
 }
 
@@ -152,7 +214,11 @@ function check(name, result, detail) {
 
 function watch(page) {
   page.on('console', (message) => {
-    if (['error', 'warning'].includes(message.type())) report.problems.push(message.text());
+    if (['error', 'warning'].includes(message.type())) {
+      const problem = `${page.url()} ${message.text()}`;
+      report.problems.push(problem);
+      console.error(`BROWSER ${problem}`);
+    }
   });
   page.on('pageerror', (error) => report.problems.push(error.message));
   page.on('response', (response) => {
@@ -184,6 +250,7 @@ async function enter(page, id) {
     const fade = document.querySelector('.scene-fade');
     return fade && Number.parseFloat(getComputedStyle(fade).opacity) < 0.05;
   }, null, { timeout: 60000 });
+  await settle(page);
 }
 
 async function shot(page, name) {
@@ -227,6 +294,7 @@ try {
   check('S5 拆分后林夏到达既有落点', true);
   await shot(page, 'S5-split');
   report.diagnostics.gate = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  check('S5 群众脚底接触阴影完整保留且背负角色不重复投影', ['actor-ayuan', 'actor-studentFemale', 'actor-studentMale', 'actor-fatherCarry'].every((id) => report.diagnostics.gate.shadowActors.includes(id)) && !report.diagnostics.gate.carryLinxiaHasShadow, report.diagnostics.gate.shadowActors);
   await page.evaluate(() => window.__worldApp.teleport(-4.8, 6.8, -38));
   await shot(page, 'S5-court');
   await page.evaluate(() => window.__worldApp.teleport(0, 7.6, 65));
@@ -234,7 +302,6 @@ try {
   await page.evaluate(() => window.__worldApp.teleport(0, 7.6, -65));
   await shot(page, 'S5-right-exterior');
   await page.evaluate(() => window.__worldApp.teleport(0, 7.6, 0));
-  await frames(page, 'S5Desktop');
   await page.keyboard.down('KeyW');
   try {
     await page.waitForFunction(() => window.__worldApp.getSceneId() === 'S6', null, { timeout: 15000 });
@@ -244,7 +311,6 @@ try {
   check('S5 步行穿过原触发区进入 S6', true);
   await page.waitForTimeout(1250);
   await shot(page, 'S6-early');
-  await frames(page, 'S6Desktop', 60);
   await shot(page, 'S6-panorama');
   await page.waitForTimeout(250);
   await shot(page, 'S6-wide');
@@ -258,7 +324,6 @@ try {
   await page.getByRole('button', { name: '我陪你走一段。', exact: true }).click();
   await page.evaluate(() => window.__worldApp.teleport(0.2, -20, 0));
   await shot(page, 'S8-middle');
-  await frames(page, 'S8Desktop');
   await page.evaluate(() => window.__worldApp.teleport(-4.6, -11, 60));
   await shot(page, 'S8-reading-pocket');
   await page.evaluate(() => window.__worldApp.teleport(4.6, -5.2, -62));
@@ -281,7 +346,6 @@ try {
   }
   check('S8 实际步行进入 S9', true);
   await shot(page, 'S9-arrival');
-  await frames(page, 'S9Desktop');
   await page.evaluate(() => window.__worldApp.teleport(-4.6, -43.6, -22));
   await shot(page, 'S9-entry-left');
   await page.evaluate(() => window.__worldApp.teleport(4.6, -43.6, 22));
@@ -297,7 +361,7 @@ try {
   });
   watch(mobile);
   await trackDraws(mobile);
-  for (const id of ['S5', 'S8']) {
+  for (const id of ['S5', 'S7', 'S8']) {
     await enter(mobile, id);
     const layout = await mobile.evaluate(() => {
       const canvas = document.querySelector('canvas');
@@ -306,7 +370,7 @@ try {
       return {
         pixelRatio: canvas.width / canvas.clientWidth,
         overflow: document.documentElement.scrollWidth > innerWidth,
-        bottomGap: innerHeight - bounds.bottom,
+        bottomGap: Math.round((innerHeight - bounds.bottom) * 100) / 100,
         paddingBottom: Number.parseFloat(getComputedStyle(dialogue).paddingBottom),
         postprocessing: window.__worldApp.getVisualDiagnostics().postprocessing,
       };
@@ -317,7 +381,6 @@ try {
     await shot(mobile, `${id}-portrait`);
     await mobile.setViewportSize({ width: 844, height: 390 });
     await shot(mobile, `${id}-landscape`);
-    await frames(mobile, `${id}MobileLandscape`);
     const size = await mobile.evaluate(() => ({ width: document.querySelector('canvas').clientWidth, height: document.querySelector('canvas').clientHeight }));
     check(`${id} 横屏旋转后画布匹配`, size.width === 844 && size.height === 390, size);
     await mobile.setViewportSize({ width: 390, height: 844 });
@@ -332,6 +395,58 @@ try {
   await campusGeometry(geometryPage, 'S8');
   await settle(geometryPage);
   await geometryPage.close();
+  check('黄金路径与几何验证零浏览器警告', report.problems.length === 0, report.problems);
+  await browser.close();
+  browser = await chromium.launch(launchOptions);
+  const desktopPerf = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  watch(desktopPerf);
+  await trackDraws(desktopPerf);
+  await enter(desktopPerf, 'S5');
+  await dialogue(desktopPerf);
+  await desktopPerf.waitForFunction(() => window.__worldApp.getActorPosition('linxiaSolo')?.[2] < .51);
+  await frames(desktopPerf, 'S5Desktop', 300);
+  await desktopPerf.keyboard.down('KeyW');
+  try {
+    await desktopPerf.waitForFunction(() => window.__worldApp.getSceneId() === 'S6', null, { timeout: 15000 });
+  } finally {
+    await desktopPerf.keyboard.up('KeyW');
+  }
+  await desktopPerf.waitForTimeout(1250);
+  await frames(desktopPerf, 'S6Desktop', 60);
+  await settle(desktopPerf);
+  await desktopPerf.context().close();
+  for (const id of ['S7', 'S8', 'S9']) {
+    await browser.close();
+    browser = await chromium.launch(launchOptions);
+    const scenePage = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    watch(scenePage);
+    await trackDraws(scenePage);
+    await enter(scenePage, id);
+    await dialogue(scenePage);
+    if (id === 'S8') {
+      await scenePage.getByRole('button', { name: '我陪你走一段。', exact: true }).click();
+      await scenePage.evaluate(() => window.__worldApp.teleport(.2, -20, 0));
+    }
+    await frames(scenePage, `${id}Desktop`, 300);
+    await settle(scenePage);
+    await scenePage.context().close();
+  }
+  for (const id of ['S5', 'S7', 'S8']) {
+    await browser.close();
+    browser = await chromium.launch(launchOptions);
+    const scenePage = await browser.newPage({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+    watch(scenePage);
+    await trackDraws(scenePage);
+    await enter(scenePage, id);
+    await dialogue(scenePage);
+    if (id === 'S8') {
+      await scenePage.getByRole('button', { name: '我陪你走一段。', exact: true }).click();
+      await scenePage.evaluate(() => window.__worldApp.teleport(.2, -20, 0));
+    }
+    await frames(scenePage, `${id}MobileLandscape`, 300);
+    await settle(scenePage);
+    await scenePage.context().close();
+  }
   check('浏览器零错误零警告、资源零失败', report.problems.length === 0, report.problems);
 } catch (error) {
   report.problems.push(error.stack ?? String(error));

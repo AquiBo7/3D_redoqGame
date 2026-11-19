@@ -237,7 +237,7 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
     expect(getSceneDefinition('S4').requiredModels).toEqual(['volunteer', 'ayuan']);
     expect(getSceneDefinition('S5').requiredModels).toEqual(['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S6').requiredModels).toEqual(['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
-    expect(getSceneDefinition('S7').requiredModels).toEqual(['volunteer', 'linxia', 'father']);
+    expect(getSceneDefinition('S7').requiredModels).toEqual(['volunteer', 'linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S8').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S9').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
   });

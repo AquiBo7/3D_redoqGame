@@ -129,6 +129,7 @@ export interface CharacterActorOptions {
   leanRad?: number;
   /** 手持小道具（橙壳手机 / 行李袋），按模型身高自动校准避免穿模 */
   props?: readonly CharacterPropSpec[];
+  castShadow?: boolean;
 }
 
 /** 水平站位（XZ 平面）：朝向计算只需要这两个分量 */
@@ -210,6 +211,7 @@ export function createCharacterActor(
   fallbackColor: number,
   options: CharacterActorOptions = {},
 ): THREE.Group {
+  const castShadow = options.castShadow ?? (modelId === 'linxia' || modelId === 'father' || modelId === 'fatherCarry');
   const outer = new THREE.Group();
   outer.name = `actor-${modelId}`;
   outer.rotation.y = options.yaw ?? 0;
@@ -235,7 +237,9 @@ export function createCharacterActor(
       disposeLocalTree(child);
     }
     for (const prop of options.props ?? []) {
-      propsRoot.add(createCharacterProp(prop, heightM));
+      const mesh = createCharacterProp(prop, heightM);
+      mesh.castShadow = castShadow;
+      propsRoot.add(mesh);
     }
   };
 
@@ -248,7 +252,7 @@ export function createCharacterActor(
     model.userData.actorModelRootId = modelId;
     model.traverse((object) => {
       if (object instanceof THREE.Mesh) {
-        object.castShadow = true;
+        object.castShadow = castShadow;
         object.receiveShadow = true;
       }
     });
@@ -262,6 +266,12 @@ export function createCharacterActor(
     mountRealModel();
   } else {
     const fallback = createPerson(fallbackHeight, fallbackColor);
+    fallback.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.castShadow = castShadow;
+        object.receiveShadow = true;
+      }
+    });
     fallback.name = 'actor-fallback';
     lean.add(fallback);
     applyProps(fallbackHeight);

@@ -174,6 +174,30 @@ function campusInstances(
   return mesh;
 }
 
+/** 共用的八边低多边形山丘：有体积的山肩、偏心峰顶与封闭山脚，共 32 个三角形。 */
+function campusHorizonGeometry(): THREE.BufferGeometry {
+  const foot: CampusTuple[] = [];
+  const shoulder: CampusTuple[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    const angle = i * Math.PI / 4;
+    foot.push([Math.cos(angle), 0, Math.sin(angle)]);
+    shoulder.push([Math.cos(angle) * 0.66, 0.46 + (i % 3) * 0.045, Math.sin(angle) * 0.58]);
+  }
+  const positions: number[] = [];
+  const triangle = (a: CampusTuple, b: CampusTuple, c: CampusTuple): void => { positions.push(...a, ...b, ...c); };
+  for (let i = 0; i < 8; i += 1) {
+    const next = (i + 1) % 8;
+    triangle(foot[i], shoulder[i], foot[next]);
+    triangle(foot[next], shoulder[i], shoulder[next]);
+    triangle(shoulder[i], [0.12, 1, -0.08], shoulder[next]);
+    triangle(foot[i], foot[next], [0, 0, 0]);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function campusMesh(
   parent: THREE.Object3D,
   geometry: THREE.BufferGeometry,
@@ -629,6 +653,46 @@ function buildBuilding(parent: THREE.Object3D): {
     }
   }
 
+  // 配楼内侧与前方草坪的第二排树；窄冠小乔木留在楼体外，高树在前方开阔区错落。
+  const secondRow = [
+    { x: -16.8, z: -8.5, height: 6.1, size: 1.3 }, { x: -25.2, z: -14.9, height: 7.1, size: 1.5 },
+    { x: -11.6, z: -19.4, height: 4.4, size: 0.8 }, { x: -11.4, z: -27.5, height: 5.2, size: 0.76 },
+    { x: -11.8, z: -35.8, height: 4.6, size: 0.68 }, { x: -11.5, z: -43.6, height: 6.3, size: 0.8 },
+    { x: -13.1, z: -53.5, height: 7.8, size: 0.9 },
+    { x: 18.7, z: -8.4, height: 7.3, size: 1.35 }, { x: 25.8, z: -10.8, height: 5.8, size: 1.25 },
+    { x: 11.5, z: -18.1, height: 4.5, size: 0.78 }, { x: 12.2, z: -25.3, height: 6.2, size: 0.74 },
+    { x: 11.4, z: -33.1, height: 4.8, size: 0.73 }, { x: 12.1, z: -41.4, height: 5.7, size: 0.8 },
+    { x: 12.2, z: -53.3, height: 7.4, size: 0.95 },
+  ];
+  for (const side of [-1, 1]) {
+    const rowTrunks: CampusPart[] = [];
+    const rowCrowns: CampusPart[] = [];
+    const rowShrubs: CampusPart[] = [];
+    for (const [index, tree] of secondRow.entries()) {
+      if (Math.sign(tree.x) !== side) continue;
+      rowTrunks.push({ p: [tree.x, tree.height / 2, tree.z], s: [0.18 * tree.size, tree.height, 0.18 * tree.size] });
+      for (let cluster = 0; cluster < 5; cluster += 1) {
+        const angle = cluster * 2.399 + index * 0.63;
+        const radius = cluster < 4 ? 0.53 * tree.size : 0;
+        rowCrowns.push({
+          p: [tree.x + Math.cos(angle) * radius, tree.height + (cluster < 4 ? 0 : 0.95) * tree.size, tree.z + Math.sin(angle) * radius],
+          s: [0.98 * tree.size, (cluster < 4 ? 0.78 : 0.69) * tree.size, 0.91 * tree.size],
+          r: [0.06, angle, 0.08], color: [0x91a384, 0xa8b492, 0x81997e, 0xb0bb9b][(index + cluster) % 4],
+        });
+      }
+      for (let shrub = 0; shrub < 3; shrub += 1) {
+        rowShrubs.push({
+          p: [tree.x + side * (shrub - 1) * 0.35, 0.52 + (shrub % 2) * 0.2, tree.z + 1.35 + shrub * 0.58],
+          s: [0.6 + shrub * 0.06, 0.48 + (shrub % 2) * 0.2, 0.67], r: [0, index + shrub, 0],
+          color: [0x879b7b, 0x9aa889, 0xa3af91][(index + shrub) % 3],
+        });
+      }
+    }
+    detailInstances(`building-second-row-trunks-${side}`, new THREE.CylinderGeometry(0.65, 1, 1, 7), bark, rowTrunks);
+    detailInstances(`building-second-row-crowns-${side}`, new THREE.IcosahedronGeometry(1, 0), foliageWind, rowCrowns);
+    detailInstances(`building-second-row-shrubs-${side}`, new THREE.IcosahedronGeometry(1, 0), foliageWind, rowShrubs);
+  }
+
   const horizonTrunks: CampusPart[] = [];
   const horizonCrowns: CampusPart[] = [];
   for (let layer = 0; layer < 3; layer += 1) {
@@ -678,58 +742,154 @@ function buildBuilding(parent: THREE.Object3D): {
     detailSign('校园生活', 1.5, 0.3, [x, 2.24, z + 0.16]);
   }
 
-  const bikeX = 12.55;
-  const bikeZ = -9.7;
-  for (const x of [10.92, 14.18]) {
-    for (const z of [-13.15, -6.25]) {
-      detailBox(iron, [x, 1.27, z], [0.075, 2.54, 0.075]);
-      detailBox(stone, [x, 0.07, z], [0.25, 0.14, 0.25]);
-      detailRod(iron, [x, 2.05, z], [x + (x < bikeX ? 0.4 : -0.4), 2.5, z], 0.025);
-    }
-  }
-  detailBox(sage, [bikeX, 2.62, bikeZ], [3.65, 0.14, 7.4], 0xffffff, [0, 0, -0.035]);
-  detailBox(cream, [bikeX, 2.515, bikeZ], [3.42, 0.055, 7.1]);
-  for (let rib = 0; rib < 15; rib += 1) detailBox(wood, [bikeX, 2.47, -13.05 + rib * 0.48], [3.37, 0.055, 0.045]);
-  for (const x of [10.74, 14.37]) detailBox(iron, [x, 2.57, bikeZ], [0.055, 0.18, 7.45]);
-  detailBox(iron, [14.18, 1.02, bikeZ], [0.055, 0.055, 6.9]);
-  detailSign('自行车停放', 2.15, 0.3, [10.73, 2.27, bikeZ], -Math.PI / 2);
   const tires: CampusPart[] = [];
   const rims: CampusPart[] = [];
-  for (let bike = 0; bike < 3; bike += 1) {
-    const x = bikeX + (bike % 2) * 0.12;
-    const z = -12 + bike * 2.2;
-    const color = [0xd5a477, 0xa3b8a6, 0xb7bdc3][bike];
-    const rear: CampusTuple = [x, 0.36, z - 0.65];
-    const front: CampusTuple = [x, 0.36, z + 0.65];
-    const pedal: CampusTuple = [x, 0.36, z - 0.04];
-    const saddle: CampusTuple = [x, 0.94, z - 0.25];
-    const head: CampusTuple = [x, 0.94, z + 0.4];
-    const fork: CampusTuple = [x, 0.65, z + 0.51];
-    for (const wheel of [rear, front]) {
-      tires.push({ p: wheel, s: [1, 1, 1], r: [0, Math.PI / 2, 0] });
-      rims.push({ p: wheel, s: [1, 1, 1], r: [0, Math.PI / 2, 0] });
-      for (let spoke = 0; spoke < 8; spoke += 1) {
-        const angle = spoke * Math.PI / 4;
-        detailRod(iron, wheel, [x, wheel[1] + Math.sin(angle) * 0.31, wheel[2] + Math.cos(angle) * 0.31], 0.0045);
+  // 保留右侧车棚原位，在左侧配楼前方补一座；所有杆件、车架和轮胎仍共享原批次。
+  for (const shelter of [{ x: 12.55, z: -9.7 }, { x: -17.3, z: -13.5 }]) {
+    const bikeX = shelter.x;
+    const bikeZ = shelter.z;
+    const side = Math.sign(bikeX);
+    detailBox(stone, [bikeX, -0.028, bikeZ], [3.9, 0.025, 7.65]);
+    for (const x of [bikeX - 1.63, bikeX + 1.63]) {
+      for (const z of [bikeZ - 3.45, bikeZ + 3.45]) {
+        detailBox(iron, [x, 1.27, z], [0.075, 2.54, 0.075]);
+        detailBox(stone, [x, 0.07, z], [0.25, 0.14, 0.25]);
+        detailRod(iron, [x, 2.05, z], [x + (x < bikeX ? 0.4 : -0.4), 2.5, z], 0.025);
       }
     }
-    for (const [a, b] of [[rear, saddle], [saddle, pedal], [pedal, rear], [saddle, head], [head, pedal], [head, fork], [fork, front]] as Array<[CampusTuple, CampusTuple]>) {
-      detailRod(iron, a, b, 0.021, color);
+    detailBox(sage, [bikeX, 2.62, bikeZ], [3.65, 0.14, 7.4], 0xffffff, [0, 0, -side * 0.035]);
+    detailBox(cream, [bikeX, 2.515, bikeZ], [3.42, 0.055, 7.1]);
+    for (let rib = 0; rib < 15; rib += 1) detailBox(wood, [bikeX, 2.47, bikeZ - 3.35 + rib * 0.48], [3.37, 0.055, 0.045]);
+    for (const x of [bikeX - 1.81, bikeX + 1.82]) detailBox(iron, [x, 2.57, bikeZ], [0.055, 0.18, 7.45]);
+    detailBox(iron, [bikeX + side * 1.63, 1.02, bikeZ], [0.055, 0.055, 6.9]);
+    detailSign('自行车停放', 2.15, 0.3, [bikeX - side * 1.82, 2.27, bikeZ], -side * Math.PI / 2);
+    for (let bike = 0; bike < 3; bike += 1) {
+      const x = bikeX + (bike % 2) * 0.12;
+      const z = bikeZ - 2.3 + bike * 2.2;
+      const color = [0xd5a477, 0xa3b8a6, 0xb7bdc3][bike];
+      const rear: CampusTuple = [x, 0.36, z - 0.65];
+      const front: CampusTuple = [x, 0.36, z + 0.65];
+      const pedal: CampusTuple = [x, 0.36, z - 0.04];
+      const saddle: CampusTuple = [x, 0.94, z - 0.25];
+      const head: CampusTuple = [x, 0.94, z + 0.4];
+      const fork: CampusTuple = [x, 0.65, z + 0.51];
+      for (const wheel of [rear, front]) {
+        tires.push({ p: wheel, s: [1, 1, 1], r: [0, Math.PI / 2, 0] });
+        rims.push({ p: wheel, s: [1, 1, 1], r: [0, Math.PI / 2, 0] });
+        for (let spoke = 0; spoke < 8; spoke += 1) {
+          const angle = spoke * Math.PI / 4;
+          detailRod(iron, wheel, [x, wheel[1] + Math.sin(angle) * 0.31, wheel[2] + Math.cos(angle) * 0.31], 0.0045);
+        }
+      }
+      for (const [a, b] of [[rear, saddle], [saddle, pedal], [pedal, rear], [saddle, head], [head, pedal], [head, fork], [fork, front]] as Array<[CampusTuple, CampusTuple]>) {
+        detailRod(iron, a, b, 0.021, color);
+      }
+      detailRod(iron, saddle, [x, 1.015, z - 0.28], 0.018);
+      detailBox(iron, [x, 1.035, z - 0.29], [0.19, 0.06, 0.28]);
+      detailRod(iron, head, [x, 1.09, z + 0.36], 0.018);
+      detailRod(iron, [x - 0.24, 1.09, z + 0.36], [x + 0.24, 1.09, z + 0.36], 0.015);
+      detailBox(iron, [x + 0.095, 0.34, z - 0.04], [0.18, 0.025, 0.085]);
+      detailRod(iron, [x, 0.34, z - 0.08], [x + 0.24, 0.025, z - 0.23], 0.013);
+      for (const rackZ of [z - 0.79, z - 0.51]) {
+        detailRod(iron, [x - 0.1, 0.04, rackZ], [x - 0.1, 0.48, rackZ], 0.024);
+      }
+      detailRod(iron, [x - 0.1, 0.48, z - 0.79], [x - 0.1, 0.48, z - 0.51], 0.024);
     }
-    detailRod(iron, saddle, [x, 1.015, z - 0.28], 0.018);
-    detailBox(iron, [x, 1.035, z - 0.29], [0.19, 0.06, 0.28]);
-    detailRod(iron, head, [x, 1.09, z + 0.36], 0.018);
-    detailRod(iron, [x - 0.24, 1.09, z + 0.36], [x + 0.24, 1.09, z + 0.36], 0.015);
-    detailBox(iron, [x + 0.095, 0.34, z - 0.04], [0.18, 0.025, 0.085]);
-    detailRod(iron, [x, 0.34, z - 0.08], [x + 0.24, 0.025, z - 0.23], 0.013);
-    for (const rackZ of [z - 0.79, z - 0.51]) {
-      detailRod(iron, [x - 0.1, 0.04, rackZ], [x - 0.1, 0.48, rackZ], 0.024);
-    }
-    detailRod(iron, [x - 0.1, 0.48, z - 0.79], [x - 0.1, 0.48, z - 0.51], 0.024);
   }
   const rubber = new THREE.MeshStandardMaterial({ color: 0x343b35, roughness: 0.86 });
   detailInstances('building-bicycle-tires', new THREE.TorusGeometry(0.335, 0.026, 5, 20), rubber, tires);
   detailInstances('building-bicycle-rims', new THREE.TorusGeometry(0.312, 0.012, 4, 20), cream, rims, false);
+
+  const courtRims: CampusPart[] = [];
+  for (const side of [-1, 1]) {
+    // 树后公告亭朝向林荫道，左亭落在配楼内侧，右亭位于楼前草坪。
+    const kioskX = side < 0 ? -11.9 : 21.6;
+    const kioskZ = side < 0 ? -31.1 : -8.8;
+    for (const dx of [-0.72, 0.72]) {
+      for (const dz of [-0.91, 0.91]) {
+        detailBox(iron, [kioskX + dx, 1.28, kioskZ + dz], [0.065, 2.56, 0.065]);
+        detailBox(stone, [kioskX + dx, 0.055, kioskZ + dz], [0.22, 0.11, 0.22]);
+      }
+    }
+    detailBox(sage, [kioskX, 2.69, kioskZ], [1.94, 0.16, 2.46], 0xffffff, [side * 0.045, 0, 0]);
+    detailBox(cream, [kioskX, 2.56, kioskZ], [1.84, 0.075, 2.36]);
+    detailBox(iron, [kioskX, 1.59, kioskZ], [0.12, 1.55, 1.96]);
+    const display = campusMesh(parent, new THREE.PlaneGeometry(1.74, 1.28), poster, [kioskX - side * 0.071, 1.56, kioskZ], false);
+    display.rotation.y = -side * Math.PI / 2;
+    display.name = `building-announcement-kiosk-${side}`;
+    display.userData.campusDetail = true;
+    detailSign('校园公告', 1.65, 0.27, [kioskX - side * 0.078, 2.34, kioskZ], -side * Math.PI / 2);
+    detailRod(iron, [kioskX - side * 0.72, 2.13, kioskZ - 0.91], [kioskX - side * 0.27, 2.55, kioskZ - 0.91], 0.025);
+
+    // 楼前远处球场只做低面数灯杆与球架剪影，不增加实时光源或占用中央通路。
+    for (const [x, z, height] of [[27, -6.2, 8.8], [22.5, -4.7, 7.9]]) {
+      const poleX = side * x;
+      detailRod(iron, [poleX, 0, z], [poleX, height, z], 0.07);
+      detailBox(stone, [poleX, 0.13, z], [0.31, 0.26, 0.31]);
+      detailBox(iron, [poleX, height, z], [0.13, 0.12, 1.38]);
+      for (const dz of [-0.48, 0.48]) detailBox(warm, [poleX, height - 0.13, z + dz], [0.23, 0.19, 0.34]);
+    }
+    const hoopX = side * 24.4;
+    const hoopZ = -11.2;
+    detailRod(iron, [hoopX, 0, hoopZ], [hoopX, 3.55, hoopZ], 0.065);
+    detailRod(iron, [hoopX, 3.4, hoopZ], [hoopX - side * 0.78, 3.4, hoopZ], 0.047);
+    detailRod(iron, [hoopX, 2.6, hoopZ], [hoopX - side * 0.65, 3.36, hoopZ], 0.035);
+    detailBox(cream, [hoopX - side * 0.8, 3.4, hoopZ], [0.11, 0.96, 1.52]);
+    detailBox(iron, [hoopX - side * 0.863, 3.27, hoopZ], [0.016, 0.42, 0.64]);
+    detailBox(cream, [hoopX - side * 0.874, 3.27, hoopZ], [0.013, 0.34, 0.56]);
+    courtRims.push({ p: [hoopX - side * 1.07, 3.04, hoopZ], s: [1, 1, 1], r: [-Math.PI / 2, 0, 0] });
+  }
+  detailInstances('building-court-hoops', new THREE.TorusGeometry(0.23, 0.018, 4, 12), iron, courtRims, false);
+
+  // 横向连廊把 A 栋两端接到配楼；景墙与修剪绿篱在连廊后方逐层封边。
+  for (const side of [-1, 1]) {
+    const corridorX = side * 15.55;
+    detailBox(stone, [corridorX, -0.015, -47.2], [13.5, 0.07, 3.48]);
+    detailBox(sage, [corridorX, 3.55, -47.2], [13.7, 0.22, 3.7]);
+    detailBox(cream, [corridorX, 3.395, -47.2], [13.56, 0.09, 3.56]);
+    for (const z of [-45.38, -49.02]) detailBox(iron, [corridorX, 3.52, z], [13.72, 0.16, 0.055]);
+    for (let column = 0; column < 6; column += 1) {
+      const x = side * (9.25 + column * 2.55);
+      for (const z of [-45.85, -48.55]) {
+        detailBox(cream, [x, 1.67, z], [0.34, 3.34, 0.34]);
+        detailBox(stone, [x, 0.17, z], [0.48, 0.34, 0.48]);
+        detailBox(cream, [x, 3.3, z], [0.51, 0.15, 0.51]);
+      }
+    }
+    detailBox(brick, [corridorX, 0.43, -49.3], [13.3, 0.86, 0.44]);
+    detailBox(cream, [corridorX, 0.905, -49.3], [13.42, 0.09, 0.54]);
+    for (const y of [1.01, 2.1]) detailBox(iron, [corridorX, y, -49.3], [13.3, 0.055, 0.065]);
+    for (let bar = 0; bar < 27; bar += 1) {
+      detailBox(iron, [side * (9.05 + bar * 0.5), 1.55, -49.3], [0.036, 1.14, 0.036]);
+    }
+    for (let hedge = 0; hedge < 9; hedge += 1) {
+      const height = 3.45 + (hedge % 3) * 0.13;
+      detailBox(foliageWind, [side * (9.55 + hedge * 1.5), height / 2, -50.95], [1.64, height, 1.6],
+        [0x7e967a, 0x8ca183, 0x849b7d][hedge % 3]);
+    }
+
+    // 左翼补至原楼后沿，右翼延长较短配楼，实体楼体与原配楼相接而非独立遮挡墙。
+    const extension = side < 0
+      ? { x: -25.7, z: -49.2, w: 7.4, d: 9.2, h: 8.6 }
+      : { x: 25.9, z: -43.6, w: 7.8, d: 20.4, h: 8.9 };
+    const inner = extension.x - side * extension.w / 2;
+    detailBox(plaster, [extension.x, extension.h / 2, extension.z], [extension.w, extension.h, extension.d]);
+    detailBox(brick, [extension.x, 0.48, extension.z], [extension.w + 0.08, 0.96, extension.d + 0.08]);
+    detailBox(sage, [extension.x, extension.h + 0.12, extension.z], [extension.w + 0.4, 0.24, extension.d + 0.4]);
+    for (const y of [3.1, 6.0, 8.65]) {
+      detailBox(cream, [extension.x, y, extension.z], [extension.w + 0.22, 0.12, extension.d + 0.22]);
+    }
+    const bays = side < 0 ? 3 : 7;
+    for (const y of [1.8, 4.7, 7.45]) {
+      for (let bay = 0; bay < bays; bay += 1) {
+        const z = extension.z + extension.d / 2 - 1.25 - bay * 2.65;
+        detailBox(bay % 3 === 1 ? warm : glass, [inner - side * 0.06, y, z], [0.08, 1.48, 1.24], bay % 3 === 1 ? 0xffffff : 0x96aba4);
+        for (const dz of [-0.7, 0.7]) detailBox(cream, [inner - side * 0.12, y, z + dz], [0.2, 1.7, 0.11]);
+        for (const dy of [-0.8, 0.8]) detailBox(cream, [inner - side * 0.12, y + dy, z], [0.2, 0.1, 1.5]);
+        detailBox(stone, [inner - side * 0.18, y - 0.92, z], [0.34, 0.1, 1.65]);
+      }
+    }
+  }
 
   for (const wing of [{ x: -20.2, z: -32.5, w: 13, d: 25, h: 11.4 }, { x: 21.5, z: -25, w: 14, d: 21, h: 10.2 }]) {
     box(plaster, [wing.x, wing.h / 2, wing.z], [wing.w, wing.h, wing.d]);
@@ -882,6 +1042,39 @@ function buildBuilding(parent: THREE.Object3D): {
       detailInstances(`building-detail-rods-${material.id}-${side}`, new THREE.CylinderGeometry(1, 1, 1, 6), material, parts);
     });
   }
+
+  // 55–60 米长轴的三层椭圆外围山环适配校园地坪（x ±65、z -78..30）。
+  // 每层错开半节距并相互搭接；山脚下沉到地坪以下，远林冠到远山逐层增高、融雾。
+  const ridgeParts: CampusPart[] = [];
+  const ridgeColor = new THREE.Color();
+  const ridgeAccent = new THREE.Color();
+  const fogColor = new THREE.Color(0xb9c6d2);
+  for (let layer = 0; layer < 3; layer += 1) {
+    for (let segment = 0; segment < 48; segment += 1) {
+      const angle = (segment + layer * 0.5) * Math.PI * 2 / 48;
+      const radius = [55, 58, 60][layer];
+      const height = [13.2, 18.2, 24][layer]
+        + Math.sin(segment * 1.73 + layer * 0.9) * [1.7, 2.8, 3.4][layer]
+        + Math.cos(segment * 0.65) * 0.6;
+      ridgeColor.setHex([0x60756f, 0x7a9299, 0x91a8b5][layer])
+        .lerp(ridgeAccent.setHex([0x788b7d, 0x91a29f, 0xa3b5c1][layer]), 0.14 + Math.cos(segment * 2.17) * 0.12)
+        .lerp(fogColor, 0.12 + layer * 0.14 + Math.sin(segment * 1.31 + layer) * 0.045);
+      ridgeParts.push({
+        p: [Math.cos(angle) * radius, -4, Math.sin(angle) * radius],
+        s: [[9.4, 11, 12][layer], height, [3.7, 4.5, 4.5][layer]],
+        r: [0, -angle - Math.PI / 2, 0], color: ridgeColor.getHex(),
+      });
+    }
+  }
+  const ridge = campusInstances(parent, campusHorizonGeometry(),
+    new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), ridgeParts, false);
+  ridge.name = 'building-horizon-ring';
+  ridge.userData.horizonRing = true;
+  // 只改变本批山环的世界变换，不染色或修改任何共享环境材质。
+  ridge.position.z = -24;
+  ridge.scale.z = 54 / 65;
+  ridge.receiveShadow = false;
+  ridge.computeBoundingBox();
 
   // 爸爸（校门方向，面向林荫路 -Z，玩家回头看到正面），双手各提一只袋子
   const father = createCharacterActor('father', 1.78, 0x8f8578, {
