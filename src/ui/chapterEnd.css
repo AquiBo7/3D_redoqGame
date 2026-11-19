@@ -1,0 +1,131 @@
+/* 章节结尾：与开始页同一套衬线标题、细线与颗粒 */
+
+.chapter-end {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px calc(24px + env(safe-area-inset-right, 0px)) var(--yt-safe-bottom)
+    calc(24px + env(safe-area-inset-left, 0px));
+  background:
+    radial-gradient(110% 80% at 50% 38%, transparent 30%, rgba(5, 8, 11, 0.6) 100%),
+    radial-gradient(70% 55% at 80% 0%, rgba(255, 214, 166, 0.1), transparent 65%),
+    rgba(10, 14, 19, 0.96);
+  color: #eef2f5;
+  text-align: center;
+  pointer-events: auto;
+  animation: chapter-end-in 0.6s var(--yt-ease) both;
+}
+
+.chapter-end::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--yt-grain);
+  background-size: 160px 160px;
+  opacity: 0.07;
+  pointer-events: none;
+}
+
+.chapter-end[hidden] {
+  display: none;
+}
+
+.chapter-end__card {
+  position: relative;
+  z-index: 1;
+  max-width: 26em;
+}
+
+.chapter-end__eyebrow {
+  margin: 0 0 18px;
+  font-size: 12px;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--yt-text-faint);
+}
+
+.chapter-end__title {
+  margin: 0;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--yt-line-soft);
+  font-family: var(--yt-font-serif);
+  font-size: clamp(26px, 5vw, 42px);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  color: #f6f3ec;
+  text-shadow: 0 2px 30px rgba(255, 214, 160, 0.14);
+}
+
+.chapter-end__note {
+  margin: 18px 0 0;
+  font-size: 14px;
+  line-height: 1.9;
+  color: var(--yt-text-dim);
+}
+
+.chapter-end__restart {
+  display: block;
+  min-height: 50px;
+  margin: 26px auto 0;
+  padding: 12px 30px;
+  border: 1px solid var(--yt-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--yt-text);
+  font-family: inherit;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  text-indent: 0.18em;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: border-color 0.2s var(--yt-ease), background-color 0.2s var(--yt-ease);
+}
+
+.chapter-end__restart:hover,
+.chapter-end__restart:focus-visible {
+  border-color: var(--yt-warm-soft);
+  background: rgba(232, 199, 154, 0.08);
+  outline: none;
+}
+
+.chapter-end__credits {
+  display: block;
+  min-height: 44px;
+  margin: 6px auto 0;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--yt-text-faint);
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  cursor: pointer;
+}
+
+.chapter-end__credits:hover,
+.chapter-end__credits:focus-visible {
+  color: var(--yt-warm);
+  border-bottom-color: var(--yt-warm-soft);
+  outline: none;
+}
+
+@keyframes chapter-end-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chapter-end {
+    animation: none;
+  }
+}

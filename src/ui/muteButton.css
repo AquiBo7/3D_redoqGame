@@ -1,0 +1,48 @@
+/* 右上角静音开关：44×44 触控热区，避开调试面板（右侧 12px + 64px 宽）与刘海安全区 */
+
+.mute-toggle {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: calc(84px + env(safe-area-inset-right, 0px));
+  z-index: 29;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0;
+  /* 极淡暗色底衬：户外亮天空下图标仍清晰，不做磨砂玻璃 */
+  background: rgba(10, 14, 19, 0.3);
+  color: rgba(235, 240, 244, 0.88);
+  cursor: pointer;
+  pointer-events: auto;
+  text-shadow: var(--yt-text-shadow);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.75));
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+
+.mute-toggle:hover,
+.mute-toggle:focus-visible {
+  background: rgba(10, 14, 19, 0.4);
+  border-color: var(--yt-warm-soft);
+  color: #ffffff;
+  outline: none;
+}
+
+.mute-toggle__icon {
+  display: none;
+  line-height: 0;
+}
+
+.mute-toggle:not(.is-muted) .mute-toggle__icon--on {
+  display: block;
+}
+
+.mute-toggle.is-muted .mute-toggle__icon--off {
+  display: block;
+}
+
+.mute-toggle.is-muted {
+  color: rgba(235, 240, 244, 0.62);
+}

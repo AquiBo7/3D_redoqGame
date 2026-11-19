@@ -1,0 +1,16 @@
+/* 2D 界面总容器：位于 #ui-root 内，层级低于章节结尾与调试面板 */
+
+.game-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.game-ui [hidden] {
+  display: none !important;
+}
+
+.game-ui button {
+  font-family: inherit;
+}

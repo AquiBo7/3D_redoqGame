@@ -1,0 +1,224 @@
+/* 调试面板（仅 ?debug=1 时挂载） */
+
+.debug-toggle {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  z-index: 30;
+  min-width: 64px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 217, 168, 0.45);
+  border-radius: 999px;
+  background: rgba(20, 26, 33, 0.92);
+  color: #ffd9a8;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.debug-toggle[hidden] {
+  display: none;
+}
+
+.debug-panel {
+  position: fixed;
+  /* 从静音按钮（顶部 12 + 44）下方展开，保证右上角控件互不遮挡 */
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100vh - 76px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(14, 19, 25, 0.96);
+  color: rgba(232, 238, 243, 0.9);
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.debug-panel[hidden] {
+  display: none;
+}
+
+.debug-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.debug-panel__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.debug-panel__status {
+  flex: 1;
+  color: rgba(232, 238, 243, 0.55);
+  font-size: 11px;
+  text-align: right;
+}
+
+.debug-panel__status.is-debug {
+  color: #ffd9a8;
+}
+
+.debug-panel__close {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.debug-panel__body {
+  flex: 1;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.debug-panel__scene {
+  margin-bottom: 8px;
+  color: #ffd9a8;
+  font-size: 12px;
+}
+
+.debug-panel__state {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.debug-panel__state th,
+.debug-panel__state td {
+  padding: 3px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  text-align: left;
+  vertical-align: top;
+}
+
+.debug-panel__state th {
+  width: 52%;
+  color: rgba(232, 238, 243, 0.72);
+  font-weight: 400;
+  word-break: break-all;
+}
+
+.debug-panel__state td {
+  color: #ffffff;
+  word-break: break-all;
+}
+
+.debug-panel__muted {
+  color: rgba(232, 238, 243, 0.55) !important;
+}
+
+.debug-panel__subtitle {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(232, 238, 243, 0.78);
+}
+
+.debug-panel__log {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.debug-panel__log-item {
+  margin-bottom: 4px;
+}
+
+.debug-panel__log-meta {
+  display: block;
+  color: rgba(232, 238, 243, 0.45);
+  font-size: 10px;
+}
+
+.debug-panel__log-summary {
+  display: block;
+  color: rgba(232, 238, 243, 0.86);
+}
+
+.debug-panel__log-empty {
+  list-style: none;
+  margin-left: -18px;
+  color: rgba(232, 238, 243, 0.4);
+}
+
+.debug-panel__log--events {
+  padding-left: 0;
+  list-style: none;
+}
+
+.debug-panel__log-item--event {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 217, 168, 0.88);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.debug-panel__jump-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.debug-panel__jump {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.debug-panel__jump.is-current {
+  border-color: rgba(255, 217, 168, 0.7);
+  background: rgba(255, 217, 168, 0.16);
+  color: #ffd9a8;
+}
+
+.debug-panel__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.debug-panel__button {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.debug-panel__button--danger {
+  border: 1px solid rgba(255, 138, 128, 0.5);
+  background: rgba(255, 138, 128, 0.12);
+  color: #ffb4ad;
+}
+
+.debug-panel__button--secondary {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: rgba(232, 238, 243, 0.7);
+}

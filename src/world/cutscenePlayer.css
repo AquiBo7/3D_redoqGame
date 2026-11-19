@@ -1,0 +1,44 @@
+/* world/cutscenePlayer.css —— 场景黑幕与过场跳过按钮
+   黑幕层级：高于 canvas 与 world-hud(2)，低于 .game-ui(12)，
+   保证切图黑幕不遮挡即将弹出的对话框 / 选项 / 手机面板。 */
+
+.scene-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #0a0e12;
+  opacity: 1;
+  pointer-events: none;
+}
+
+/* S6 开场 CG 的跳过按钮：右下角，≥44px 触控目标，避让底部 48px 安全区与刘海屏 */
+.cutscene-skip {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(48px + env(safe-area-inset-bottom));
+  min-width: 96px;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 1px solid var(--yt-line);
+  border-radius: 0;
+  background: rgba(10, 14, 19, 0.4);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: var(--yt-font-sans);
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 11;
+}
+
+.cutscene-skip:hover,
+.cutscene-skip:focus-visible {
+  border-color: var(--yt-warm-soft);
+  background: rgba(10, 14, 19, 0.7);
+  outline: none;
+}
+
+.cutscene-skip[hidden] {
+  display: none;
+}

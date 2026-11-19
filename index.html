@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="《一条截图》：网络暴力主题的教育向第一人称叙事游戏（全部虚构）" />
+    <meta name="theme-color" content="#0e1319" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230e1319'/%3E%3Cpath d='M20 24h24M20 32h24M20 40h16' stroke='%23f2cfa4' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <title>一条截图</title>
+    <link rel="preload" href="/fonts/yt-serif-600.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/yt-sans-400.woff2" as="font" type="font/woff2" crossorigin />
+  </head>
+  <body>
+    <!-- 3D 世界挂载点 -->
+    <div id="app"></div>
+
+    <!-- 2D 界面层：由 src/ui 驱动 -->
+    <div id="ui-root">
+      <section id="start-page" class="start-page" aria-label="开始页">
+        <p class="start-page__eyebrow">第一章 · 到校段</p>
+        <h1 class="start-page__title">一条截图</h1>
+        <div class="start-page__rule" aria-hidden="true"></div>
+        <p class="start-page__notice">本作品为虚构，涉及网络暴力主题，可随时退出。</p>
+
+        <div id="portrait-hint" class="portrait-hint" hidden>
+          <span>建议横屏或使用电脑体验第一人称最佳视野</span>
+          <button id="portrait-hint-close" class="portrait-hint__close" type="button">知道了</button>
+        </div>
+
+        <div class="start-page__actions">
+          <button id="btn-continue" class="btn btn--primary" type="button" hidden>继续体验</button>
+          <button id="btn-start" class="btn btn--primary" type="button">开始体验</button>
+          <button id="btn-exit" class="btn btn--ghost" type="button">退出</button>
+          <button id="btn-credits" class="btn-credits" type="button">致谢</button>
+        </div>
+      </section>
+
+      <section id="exit-screen" class="exit-screen" hidden>
+        <p>已退出体验，感谢参与。<br />你可以直接关闭本页。</p>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

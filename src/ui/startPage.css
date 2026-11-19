@@ -1,0 +1,278 @@
+/* 开始页：清晨冷蓝灰 + 窗缝暖光，衬线片名与细线分隔，直角按钮 */
+
+.start-page {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 40px 24px var(--yt-safe-bottom);
+  /* 底图：冷蓝灰夜明；暖光自右上斜切；四角压暗 */
+  background:
+    radial-gradient(120% 90% at 50% 42%, transparent 40%, rgba(6, 10, 14, 0.55) 100%),
+    linear-gradient(198deg, transparent 42%, rgba(255, 216, 168, 0.09) 58%, transparent 72%),
+    radial-gradient(70% 55% at 82% 0%, rgba(255, 214, 166, 0.14), transparent 65%),
+    linear-gradient(180deg, #16202b 0%, #101720 52%, #0a0e13 100%);
+  text-align: center;
+  pointer-events: auto;
+  transition: opacity 0.7s var(--yt-ease);
+}
+
+/* 静态颗粒：与 3D 世界同一纹理，不拦截指针 */
+.start-page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--yt-grain);
+  background-size: 160px 160px;
+  opacity: 0.07;
+  pointer-events: none;
+}
+
+.start-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.start-page[hidden] {
+  display: none;
+}
+
+.start-page.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.start-page__eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--yt-text-faint);
+}
+
+.start-page__title {
+  margin: 0;
+  font-family: var(--yt-font-serif);
+  font-size: clamp(40px, 7.5vw, 76px);
+  font-weight: 600;
+  letter-spacing: 0.26em;
+  text-indent: 0.26em;
+  color: #f6f3ec;
+  text-shadow: 0 2px 40px rgba(255, 214, 160, 0.16);
+}
+
+.start-page__rule {
+  width: 56px;
+  height: 1px;
+  margin: 2px 0 4px;
+  background: linear-gradient(90deg, transparent, var(--yt-warm-soft), transparent);
+}
+
+.start-page__notice {
+  margin: 0;
+  max-width: 32em;
+  font-size: clamp(12px, 2.4vw, 14px);
+  line-height: 1.9;
+  color: var(--yt-text-dim);
+}
+
+/* 手机竖屏温和提示：细线直条，不再用胶囊 */
+.portrait-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(440px, 100%);
+  padding: 10px 4px 10px 16px;
+  border-top: 1px solid var(--yt-line-soft);
+  border-bottom: 1px solid var(--yt-line-soft);
+  color: var(--yt-text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+}
+
+.portrait-hint[hidden] {
+  display: none;
+}
+
+.portrait-hint__close {
+  flex-shrink: 0;
+  min-width: 56px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-left: 1px solid var(--yt-line-soft);
+  background: transparent;
+  color: var(--yt-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.start-page__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(320px, 100%);
+  margin-top: 20px;
+}
+
+.start-page__actions .btn[hidden] {
+  display: none;
+}
+
+/* 按钮可点击区域 ≥ 44px（实际 50px）；直角细边，无胶囊 */
+.btn {
+  min-height: 50px;
+  padding: 0 28px;
+  border: 1px solid var(--yt-line);
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  cursor: pointer;
+  transition:
+    background-color 0.25s var(--yt-ease),
+    border-color 0.25s var(--yt-ease),
+    color 0.25s var(--yt-ease);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:focus-visible {
+  outline: 1px solid var(--yt-warm);
+  outline-offset: 4px;
+}
+
+.btn--primary {
+  border-color: transparent;
+  background: #e9ddc6;
+  color: #1a2027;
+}
+
+.btn--primary:hover {
+  background: #f4e9d6;
+}
+
+.btn--ghost {
+  color: var(--yt-text-dim);
+}
+
+.btn--ghost:hover {
+  border-color: var(--yt-warm-soft);
+  color: var(--yt-text);
+}
+
+/* 致谢入口：低调下划线文字，热区 ≥44px */
+.btn-credits {
+  align-self: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--yt-text-faint);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  cursor: pointer;
+}
+
+.btn-credits:hover,
+.btn-credits:focus-visible {
+  color: var(--yt-warm);
+  border-bottom-color: var(--yt-warm-soft);
+  outline: none;
+}
+
+/* 退出后的收尾画面（无法关闭标签页时展示） */
+.exit-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px calc(24px + env(safe-area-inset-right, 0px)) var(--yt-safe-bottom)
+    calc(24px + env(safe-area-inset-left, 0px));
+  background: linear-gradient(180deg, #141c25 0%, var(--yt-ink) 100%);
+  color: var(--yt-text-dim);
+  font-size: 15px;
+  line-height: 1.9;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.exit-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--yt-grain);
+  background-size: 160px 160px;
+  opacity: 0.07;
+  pointer-events: none;
+}
+
+.exit-screen[hidden] {
+  display: none;
+}
+
+/* 手机横屏（高度有限）时收紧间距，避免按钮溢出 */
+@media (max-height: 500px) {
+  .start-page {
+    gap: 10px;
+    padding-top: 16px;
+  }
+
+  .start-page__eyebrow {
+    font-size: 11px;
+  }
+
+  .start-page__title {
+    font-size: clamp(28px, 5vh + 18px, 44px);
+  }
+
+  .start-page__rule {
+    margin: 0;
+  }
+
+  .start-page__actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: min(560px, 100%);
+    gap: 10px 16px;
+    margin-top: 10px;
+  }
+
+  .btn {
+    flex: 1 1 auto;
+    min-width: 120px;
+    min-height: 46px;
+  }
+
+  .btn-credits {
+    flex: 0 0 100%;
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .start-page {
+    transition: none;
+  }
+
+  .btn,
+  .btn-credits {
+    transition: none;
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+tools/shots/
+
+# 原始建模源文件体积过大（单个 25~61MB），只提交压缩后的 public/models
+art/raw/*.glb
+/*.glb

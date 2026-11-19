@@ -1,0 +1,706 @@
+/* 2D 居中手机界面 */
+
+.phone-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px))
+    calc(48px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+  background: rgba(5, 9, 13, 0.55);
+  -webkit-backdrop-filter: blur(6px) brightness(0.62);
+  backdrop-filter: blur(6px) brightness(0.62);
+  pointer-events: auto;
+  animation: phone-overlay-in 0.2s ease both;
+}
+
+.phone-overlay[hidden] {
+  display: none;
+}
+
+@keyframes phone-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.phone-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  height: min(760px, 100%);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 26px;
+  background: linear-gradient(180deg, #1b232d 0%, #10161d 100%);
+  box-shadow:
+    0 0 0 5px #0a0d11,
+    0 0 0 6px rgba(255, 255, 255, 0.09),
+    0 30px 80px rgba(0, 0, 0, 0.6);
+}
+
+/* 顶部听筒：纯装饰，强化真实机身感 */
+.phone-frame::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  z-index: 3;
+  width: 54px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.phone__status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px 2px;
+  color: rgba(230, 238, 244, 0.68);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.phone__status-mark {
+  font-size: 7px;
+  letter-spacing: 0.35em;
+  opacity: 0.5;
+}
+
+.phone__body {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 16px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.phone__body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.phone__body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.phone__footer {
+  flex: 0 0 auto;
+  padding: 10px 16px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 12, 17, 0.55);
+}
+
+.phone__close {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0;
+  background: transparent;
+  color: rgba(240, 245, 248, 0.9);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.phone__close:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.phone__close:focus-visible,
+.phone__row:focus-visible,
+.phone__back:focus-visible,
+.phone__reply:focus-visible,
+.phone__lockscreen:focus-visible {
+  outline: 2px solid rgba(255, 217, 168, 0.85);
+  outline-offset: 2px;
+}
+
+/* 锁屏 */
+
+.phone__lockscreen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 100%;
+  padding: 28px 20px 40px;
+  border: none;
+  border-radius: 22px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255, 214, 160, 0.1), transparent 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 60%);
+  color: #eef3f6;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.phone__lock-day {
+  color: rgba(230, 238, 244, 0.55);
+  font-size: 12px;
+  letter-spacing: 0.24em;
+}
+
+.phone__lock-time {
+  font-family: var(--yt-font-serif);
+  font-size: clamp(56px, 12vh, 82px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.05;
+  color: #f4efe4;
+  text-shadow: 0 8px 40px rgba(255, 214, 160, 0.2);
+}
+
+.phone__lock-alarm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 12px;
+}
+
+.phone__lock-alarm-label {
+  flex: 0 0 auto;
+  color: rgba(255, 217, 168, 0.86);
+}
+
+.phone__lock-alarm-text {
+  overflow: hidden;
+  color: rgba(232, 238, 243, 0.75);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phone__lock-hint {
+  margin-top: 26px;
+  color: rgba(232, 238, 243, 0.42);
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  animation: phone-lock-hint 2.4s ease-in-out infinite;
+}
+
+@keyframes phone-lock-hint {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* 主页 */
+
+.phone__home-head {
+  padding: 12px 4px 12px;
+}
+
+.phone__home-title {
+  margin: 0;
+  font-family: var(--yt-font-serif);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+
+.phone__home-sub {
+  margin: 4px 0 0;
+  color: rgba(230, 238, 244, 0.45);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.phone__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.phone__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.035);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.phone__row {
+  cursor: pointer;
+}
+
+button.phone__row:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.phone__row--alarm {
+  background: rgba(255, 217, 168, 0.045);
+}
+
+.phone__row-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(240, 245, 248, 0.88);
+  font-size: 15px;
+}
+
+.phone__row-icon--chat {
+  background: rgba(176, 211, 222, 0.14);
+  color: #cbe6ee;
+}
+
+.phone__row-icon--memo {
+  background: rgba(255, 222, 173, 0.13);
+  color: #ffe0b0;
+}
+
+.phone__row-icon--alarm {
+  background: rgba(255, 200, 150, 0.14);
+  color: #ffd0a0;
+}
+
+.phone__row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.phone__row-title {
+  overflow: hidden;
+  color: rgba(245, 248, 250, 0.94);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phone__row-sub {
+  overflow: hidden;
+  color: rgba(230, 238, 244, 0.46);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phone__badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e8796c;
+  color: #fff7f3;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.phone__tag {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(230, 238, 244, 0.5);
+  font-size: 10px;
+}
+
+/* 通知卡片 */
+
+.phone__notice-card {
+  padding: 14px 14px 15px;
+  border: 0;
+  border-left: 2px solid rgba(242, 169, 142, 0.55);
+  border-radius: 2px;
+  background:
+    linear-gradient(140deg, rgba(255, 238, 214, 0.07), transparent 60%),
+    rgba(255, 255, 255, 0.045);
+}
+
+.phone__notice-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.phone__notice-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f2a98e;
+  box-shadow: 0 0 10px rgba(242, 169, 142, 0.7);
+}
+
+.phone__notice-title {
+  color: rgba(245, 248, 250, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.phone__notice-text {
+  margin: 0;
+  color: rgba(245, 248, 250, 0.9);
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.phone__notice-card--detail {
+  margin-top: 12px;
+}
+
+/* 分区详情 */
+
+.phone__section-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 10px;
+  background: linear-gradient(180deg, #19212a 78%, rgba(25, 33, 42, 0));
+}
+
+.phone__section-title {
+  font-family: var(--yt-font-serif);
+  letter-spacing: 0.12em;
+}
+
+.phone__back {
+  min-width: 64px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0;
+  background: transparent;
+  color: rgba(240, 245, 248, 0.82);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.phone__section-title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phone__alarm-card {
+  padding: 20px;
+  border: 0;
+  border-top: 1px solid rgba(255, 217, 168, 0.22);
+  border-bottom: 1px solid rgba(255, 217, 168, 0.12);
+  border-radius: 2px;
+  background: rgba(255, 217, 168, 0.055);
+  text-align: center;
+}
+
+.phone__alarm-label {
+  margin: 0;
+  color: rgba(255, 232, 201, 0.92);
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.phone__alarm-state {
+  margin: 8px 0 0;
+  color: rgba(230, 238, 244, 0.45);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+.phone__memo-meta {
+  margin: 4px 2px 12px;
+  color: rgba(230, 238, 244, 0.4);
+  font-size: 11px;
+}
+
+.phone__memo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: memo-item;
+}
+
+.phone__memo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(240, 245, 248, 0.88);
+  font-size: 13.5px;
+  line-height: 1.6;
+  counter-increment: memo-item;
+}
+
+.phone__memo-item::before {
+  content: counter(memo-item);
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 222, 173, 0.13);
+  color: #ffe0b0;
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* 聊天 */
+
+.phone__chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.phone__message {
+  max-width: 88%;
+  padding: 8px 12px 9px;
+  border-radius: 3px;
+}
+
+.phone__message--in {
+  align-self: flex-start;
+  border-left: 2px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.phone__message--out {
+  align-self: flex-end;
+  border-right: 2px solid rgba(203, 231, 215, 0.4);
+  background: rgba(203, 231, 215, 0.12);
+}
+
+.phone__message-meta {
+  display: block;
+  margin-bottom: 3px;
+  color: rgba(230, 238, 244, 0.38);
+  font-size: 10px;
+}
+
+.phone__message-text {
+  margin: 0;
+  color: rgba(245, 248, 250, 0.9);
+  font-size: 14px;
+  line-height: 1.68;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.phone__replies {
+  margin-top: 16px;
+  padding-top: 13px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.phone__replies-label {
+  margin: 0 0 8px 2px;
+  color: rgba(230, 238, 244, 0.42);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.phone__reply-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.phone__reply {
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(240, 245, 248, 0.88);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phone__reply:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.phone__read-status {
+  margin: 14px 0 0;
+  color: rgba(230, 238, 244, 0.38);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+/* 竖屏：尽量铺满，但上下留足 48px 安全区 */
+@media (orientation: portrait) {
+  .phone-overlay {
+    padding: calc(48px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px))
+      calc(48px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+  }
+
+  .phone-frame {
+    width: min(520px, 100%);
+    height: 100%;
+    border-radius: 22px;
+  }
+}
+
+/* 矮横屏：压缩内容，内部滚动；手机框底部仍避开 48px 安全区 */
+@media (max-height: 500px) {
+  .phone-overlay {
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .phone-frame {
+    width: min(380px, 72vw);
+    border-radius: 18px;
+  }
+
+  .phone__status {
+    padding: 14px 16px 0;
+    font-size: 10px;
+  }
+
+  .phone__body {
+    padding: 0 12px 12px;
+  }
+
+  .phone__footer {
+    padding: 8px 12px 10px;
+  }
+
+  .phone__close {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .phone__home-head {
+    padding: 8px 2px 7px;
+  }
+
+  .phone__home-title {
+    font-size: 20px;
+  }
+
+  .phone__home-sub {
+    display: none;
+  }
+
+  .phone__row {
+    min-height: 52px;
+    padding: 7px 10px;
+    gap: 9px;
+  }
+
+  .phone__row-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+
+  .phone__row-title {
+    font-size: 13px;
+  }
+
+  .phone__row-sub {
+    font-size: 11px;
+  }
+
+  .phone__lockscreen {
+    gap: 10px;
+    padding: 16px 14px 22px;
+  }
+
+  .phone__lock-time {
+    font-size: clamp(40px, 14vh, 58px);
+  }
+
+  .phone__lock-hint {
+    margin-top: 14px;
+  }
+
+  .phone__message-text {
+    font-size: 13px;
+  }
+
+  .phone__reply {
+    min-height: 44px;
+    font-size: 12.5px;
+  }
+
+  .phone__section-head {
+    padding: 7px 0;
+  }
+
+  .phone__back {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-overlay {
+    animation: none;
+  }
+
+  .phone__lock-hint {
+    animation: none;
+  }
+}

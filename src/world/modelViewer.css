@@ -1,0 +1,152 @@
+/* world/modelViewer.css —— ?modelViewer=1 模型检视台样式
+   移动端安全区：顶栏含 safe-area-inset-top，底栏底部预留 48px + safe-area-inset-bottom；按钮 ≥ 44px。 */
+
+.mv-root {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.mv-root canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* 顶部控制栏：标题 + 角色切换 */
+.mv-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) env(safe-area-inset-right, 0px) 10px
+    env(safe-area-inset-left, 0px);
+  background: rgba(14, 19, 25, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+.mv-topbar__title {
+  margin: 0 12px 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #eef2f5;
+  letter-spacing: 0.08em;
+}
+
+.mv-chars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mv-btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef2f5;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mv-btn:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.mv-btn--active {
+  background: #f2cfa4;
+  border-color: #f2cfa4;
+  color: #0e1319;
+  font-weight: 600;
+}
+
+/* 底部控制栏：实时数据面板 + 显示开关 */
+.mv-bottombar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px env(safe-area-inset-right, 0px) calc(48px + env(safe-area-inset-bottom, 0px))
+    env(safe-area-inset-left, 0px);
+  background: rgba(14, 19, 25, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+/* 骨骼动画动作栏：整行展示，无动画角色隐藏 */
+.mv-anims {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mv-anims[hidden] {
+  display: none;
+}
+
+.mv-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #c9d4dc;
+}
+
+.mv-stats__item strong {
+  color: #f2cfa4;
+  font-weight: 600;
+}
+
+.mv-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 加载中 / 错误提示浮层 */
+.mv-loading {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  padding: 10px 22px;
+  border-radius: 20px;
+  background: rgba(14, 19, 25, 0.78);
+  color: #eef2f5;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+@media (max-width: 560px) {
+  .mv-topbar__title {
+    margin-right: 8px;
+  }
+
+  .mv-btn {
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .mv-stats {
+    font-size: 11.5px;
+  }
+}

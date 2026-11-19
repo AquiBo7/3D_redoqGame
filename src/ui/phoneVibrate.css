@@ -1,0 +1,255 @@
+/* 手机震动提示与轻量消息卡：细线直条 + 暖色左边线，去掉胶囊与重发光 */
+
+.phone-vibrate {
+  position: fixed;
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  z-index: 45;
+  width: min(340px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  padding: 14px 16px 12px 18px;
+  border: 0;
+  border-left: 2px solid var(--yt-warm);
+  background: linear-gradient(90deg, rgba(232, 199, 154, 0.08), rgba(10, 14, 19, 0.86) 40%);
+  pointer-events: auto;
+  animation: phone-vibrate-in 0.25s var(--yt-ease) both;
+}
+
+.phone-vibrate[hidden] {
+  display: none;
+}
+
+@keyframes phone-vibrate-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 很轻的呼吸边线，不再整框发光 */
+.phone-vibrate::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--yt-warm);
+  animation: phone-vibrate-glow 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes phone-vibrate-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.phone-vibrate__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.phone-vibrate__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--yt-warm);
+}
+
+.phone-vibrate__title {
+  color: var(--yt-warm);
+  font-family: var(--yt-font-serif);
+  font-size: 13px;
+  letter-spacing: 0.2em;
+}
+
+.phone-vibrate__preview {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 8px 0 0;
+  color: var(--yt-text-dim);
+  font-size: 12.5px;
+  line-height: 1.75;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.phone-vibrate__actions {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.phone-vibrate__button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 72px;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 1px solid var(--yt-line-soft);
+  background: transparent;
+  color: var(--yt-text-dim);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+}
+
+.phone-vibrate__button--primary {
+  border-bottom-color: var(--yt-warm-soft);
+  color: var(--yt-warm);
+}
+
+.phone-vibrate__button:hover,
+.phone-vibrate__button:focus-visible {
+  color: #fff;
+  border-bottom-color: var(--yt-warm);
+}
+
+.phone-vibrate__button:active {
+  transform: translateY(1px);
+}
+
+.phone-vibrate__button:focus-visible,
+.vibration-message__close:focus-visible {
+  outline: 1px solid var(--yt-warm-soft);
+  outline-offset: 3px;
+}
+
+.vibration-message {
+  position: fixed;
+  inset: 0;
+  z-index: 46;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(24px + env(safe-area-inset-top, 0px)) calc(20px + env(safe-area-inset-right, 0px))
+    var(--yt-safe-bottom) calc(20px + env(safe-area-inset-left, 0px));
+  background: rgba(5, 9, 13, 0.5);
+  -webkit-backdrop-filter: blur(5px) brightness(0.7);
+  backdrop-filter: blur(5px) brightness(0.7);
+  pointer-events: auto;
+  animation: vibration-message-in 0.2s var(--yt-ease) both;
+}
+
+.vibration-message[hidden] {
+  display: none;
+}
+
+@keyframes vibration-message-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.vibration-message__card {
+  position: relative;
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: 22px 24px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-top: 1px solid var(--yt-line);
+  border-bottom: 1px solid var(--yt-line);
+  background: rgba(10, 14, 19, 0.9);
+}
+
+.vibration-message__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.vibration-message__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--yt-warm);
+}
+
+.vibration-message__title {
+  color: var(--yt-warm);
+  font-family: var(--yt-font-serif);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+}
+
+.vibration-message__text {
+  margin: 0;
+  color: var(--yt-text);
+  font-size: 15px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.vibration-message__close {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 20px;
+  border: 0;
+  border-top: 1px solid var(--yt-line-soft);
+  background: transparent;
+  color: var(--yt-text-dim);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+}
+
+.vibration-message__close:hover {
+  color: #fff;
+}
+
+@media (max-height: 500px) {
+  .phone-vibrate {
+    bottom: calc(54px + env(safe-area-inset-bottom, 0px));
+    width: min(300px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    padding: 10px 12px 8px 14px;
+  }
+
+  .phone-vibrate__preview {
+    -webkit-line-clamp: 1;
+  }
+
+  .phone-vibrate__actions {
+    margin-top: 2px;
+  }
+
+  .vibration-message__card {
+    padding: 14px 16px 10px;
+  }
+
+  .vibration-message__close {
+    min-height: 44px;
+    margin-top: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-vibrate {
+    animation: none;
+  }
+
+  .phone-vibrate::after {
+    animation: none;
+  }
+
+  .vibration-message {
+    animation: none;
+  }
+}
