@@ -2,6 +2,7 @@
 // 流程：解析 URL → 组装 core 引擎（状态机 / 存档 / 事件）→ 挂载开始页与调试 UI
 // 玩家开始或继续后，再创建 3D 世界；core 的剧情推进不依赖 3D 是否就绪。
 
+import { playAlarm, resetFootsteps, updateFootsteps } from './audio/audioManager';
 import { initDebugPanel } from './core/debugPanel';
 import { eventBus } from './core/eventBus';
 import { GameEngine } from './core/gameEngine';
@@ -51,6 +52,11 @@ if (params.modelViewer) {
   if (exitScreen) exitScreen.hidden = true;
   initPhonePreview({ bus: eventBus });
 } else {
+  // 只在游戏分支绑定一次，先于引擎和世界初始化。
+  eventBus.on('audio:motion', updateFootsteps);
+  eventBus.on('audio:reset', resetFootsteps);
+  eventBus.on('audio:alarm', playAlarm);
+
   const engine = new GameEngine({ bus: eventBus, params });
   engine.attach();
 

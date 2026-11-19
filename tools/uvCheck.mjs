@@ -24,18 +24,21 @@ export function countUvTears(doc) {
         uvless += triCountLocal;
         continue;
       }
-      const uvTemp = [0, 0, 0, 0, 0, 0];
+      // getElement 写入传入的数组；不能把 uvTemp 的值拷入临时数组后丢弃读数。
+      const uv0 = [0, 0];
+      const uv1 = [0, 0];
+      const uv2 = [0, 0];
       const indexArray = indices.getArray();
       for (let t = 0; t < triCountLocal; t += 1) {
         const i0 = indexArray[t * 3];
         const i1 = indexArray[t * 3 + 1];
         const i2 = indexArray[t * 3 + 2];
-        uvAccessor.getElement(i0, [uvTemp[0], uvTemp[1]]);
-        uvAccessor.getElement(i1, [uvTemp[2], uvTemp[3]]);
-        uvAccessor.getElement(i2, [uvTemp[4], uvTemp[5]]);
-        const d01 = Math.hypot(uvTemp[2] - uvTemp[0], uvTemp[3] - uvTemp[1]);
-        const d12 = Math.hypot(uvTemp[4] - uvTemp[2], uvTemp[5] - uvTemp[3]);
-        const d20 = Math.hypot(uvTemp[0] - uvTemp[4], uvTemp[1] - uvTemp[5]);
+        uvAccessor.getElement(i0, uv0);
+        uvAccessor.getElement(i1, uv1);
+        uvAccessor.getElement(i2, uv2);
+        const d01 = Math.hypot(uv1[0] - uv0[0], uv1[1] - uv0[1]);
+        const d12 = Math.hypot(uv2[0] - uv1[0], uv2[1] - uv1[1]);
+        const d20 = Math.hypot(uv0[0] - uv2[0], uv0[1] - uv2[1]);
         const worst = Math.max(d01, d12, d20);
         if (worst > UV_TEAR_HARD) overHard += 1;
         else if (worst > UV_TEAR_SOFT) overSoft += 1;

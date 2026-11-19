@@ -7,10 +7,10 @@ import { describe, expect, it } from 'vitest';
 import { CHARACTER_MODELS, getCharacterModel } from './modelManifest';
 
 describe('CHARACTER_MODELS 清单', () => {
-  it('恰好包含 5 位角色，id 不重复', () => {
-    expect(CHARACTER_MODELS).toHaveLength(5);
+  it('包含 5 位主角模型与 3 份新动画资源，id 不重复', () => {
+    expect(CHARACTER_MODELS).toHaveLength(8);
     const ids = CHARACTER_MODELS.map((entry) => entry.id);
-    expect(new Set(ids).size).toBe(5);
+    expect(new Set(ids).size).toBe(8);
   });
 
   it('所有模型路径以 ./models/ 开头且为 .glb（禁止写死根路径）', () => {
@@ -44,7 +44,7 @@ describe('CHARACTER_MODELS 清单', () => {
     }
   });
 
-  it('5 位角色 frontYawRad 完全一致且为 -π/2（截图实测原生正面统一朝 +X，three.js 矩阵 +X→+Z 需 -90°）', () => {
+  it('主角与路人模型 frontYawRad 为 -π/2（原生 +X 正面归正为 +Z）', () => {
     const yaws = CHARACTER_MODELS.map((entry) => entry.frontYawRad);
     expect(new Set(yaws).size).toBe(1);
     for (const yaw of yaws) expect(yaw).toBeCloseTo(-Math.PI / 2, 6);

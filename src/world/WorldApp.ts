@@ -9,7 +9,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { gsap } from 'gsap';
-import { playAlarm, updateFootsteps } from '../audio/audioManager';
+import { sampleGroundHeight } from './navMath';
 import type { EventBus } from '../core/eventBus';
 import { eventBus as defaultEventBus } from '../core/eventBus';
 import type { SceneId, SceneKey } from '../data/storySchema';
@@ -54,12 +54,6 @@ const FADE_IN_SEC = 0.55;
 const INITIAL_FADE_SEC = 0.5;
 /** 切图预载角色模型的总时长上限（毫秒）：超时直接进场景，缺失模型由 shared 回退并异步补载 */
 const MODEL_PRELOAD_TIMEOUT_MS = 8000;
-/** 会播放环境脚步的步行场景（S4 街段 / S5–S6 校门 / S8–S9 校园） */
-const FOOTSTEP_SCENE_KEYS: ReadonlySet<SceneKey> = new Set<SceneKey>([
-  'street',
-  'gate',
-  'building',
-]);
 
 /** 清晨天空球半径：小于 camera.far = 120，且每帧跟随相机，玩家永远到不了天穹边缘 */
 const SKY_DOME_RADIUS = 90;
@@ -212,6 +206,7 @@ export class WorldApp {
   private disposed = false;
   private rafId = 0;
   private lastFrameTime = 0;
+  private readonly motionPositions = new Map<string, THREE.Vector3>();
 
   constructor(container: HTMLElement, options: WorldAppOptions = {}) {
     const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
@@ -314,6 +309,7 @@ export class WorldApp {
       camera: this.camera,
       setCinematic: (value) => this.controller.setCinematic(value),
       getPanoramaAnchor: () => this.currentDefinition.panoramaAnchor ?? null,
+      getExitAnchor: () => this.currentDefinition.exitAnchor ?? null,
       getBaseFov: () => this.baseFov,
       getSceneKey: () => this.currentDefinition.sceneKey,
     });
@@ -332,6 +328,7 @@ export class WorldApp {
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__worldApp = {
         getSceneId: () => this.currentSceneId,
+        getPlayerPosition: () => ({ feet: this.controller.getFeetPosition(), camera: this.camera.position.toArray(), direction: this.camera.getWorldDirection(new THREE.Vector3()).toArray(), enabled: this.controller.isEnabled() }),
         /** 传送并设定视角（yawDeg=0 面向 -Z，180 面向 +Z） */
         teleport: (x: number, z: number, yawDeg = 0) => {
           this.controller.setSpawn({ x, z, yaw: (yawDeg * Math.PI) / 180 });
@@ -445,14 +442,14 @@ export class WorldApp {
     this.buildDefinition(definition);
     this.applyFog(definition);
     this.debugOverlay?.setDefinition(definition);
-    this.controller.setLookOnly(sceneId === 'S1');
 
     this.currentRuntime = getSceneRuntime(sceneId);
     this.currentRuntime?.enter(this.createRuntimeContext(sceneId));
     this.syncHudHints();
     this.initialMounted = true;
 
-    if (sceneId === 'S1') playAlarm();
+    this.resetMotionAudio();
+    if (sceneId === 'S1') this.bus.emit('audio:alarm');
 
     // S4 挂载完成后静默预热 S5 主角与爸爸模型：不阻塞街段游玩，S5 黑幕预载必命中缓存
     if (sceneId === 'S4') {
@@ -480,6 +477,7 @@ export class WorldApp {
 
   /** scene:transition：同 sceneKey 只换交互配置；异 key 黑幕淡出 → 重建 → 淡入 */
   private handleSceneTransition(payload: { toSceneId: SceneId; sceneKey: SceneKey }): void {
+    this.resetMotionAudio();
     this.currentSceneId = payload.toSceneId;
     const definition = getSceneDefinition(payload.toSceneId);
 
@@ -489,7 +487,6 @@ export class WorldApp {
       this.currentDefinition = definition;
       this.applyInteraction(definition);
       this.debugOverlay?.setDefinition(definition);
-      this.controller.setLookOnly(payload.toSceneId === 'S1');
       // 共享 runtime 按 sceneId 自行判断是否重启演出（如 gate 只在 S5 播放）
       this.currentRuntime?.enter(this.createRuntimeContext(payload.toSceneId));
       this.syncHudHints();
@@ -713,7 +710,9 @@ export class WorldApp {
   private attachContactShadows(): void {
     const grounded: THREE.Object3D[] = [];
     this.levelGroup.traverse((object) => {
-      if (isGroundedActor(object)) grounded.push(object);
+      const position = object.getWorldPosition(new THREE.Vector3());
+      const groundY = sampleGroundHeight(position, this.currentDefinition.nav.surfaces, this.currentDefinition.nav.groundY);
+      if (isGroundedActor(object, groundY)) grounded.push(object);
     });
     for (const actor of grounded) {
       if (actor.getObjectByName('contact-shadow')) continue;
@@ -819,17 +818,48 @@ export class WorldApp {
     this.controller.update(dt);
     this.interaction.update(dt, now);
     this.currentRuntime?.tick?.(dt);
-    updateFootsteps(
-      dt,
-      this.controller.getMoveSpeed(),
-      FOOTSTEP_SCENE_KEYS.has(this.currentDefinition.sceneKey) && this.controller.isEnabled(),
-    );
+    this.updateMotionAudio(dt);
     this.skyDome.position.copy(this.camera.position);
     this.skyMaterial.uniforms.uTime.value += dt;
     this.updateAirParticles(dt);
     if (this.composer) this.composer.render(dt);
     else this.renderer.render(this.scene, this.camera);
   };
+
+  private resetMotionAudio(): void {
+    this.motionPositions.clear();
+    this.bus.emit('audio:reset');
+  }
+
+  private updateMotionAudio(dt: number): void {
+    const surface = this.currentDefinition.footstepSurface ?? 'stone';
+    const sample = (sourceId: string, position: THREE.Vector3, allow: boolean, gain: number): void => {
+      const previous = this.motionPositions.get(sourceId);
+      const distance = previous ? Math.hypot(position.x - previous.x, position.z - previous.z) : 0;
+      if (previous) previous.copy(position);
+      else this.motionPositions.set(sourceId, position.clone());
+      this.bus.emit('audio:motion', {
+        sourceId, distance, gain, surface,
+        allow: allow && distance <= dt * 12 && this.initialMounted && this.pendingSceneId === null,
+      });
+    };
+    sample('player', this.camera.position,
+      this.controller.isEnabled() || (this.currentSceneId === 'S3' && this.cutscenePlayer.isPlaying()), 0.85);
+    for (const id of this.currentDefinition.footstepActors ?? []) {
+      const actor = this.actors[id];
+      if (!actor) continue;
+      let visible = true;
+      let ancestor: THREE.Object3D | null = actor;
+      while (ancestor) {
+        visible = visible && ancestor.visible;
+        ancestor = ancestor.parent;
+      }
+      const position = actor.getWorldPosition(new THREE.Vector3());
+      const distance = position.distanceTo(this.camera.position);
+      const gain = 0.48 * Math.max(0, 1 - distance / 8) ** 2;
+      sample(id, position, visible && gain > 0, gain);
+    }
+  }
 
   /** 供 2D 阻塞式界面调用：锁定输入并主动退出 PointerLock */
   lockControls(): void {
@@ -843,6 +873,7 @@ export class WorldApp {
   /** 释放渲染资源（进入降级模式或销毁场景时调用） */
   dispose(): void {
     this.disposed = true;
+    this.resetMotionAudio();
     this.transitionToken += 1;
     cancelAnimationFrame(this.rafId);
     if (this.initialFadeTimer !== 0) window.clearTimeout(this.initialFadeTimer);

@@ -2,14 +2,17 @@
 // 职责：首次手势解锁、静音开关持久化、手机提示音、清晨闹钟、脚步、界面点击反馈。
 // 所有播放接口在无 AudioContext / 静音 / 音频不可用时静默返回，不产生任何浏览器警告。
 
+import type { GameEvents } from '../core/eventBus';
+
 const MUTE_STORAGE_KEY = 'yitiaojietu:muted';
+const STEP_LENGTH = 0.65;
 
 let context: AudioContext | null = null;
+let audioUnlocked = false;
 let mutedCache: boolean | null = null;
 let noiseBuffer: AudioBuffer | null = null;
 let noiseBufferOwner: AudioContext | null = null;
-/** 已累计的步行距离（米），用于按步幅触发脚步音 */
-let footstepDistance = 0;
+const footstepSources = new Map<string, { distance: number; rightFoot: boolean }>();
 
 function safeStorage(): Storage | null {
   try {
@@ -42,7 +45,7 @@ export function setMuted(muted: boolean): void {
   } catch {
     // 存储被禁用时忽略，保持会话内状态
   }
-  if (muted) footstepDistance = 0;
+  if (muted) resetFootsteps();
 }
 
 /** 切换静音，返回切换后的状态 */
@@ -63,23 +66,26 @@ export function getAudioContext(): AudioContext {
  * 再播放一个 1 采样点的静音 AudioBuffer。
  */
 export function unlockAudio(): void {
-  const ctx = getAudioContext();
+  if (typeof AudioContext === 'undefined') return;
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'closed') return;
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    audioUnlocked = true;
 
-  // 部分浏览器在权限受限时 resume 会失败，静默忽略即可，不影响游戏
-  ctx.resume().catch(() => {});
-
-  const silentBuffer = ctx.createBuffer(1, 1, ctx.sampleRate);
-  const source = ctx.createBufferSource();
-  source.buffer = silentBuffer;
-  source.connect(ctx.destination);
-  source.start(0);
+    const silentBuffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+    const source = ctx.createBufferSource();
+    source.buffer = silentBuffer;
+    source.connect(ctx.destination);
+    source.start(0);
+  } catch {
+    // 音频不可用时静默降级
+  }
 }
 
-/** 可播放的上下文：静音 / 未解锁 / 已关闭时返回 null，并在挂起时尝试恢复 */
+/** 仅使用已由手势解锁且正在运行的上下文，不在播放路径主动恢复。 */
 function playbackContext(): AudioContext | null {
-  if (isMuted()) return null;
-  if (!context || context.state === 'closed') return null;
-  if (context.state === 'suspended') context.resume().catch(() => {});
+  if (isMuted() || !audioUnlocked || context?.state !== 'running') return null;
   return context;
 }
 
@@ -195,44 +201,78 @@ function getNoiseBuffer(ctx: AudioContext): AudioBuffer {
   return buffer;
 }
 
-function playFootstepSound(ctx: AudioContext): void {
+function playFootstepSound(
+  ctx: AudioContext,
+  surface: GameEvents['audio:motion']['surface'],
+  gain: number,
+  rightFoot: boolean,
+): void {
   try {
     const startAt = ctx.currentTime + 0.005;
+    const wood = surface === 'wood';
+    const pitch = rightFoot ? 1.035 : 0.965;
+    const level = rightFoot ? 0.96 : 1;
+    const duration = wood ? 0.105 : 0.08;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(gain, startAt);
+    master.connect(ctx.destination);
 
     const source = ctx.createBufferSource();
     source.buffer = getNoiseBuffer(ctx);
+    source.playbackRate.setValueAtTime(pitch, startAt);
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(340, startAt);
+    filter.frequency.setValueAtTime((wood ? 850 : 1500) * pitch, startAt);
     const envelope = ctx.createGain();
     envelope.gain.setValueAtTime(0.0001, startAt);
-    envelope.gain.exponentialRampToValueAtTime(0.018, startAt + 0.012);
-    envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.09);
+    envelope.gain.exponentialRampToValueAtTime((wood ? 0.085 : 0.065) * level, startAt + 0.008);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
     source.connect(filter);
     filter.connect(envelope);
-    envelope.connect(ctx.destination);
+    envelope.connect(master);
     source.start(startAt);
-    source.stop(startAt + 0.11);
+    source.stop(startAt + duration + 0.015);
 
-    softBeep(ctx, startAt, 92, 0.08, 0.016, 'sine');
+    const thud = ctx.createOscillator();
+    const thudEnvelope = ctx.createGain();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime((wood ? 108 : 142) * pitch, startAt);
+    thud.frequency.exponentialRampToValueAtTime((wood ? 60 : 85) * pitch, startAt + duration);
+    thudEnvelope.gain.setValueAtTime(0.0001, startAt);
+    thudEnvelope.gain.exponentialRampToValueAtTime((wood ? 0.05 : 0.038) * level, startAt + 0.006);
+    thudEnvelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+    thud.connect(thudEnvelope);
+    thudEnvelope.connect(master);
+    thud.start(startAt);
+    thud.stop(startAt + duration + 0.015);
   } catch {
     // 静默降级
   }
 }
 
-/**
- * 按实际移动速度累积步幅并播放极轻脚步（S4 / S5 / S8 步行段）。
- * allow=false（非步行场景 / 输入被锁 / 停止移动）时重置累积，避免停下又起步时补音。
- */
-export function updateFootsteps(dt: number, speedMps: number, allow: boolean): void {
-  if (!allow || speedMps <= 0.15 || isMuted() || !context) {
-    footstepDistance = 0;
+/** 场景切换 / 暂停时丢弃所有声源的步幅与左右脚相位。 */
+export function resetFootsteps(): void {
+  footstepSources.clear();
+}
+
+/** 按声源累计本帧实际位移（米）；停走、不可听或不可播放时清除该源，避免补音。 */
+export function updateFootsteps({ sourceId, distance, allow, gain, surface }: GameEvents['audio:motion']): void {
+  const ctx = playbackContext();
+  if (!allow || !Number.isFinite(distance) || distance <= 0 || !Number.isFinite(gain) || gain <= 0 || !ctx) {
+    footstepSources.delete(sourceId);
     return;
   }
-  const stepLength = 0.78;
-  footstepDistance += dt * Math.min(speedMps, 6);
-  if (footstepDistance < stepLength) return;
-  footstepDistance -= stepLength;
-  const ctx = playbackContext();
-  if (ctx) playFootstepSound(ctx);
+
+  let source = footstepSources.get(sourceId);
+  if (!source) {
+    source = { distance: 0, rightFoot: false };
+    footstepSources.set(sourceId, source);
+  }
+  source.distance += distance;
+  // 容忍跨帧求和误差，保证相同路程在不同帧率下步数一致。
+  while (source.distance + 1e-9 >= STEP_LENGTH) {
+    source.distance = Math.max(0, source.distance - STEP_LENGTH);
+    playFootstepSound(ctx, surface, Math.min(gain, 1), source.rightFoot);
+    source.rightFoot = !source.rightFoot;
+  }
 }

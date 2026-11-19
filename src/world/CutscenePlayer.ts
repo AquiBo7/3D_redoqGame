@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { gsap } from 'gsap';
 import type { EventBus, GameEvents } from '../core/eventBus';
 import type { SceneKey } from '../data/storySchema';
-import type { PanoramaAnchor } from './worldSceneTypes';
+import type { ExitAnchor, PanoramaAnchor } from './worldSceneTypes';
 import './cutscenePlayer.css';
 
 /** 硬超时兜底：过场时长 + 该缓冲毫秒后强制结束，防止动画异常导致状态机卡死 */
@@ -29,6 +29,7 @@ export interface CutscenePlayerOptions {
   /** 只切换过场锁（cinematic），不得触碰 controlsLocked / unlockControls */
   setCinematic: (value: boolean) => void;
   getPanoramaAnchor: () => PanoramaAnchor | null;
+  getExitAnchor: () => ExitAnchor | null;
   getBaseFov: () => number;
   /** 当前装载的场景 key，用于判断切场是否复用同一 3D 场景 */
   getSceneKey: () => SceneKey;
@@ -46,6 +47,7 @@ export class CutscenePlayer {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly setCinematic: (value: boolean) => void;
   private readonly getPanoramaAnchor: () => PanoramaAnchor | null;
+  private readonly getExitAnchor: () => ExitAnchor | null;
   private readonly getBaseFov: () => number;
   private readonly getSceneKey: () => SceneKey;
 
@@ -58,6 +60,8 @@ export class CutscenePlayer {
   private active: ActiveCutscene | null = null;
   private timeline: gsap.core.Timeline | null = null;
   private hardTimeout = 0;
+  /** 出门步态的基准高度，打断时也要移除纵向起伏。 */
+  private runBaseY: number | null = null;
 
   constructor(options: CutscenePlayerOptions) {
     this.bus = options.bus;
@@ -66,6 +70,7 @@ export class CutscenePlayer {
     this.camera = options.camera;
     this.setCinematic = options.setCinematic;
     this.getPanoramaAnchor = options.getPanoramaAnchor;
+    this.getExitAnchor = options.getExitAnchor;
     this.getBaseFov = options.getBaseFov;
     this.getSceneKey = options.getSceneKey;
 
@@ -140,39 +145,72 @@ export class CutscenePlayer {
     this.timeline = timeline;
   }
 
-  /** s3-run：快跑晃动 + 朝房门推进；结尾把黑幕留在 1，交给 S4 切图淡入无缝接管 */
+  /** s3-run：先原地对准出口，再沿视线推进；末尾黑幕交给下一场景接管。 */
   private playRun(seconds: number): void {
     const camera = this.camera;
-    const startX = camera.position.x;
-    const startY = camera.position.y;
-    const startZ = camera.position.z;
-    // room.ts 房门位于 x≈3.4 / z≈2.7，从任意站位斜向门口推进，停在距门约 1.2m 处
-    const targetX = 2.35;
-    const targetZ = 2.0;
-
+    const anchor = this.getExitAnchor();
     gsap.set(this.fadeEl, { opacity: 0 });
 
-    const run = { progress: 0 };
     const timeline = gsap.timeline({ onComplete: () => this.finish() });
-    timeline
-      .to(
-        run,
-        {
-          progress: 1,
-          duration: seconds,
-          ease: 'power1.in',
-          onUpdate: () => {
-            const progress = run.progress;
-            camera.position.x =
-              startX + (targetX - startX) * progress + Math.sin(progress * 46) * 0.05;
-            camera.position.z = startZ + (targetZ - startZ) * progress;
-            camera.position.y = startY + Math.sin(progress * 90) * 0.028;
-            camera.rotation.z = Math.sin(progress * 62) * 0.012;
+    if (anchor) {
+      const start = camera.position.clone();
+      const direction = new THREE.Vector3(anchor.position.x - start.x, 0, anchor.position.z - start.z);
+      const distance = direction.length();
+      const hasDirection = distance > 1e-6;
+      // 已进入停止半径时只转向；与锚点重合时保留朝向，避免零向量 lookAt 突跳。
+      const travelDistance = hasDirection ? Math.max(0, distance - Math.max(0, anchor.stopDistance)) : 0;
+      const target = start.clone().addScaledVector(direction.normalize(), travelDistance);
+      const doorTarget = new THREE.Vector3(anchor.position.x, start.y, anchor.position.z);
+      const startRotation = camera.quaternion.clone();
+      const doorRotation = hasDirection
+        ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(start, doorTarget, camera.up))
+        : startRotation.clone();
+      const turnSeconds = Math.min(0.35, seconds);
+      const turn = { progress: 0 };
+      const run = { progress: 0 };
+      this.runBaseY = start.y;
+
+      timeline
+        .to(
+          turn,
+          {
+            progress: 1,
+            duration: turnSeconds,
+            ease: 'power1.inOut',
+            onUpdate: () => {
+              // 四元数 slerp 自动走最短旋转路径；转身阶段绝不改变位置。
+              camera.quaternion.slerpQuaternions(startRotation, doorRotation, turn.progress);
+            },
           },
-        },
-        0,
-      )
-      .to(this.fadeEl, { opacity: 1, duration: 0.4, ease: 'power1.in' }, Math.max(0, seconds - 0.4));
+          0,
+        )
+        .to(
+          run,
+          {
+            progress: 1,
+            duration: Math.max(0, seconds - turnSeconds),
+            ease: 'power1.in',
+            onUpdate: () => {
+              const progress = run.progress;
+              camera.position.lerpVectors(start, target, progress);
+              // 仅保留轻微纵向步态，首尾归零；近门无位移时也无晃动。
+              camera.position.y += Math.sin(progress * 46) * 0.014 * Math.min(1, travelDistance)
+                * 4 * progress * (1 - progress);
+              if (hasDirection) {
+                doorTarget.y = camera.position.y;
+                camera.lookAt(doorTarget);
+              }
+            },
+          },
+          turnSeconds,
+        );
+    } else {
+      // 未配置出口时原地等候，仍按剧情时长结束，不猜测场景或目标坐标。
+      timeline.to({}, { duration: seconds }, 0);
+    }
+
+    const fadeSeconds = Math.min(0.4, seconds);
+    timeline.to(this.fadeEl, { opacity: 1, duration: fadeSeconds, ease: 'power1.in' }, seconds - fadeSeconds);
     this.timeline = timeline;
   }
 
@@ -270,6 +308,10 @@ export class CutscenePlayer {
   private resetSideEffects(key: string): void {
     this.canvas.style.filter = '';
     this.camera.rotation.z = 0;
+    if (key === 's3-run' && this.runBaseY !== null) {
+      this.camera.position.y = this.runBaseY;
+      this.runBaseY = null;
+    }
     if (key === 'school-gate-panorama') {
       this.camera.fov = this.getBaseFov();
       this.camera.updateProjectionMatrix();

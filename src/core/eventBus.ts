@@ -21,6 +21,17 @@ export interface GameEvents {
   'scene:gazeHotspot': { sceneId: SceneId; hotspotId: string; dwellMs?: number };
   'scene:interact': { sceneId: SceneId; targetId: string };
 
+  // 3D → 音频（由入口接线）
+  'audio:motion': {
+    sourceId: string;
+    distance: number;
+    allow: boolean;
+    gain: number;
+    surface: 'wood' | 'stone';
+  };
+  'audio:reset': void;
+  'audio:alarm': void;
+
   // UI → Core
   'ui:chooseOption': { stepId: string; choiceId: string };
   'ui:phoneAction': {

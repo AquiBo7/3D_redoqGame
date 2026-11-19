@@ -746,8 +746,13 @@ export function createRoomDefinition(sceneId: SceneId): WorldSceneDefinition {
 
   return {
     sceneKey: 'room',
+    footstepSurface: 'wood',
     spawn: SPAWN,
     nav: NAV,
+    exitAnchor: {
+      position: { x: ROOM_PROPS.door.center.x, y: 1.6, z: ROOM_PROPS.door.center.z },
+      stopDistance: 0.85,
+    },
     // 房间（首屏）不出现任何角色：保持零 GLB 加载，首屏资源预算红线
     requiredModels: [],
     interactables,

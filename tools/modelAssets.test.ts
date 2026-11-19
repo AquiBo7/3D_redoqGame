@@ -71,6 +71,47 @@ describe('public/models 压缩产物', () => {  it('5 个角色模型文件真�
   });
 });
 
+const NEW_ANIMATED_MODELS = [
+  { file: 'chr_father_carry.glb', clips: ['Piggyback_Pickup_And_Walk', 'Piggyback_Walk_Loop'], node: 'Root', lockAxis: 0, driftAxis: 2, minTris: 9000 },
+  { file: 'chr_student_female.glb', clips: ['idle', 'walk'], node: 'Hip', lockAxis: 1, driftAxis: 0, minTris: 20000 },
+  { file: 'chr_student_male.glb', clips: ['fold_arms', 'walk'], node: 'Hip', lockAxis: 1, driftAxis: 0, minTris: 20000 },
+];
+
+describe('新父亲与路人动画资源', () => {
+  it.each(NEW_ANIMATED_MODELS)('$file 体积、面数、UV 与 41 骨蒙皮完整', async (model) => {
+    const path = resolve(process.cwd(), 'public/models', model.file);
+    expect(statSync(path).size).toBeLessThanOrEqual(2 * 1024 * 1024);
+    const doc = await IO.read(path);
+    expect(countTris(doc)).toBeGreaterThan(model.minTris);
+    expect(countTris(doc)).toBeLessThan(60000);
+    expect(countUvTears(doc).overHard).toBe(0);
+    expect(countUvTears(doc).overSoft).toBeLessThanOrEqual(20);
+    expect(doc.getRoot().listSkins()).toHaveLength(1);
+    expect(doc.getRoot().listSkins()[0].listJoints()).toHaveLength(41);
+    for (const mesh of doc.getRoot().listMeshes()) {
+      for (const primitive of mesh.listPrimitives()) {
+        expect(primitive.getAttribute('JOINTS_0')).toBeTruthy();
+        expect(primitive.getAttribute('WEIGHTS_0')).toBeTruthy();
+      }
+    }
+    expect(doc.getRoot().listAnimations().map((clip) => clip.getName()).sort()).toEqual(model.clips);
+    for (const animation of doc.getRoot().listAnimations()) {
+      if (model.node === 'Hip' && animation.getName() !== 'walk') continue;
+      const channel = animation.listChannels().find((item) => item.getTargetNode()?.getName() === model.node && item.getTargetPath() === 'translation');
+      expect(channel).toBeDefined();
+      const values = channel!.getSampler()!.getOutput()!.getArray()!;
+      const last = values.length - 3;
+      const samples = Array.from({ length: values.length / 3 }, (_, index) => values[index * 3 + model.lockAxis]);
+      expect(Math.max(...samples) - Math.min(...samples)).toBeLessThan(1e-4);
+      expect(Math.abs(values[last + model.driftAxis] - values[model.driftAxis])).toBeLessThan(1e-4);
+      if (model.node === 'Hip') {
+        const heights = Array.from({ length: values.length / 3 }, (_, index) => values[index * 3 + 2]);
+        expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(0.005);
+      }
+    }
+  });
+});
+
 const EXPECTED_ANIMATIONS = ['afraid', 'agree', 'greet_04', 'walk', 'wave_goodbye_02'];
 
 describe('林夏双 primitive 共享顶点缓冲契约（双脚修复版）', () => {

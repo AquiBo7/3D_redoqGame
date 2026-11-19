@@ -305,13 +305,11 @@ let contactShadowTexture: THREE.CanvasTexture | null = null;
  * gate.ts 背在爸爸身上的 carryLinxia（局部 y = 0.45，位于 carryGroup 内）在此被排除，
  * 不会出现黑圆盘悬空浮在爸爸腰后的穿帮。
  */
-export function isGroundedActor(actor: THREE.Object3D): boolean {
-  // 只认 createCharacterActor 的外层组：内部 actor-pose / actor-props 同名前缀但不得重复挂阴影
+export function isGroundedActor(actor: THREE.Object3D, groundY = 0): boolean {
   if (typeof actor.userData.actorModelId !== 'string') return false;
-  if (actor.position.y > 0.06) return false;
   const worldPosition = new THREE.Vector3();
   actor.getWorldPosition(worldPosition);
-  return worldPosition.y <= 0.08;
+  return Math.abs(worldPosition.y - groundY) <= 0.08;
 }
 
 /** 新建一个接触阴影圆片实例；几何 / 材质 / 贴图全部共享，disposeObjectTree 不会误删 */

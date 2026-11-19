@@ -68,6 +68,21 @@ describe('接触阴影贴地判定', () => {
   });
 });
 
+describe('平台接触阴影', () => {
+  it('站在高台上的角色相对地形贴地，背负角色仍不挂阴影', () => {
+    const scene = new THREE.Scene();
+    const father = createActor('actor-father');
+    father.position.y = 0.42;
+    const linxia = createActor('actor-linxia');
+    linxia.position.y = 0.45;
+    father.add(linxia);
+    scene.add(father);
+    scene.updateMatrixWorld(true);
+    expect(isGroundedActor(father, 0.42)).toBe(true);
+    expect(isGroundedActor(linxia, 0.42)).toBe(false);
+  });
+});
+
 describe('材质缓存释放', () => {
   it('空缓存（未生成任何贴图）时 disposeMaterialCache 不触碰 DOM 且不报错', () => {
     expect(() => disposeMaterialCache()).not.toThrow();

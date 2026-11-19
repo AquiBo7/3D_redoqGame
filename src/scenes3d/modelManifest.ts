@@ -12,7 +12,7 @@
 // 场景摆放约定：先 rotation.y = frontYawRad 归正（正面朝 +Z），再叠加所需朝向角：
 // yaw=0 → 面向 +Z，yaw=π → 面向 -Z，yaw=π/2 → 面向 +X。
 
-export type CharacterModelId = 'linxia' | 'father' | 'ayuan' | 'volunteer' | 'protagonist';
+export type CharacterModelId = 'linxia' | 'father' | 'ayuan' | 'volunteer' | 'protagonist' | 'fatherCarry' | 'studentFemale' | 'studentMale';
 
 export interface CharacterModelEntry {
   id: CharacterModelId;
@@ -32,6 +32,9 @@ export const CHARACTER_MODELS: readonly CharacterModelEntry[] = [
   { id: 'ayuan', name: '阿远', path: './models/chr_ayuan.glb', heightM: 1.68, frontYawRad: -Math.PI / 2 },
   { id: 'volunteer', name: '志愿者', path: './models/chr_volunteer.glb', heightM: 1.66, frontYawRad: -Math.PI / 2 },
   { id: 'protagonist', name: '主角', path: './models/chr_protagonist.glb', heightM: 1.74, frontYawRad: -Math.PI / 2 },
+  { id: 'fatherCarry', name: '爸爸（背人）', path: './models/chr_father_carry.glb', heightM: 1.78, frontYawRad: -Math.PI / 2 },
+  { id: 'studentFemale', name: '女同学', path: './models/chr_student_female.glb', heightM: 1.65, frontYawRad: -Math.PI / 2 },
+  { id: 'studentMale', name: '男同学', path: './models/chr_student_male.glb', heightM: 1.7, frontYawRad: -Math.PI / 2 },
 ];
 
 export function getCharacterModel(id: CharacterModelId): CharacterModelEntry {

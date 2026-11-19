@@ -7,10 +7,10 @@
 // 严禁使用无属性保护的 simplifySloppy：会把 UV 跨岛三角形塌缩成裂纹（贴图黑锯齿）。
 // 减面后做 UV 撕裂硬校验：任一三角形任一条边 UV 距离 > 0.25 的数量必须为 0。
 //
-// 骨骼动画模型（linxia）专用路径：
-//   1. 仅保留剧情相关动画，其余动画连同 channels / samplers 一并 dispose，再 prune() 清残留 accessor；
-//   2. walk 去除 Root Motion 转原地循环：锁定 Hip 局部 Y 为首帧值（消除 ~1.5m 前进位移），
-//      减去 X 轴线性漂移，保留 Z 轴步态微起伏；
+// 骨骼动画模型路径：
+//   1. 按模型配置保留动画，其余动画连同 channels / samplers 一并 dispose，再 prune() 清残留 accessor；
+//   2. 按 clip / 节点 / 轴配置去除水平 Root Motion，依据父节点坐标系保留真实高度起伏；
+//      Hip：锁 Y、X 去漂移、保留 Z；背人父亲 Root：锁 X、Z 去漂移、保留 Y；
 //   3. 减面只替换索引缓冲，JOINTS_0 / WEIGHTS_0 与 Skin 原样保留，compactPrimitive 完整重映射。
 //
 // 多 primitive 共享顶点缓冲（linxia 双脚修复版）：
@@ -19,18 +19,30 @@
 //   - compactPrimitive 会为当前 primitive 生成独立属性副本并解除共享，另一个 primitive 的原缓冲不受影响；
 //   - 压缩后复查：任意两个 primitive 不得再共享 accessor，避免 53 万冗余顶点或索引越界。
 //
-// art/raw/ 原文件只读，绝不修改。运行：node tools/compressModels.mjs
+// art/raw/ 原文件只读，绝不修改。只处理指定模型：
+// node tools/compressModels.mjs --models fatherCarry,studentFemale,studentMale
+// 不带参数保持全量处理行为；UV / 体积 / 动画校验在写入任何产物前完成。
 
 import { statSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { compactPrimitive, meshopt, prune, textureCompress } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptDecoder, MeshoptSimplifier } from 'meshoptimizer';
 import { countTris, countUvTears } from './uvCheck.mjs';
 
+// 默认 12 位指数滤波会改变步态高度超过 0.1mm，平移轨道保留 20 位精度。
+const assetEncoder = {
+  ...MeshoptEncoder,
+  encodeFilterExp(source, count, stride, bits) {
+    return MeshoptEncoder.encodeFilterExp(source, count, stride, Math.max(bits, 20));
+  },
+};
 const IO = new NodeIO()
   .registerExtensions(ALL_EXTENSIONS)
-  .registerDependencies({ 'meshopt.encoder': MeshoptEncoder, 'meshopt.decoder': MeshoptDecoder });
+  .registerDependencies({ 'meshopt.encoder': assetEncoder, 'meshopt.decoder': MeshoptDecoder });
 
 /** 减面目标（面数）：优先 33K；UV 异常模型允许 35K–45K */
 const TARGET_TRIS = 33000;
@@ -42,22 +54,58 @@ const ATTR_WEIGHTS = [0.05, 0.05, 0.05, 25, 25];
 /** 可动林夏保留的剧情动画（其余舞蹈 / 欢呼 / 摔倒等全部剔除） */
 const LINXIA_KEEP_ANIMATIONS = ['walk', 'afraid', 'agree', 'greet_04', 'wave_goodbye_02'];
 
-/** walk 原地化的根骨骼节点名（Tripo 绑骨版为 Hip；同时兼容 Pelvis 命名） */
-const ROOT_MOTION_NODE_NAMES = ['Hip', 'Pelvis'];
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const MAX_BYTES = 2 * 1024 * 1024;
 
-const MODELS = [
+// 平移轨道使用父节点坐标系，而不是目标骨骼自身旋转后的轴。
+// Hip 的父节点 Root 把本地 (X,Y,Z) 映射为世界 (-Z,-X,+Y)。
+const HIP_WALK_MOTION = { clip: 'walk', node: 'Hip', lockAxis: 1, driftAxes: [0], preserveAxis: 2 };
+const CARRY_CLIPS = ['Piggyback_Pickup_And_Walk', 'Piggyback_Walk_Loop'];
+
+export const MODELS = [
   {
+    id: 'linxia',
     raw: 'art/raw/女主-可动-双脚修复.glb',
     out: 'public/models/chr_linxia.glb',
     name: '林夏',
     animated: true,
     keepAnimations: LINXIA_KEEP_ANIMATIONS,
+    rootMotion: [HIP_WALK_MOTION],
   },
-  { raw: 'art/raw/爸爸3d模型.glb', out: 'public/models/chr_father.glb', name: '爸爸' },
-  { raw: 'art/raw/男同学1.glb', out: 'public/models/chr_ayuan.glb', name: '阿远' },
-  { raw: 'art/raw/女同学1.glb', out: 'public/models/chr_volunteer.glb', name: '志愿者' },
-  { raw: 'art/raw/男主3d建模.glb', out: 'public/models/chr_protagonist.glb', name: '主角' },
+  { id: 'father', raw: 'art/raw/爸爸3d模型.glb', out: 'public/models/chr_father.glb', name: '爸爸' },
+  { id: 'ayuan', raw: 'art/raw/男同学1.glb', out: 'public/models/chr_ayuan.glb', name: '阿远' },
+  { id: 'volunteer', raw: 'art/raw/女同学1.glb', out: 'public/models/chr_volunteer.glb', name: '志愿者' },
+  { id: 'protagonist', raw: 'art/raw/男主3d建模.glb', out: 'public/models/chr_protagonist.glb', name: '主角' },
+  {
+    id: 'fatherCarry', raw: 'art/raw/爸爸3D-背人行走.glb', out: 'public/models/chr_father_carry.glb',
+    name: '爸爸（背人）', animated: true, keepAnimations: CARRY_CLIPS,
+    // Root 的父节点 Armature 为单位变换：X/Z 水平，Y 竖直。不能对 Y 去漂移。
+    rootMotion: CARRY_CLIPS.map((clip) => ({ clip, node: 'Root', lockAxis: 0, driftAxes: [2], preserveAxis: 1 })),
+  },
+  {
+    id: 'studentFemale', raw: 'art/raw/女同学2可动.glb', out: 'public/models/chr_student_female.glb',
+    name: '女同学', animated: true, keepAnimations: ['walk', 'idle'], rootMotion: [HIP_WALK_MOTION], textureSize: 768,
+  },
+  {
+    id: 'studentMale', raw: 'art/raw/胖男同学可动.glb', out: 'public/models/chr_student_male.glb',
+    name: '男同学', animated: true, keepAnimations: ['walk', 'fold_arms'], rootMotion: [HIP_WALK_MOTION], textureSize: 768,
+  },
 ];
+
+/** 显式选模，未知 / 重复 / 空参数必须在读取及写出资源前失败。 */
+export function selectModels(args) {
+  if (args.length === 0) return MODELS;
+  if (args.length !== 2 || args[0] !== '--models') {
+    throw new Error('用法：node tools/compressModels.mjs --models fatherCarry,studentFemale,studentMale');
+  }
+  const ids = args[1].split(',');
+  if (new Set(ids).size !== ids.length) throw new Error('模型 id 不可重复');
+  return ids.map((id) => {
+    const model = MODELS.find((item) => item.id === id);
+    if (!model) throw new Error(`未知模型 id：${id || '(空)'}`);
+    return model;
+  });
+}
 
 /** 读取 accessor 为 Float32Array（FLOAT 直接取，其余类型逐个 getElement 解码归一化） */
 function readFloatAttribute(accessor, components) {
@@ -104,43 +152,59 @@ function pruneAnimations(doc, keepNames) {
   return removed;
 }
 
-/**
- * walk 原地循环：Hip 局部 Y 锁定首帧值（消除 2.33s 内约 1.5m 前进），
- * X 减去首尾线性漂移、保留步态摆动，Z（垂直微起伏）不动。
- */
-function stripWalkRootMotion(doc) {
-  const walk = doc.getRoot().listAnimations().find((animation) => animation.getName() === 'walk');
-  if (!walk) throw new Error('缺少 walk 动画，无法执行原地化');
+function motionTrack(doc, config) {
+  const animation = doc.getRoot().listAnimations().find((item) => item.getName() === config.clip);
+  if (!animation) throw new Error(`缺少 ${config.clip} 动画，无法执行原地化`);
+  const channels = animation.listChannels().filter((item) =>
+    item.getTargetPath() === 'translation' && item.getTargetNode()?.getName() === config.node);
+  if (channels.length !== 1) throw new Error(`${config.clip} 必须有唯一 ${config.node} translation 轨道`);
+  return { animation, channel: channels[0] };
+}
 
-  const channel = walk.listChannels().find((item) => {
-    if (item.getTargetPath() !== 'translation') return false;
-    const node = item.getTargetNode();
-    return node !== null && ROOT_MOTION_NODE_NAMES.includes(node.getName());
-  });
-  if (!channel) throw new Error(`walk 缺少 ${ROOT_MOTION_NODE_NAMES.join('/')} 的 translation 轨道`);
-
-  const sampler = channel.getSampler();
-  const input = sampler.getInput();
-  const output = sampler.getOutput();
-  const frames = input.getCount();
-  if (frames < 2) throw new Error('walk 根骨骼轨道帧数不足');
-
-  const values = Float32Array.from(output.getArray());
-  const x0 = values[0];
-  const y0 = values[1];
-  const xLast = values[(frames - 1) * 3];
-  const driftX = xLast - x0;
-
-  for (let i = 0; i < frames; i += 1) {
-    const t = i / (frames - 1);
-    const base = i * 3;
-    values[base] -= driftX * t;
-    values[base + 1] = y0;
+/** 轴配置必须覆盖 XYZ，且只修改水平轴；防止把目标节点自身旋转误用于 translation。 */
+function verifyMotionAxes(channel, config) {
+  const axes = [config.lockAxis, ...config.driftAxes, config.preserveAxis];
+  if (axes.length !== 3 || [...axes].sort().join(',') !== '0,1,2') throw new Error('根运动轴配置必须覆盖 XYZ 且不重复');
+  const parent = channel.getTargetNode().getParentNode();
+  const matrix = parent?.getWorldMatrix() ?? [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  for (const axis of axes) {
+    const length = Math.hypot(matrix[axis * 4], matrix[axis * 4 + 1], matrix[axis * 4 + 2]);
+    const vertical = Math.abs(matrix[axis * 4 + 1]) / length;
+    if (!Number.isFinite(vertical) || (axis === config.preserveAxis ? vertical < 0.9999 : vertical > 1e-4)) {
+      throw new Error(`${config.clip}/${config.node} 轴 ${axis} 与父节点水平/竖直坐标不符`);
+    }
   }
-  output.setArray(values);
+}
 
-  const node = channel.getTargetNode();
-  return { node: node ? node.getName() : '?', frames, driftX, restY: y0 };
+/** 使用真实时间比例去除首尾水平漂移，保留其他姿态轨道及高度的每个采样值。 */
+export function stripRootMotion(doc, configs) {
+  return configs.map((config) => {
+    const { animation, channel } = motionTrack(doc, config);
+    verifyMotionAxes(channel, config);
+    const sampler = channel.getSampler();
+    if (sampler.getInterpolation() !== 'LINEAR') throw new Error(`${config.clip} 根运动仅支持 LINEAR 采样`);
+    const input = sampler.getInput();
+    const output = sampler.getOutput();
+    const times = readFloatAttribute(input, 1);
+    const frames = input.getCount();
+    if (frames < 2 || output.getType() !== 'VEC3' || output.getCount() !== frames || times[frames - 1] <= times[0]) {
+      throw new Error(`${config.clip} 根骨骼轨道帧数或时长无效`);
+    }
+    const values = Float32Array.from(readFloatAttribute(output, 3));
+    const first = Array.from(values.slice(0, 3));
+    const drift = first.map((value, axis) => values[(frames - 1) * 3 + axis] - value);
+    for (let i = 0; i < frames; i += 1) {
+      const t = (times[i] - times[0]) / (times[frames - 1] - times[0]);
+      values[i * 3 + config.lockAxis] = first[config.lockAxis];
+      for (const axis of config.driftAxes) values[i * 3 + axis] -= drift[axis] * t;
+    }
+    // 采样器 / accessor 可能由其他轨道复用，只替换本轨道。
+    const replacement = sampler.clone().setOutput(output.clone().setArray(values));
+    animation.addSampler(replacement);
+    channel.setSampler(replacement);
+    if (!animation.listChannels().some((item) => item.getSampler() === sampler)) animation.removeSampler(sampler);
+    return { ...config, frames, drift };
+  });
 }
 
 /**
@@ -264,120 +328,128 @@ function inspectSkin(doc) {
   };
 }
 
-/** 读回输出做动画契约校验：动画名单、walk Hip 原地化、Z 步态起伏 */
-async function verifyAnimatedOutput(path, keepNames) {
-  const doc = await IO.read(path);
-  const root = doc.getRoot();
-  const names = root.listAnimations().map((animation) => animation.getName()).sort();
-  const expected = [...keepNames].sort();
+/** 序列化后读回动画：逐模型配置校验，而不是假定所有模型都是 walk/Hip。 */
+function verifyAnimatedOutput(doc, model, snapshots) {
+  const names = doc.getRoot().listAnimations().map((animation) => animation.getName()).sort();
+  const expected = [...model.keepAnimations].sort();
   if (names.join(',') !== expected.join(',')) {
     throw new Error(`动画名单不符：期望 [${expected.join(', ')}]，实际 [${names.join(', ')}]`);
   }
-
-  const walk = root.listAnimations().find((animation) => animation.getName() === 'walk');
-  const channel = walk.listChannels().find((item) => {
-    if (item.getTargetPath() !== 'translation') return false;
-    const node = item.getTargetNode();
-    return node !== null && ROOT_MOTION_NODE_NAMES.includes(node.getName());
+  const motion = model.rootMotion.map((config, index) => {
+    const { channel } = motionTrack(doc, config);
+    verifyMotionAxes(channel, config);
+    const values = readFloatAttribute(channel.getSampler().getOutput(), 3);
+    const before = snapshots[index];
+    if (values.length !== before.length) throw new Error(`${config.clip} 根运动采样数量改变`);
+    const frames = values.length / 3;
+    const ranges = [0, 1, 2].map((axis) => {
+      const samples = Array.from({ length: frames }, (_, i) => values[i * 3 + axis]);
+      return Math.max(...samples) - Math.min(...samples);
+    });
+    if (ranges[config.lockAxis] > 1e-4) throw new Error(`${config.clip}/${config.node} 前进轴未锁定`);
+    for (const axis of config.driftAxes) {
+      if (Math.abs(values[(frames - 1) * 3 + axis] - values[axis]) > 1e-4) {
+        throw new Error(`${config.clip}/${config.node} 轴 ${axis} 仍有水平漂移`);
+      }
+    }
+    for (let i = 0; i < frames; i += 1) {
+      const offset = i * 3 + config.preserveAxis;
+      if (Math.abs(values[offset] - before[offset]) > 1e-4) throw new Error(`${config.clip} 竖向起伏改变：帧 ${i} ${before[offset]} → ${values[offset]}`);
+    }
+    return { clip: config.clip, node: config.node, frames, ranges };
   });
-  if (!channel) throw new Error('输出缺少 walk 根骨骼 translation 轨道');
-
-  const input = channel.getSampler().getInput();
-  const values = channel.getSampler().getOutput().getArray();
-  const frames = input.getCount();
-  let minY = Infinity;
-  let maxY = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (let i = 0; i < frames; i += 1) {
-    minY = Math.min(minY, values[i * 3 + 1]);
-    maxY = Math.max(maxY, values[i * 3 + 1]);
-    minZ = Math.min(minZ, values[i * 3 + 2]);
-    maxZ = Math.max(maxZ, values[i * 3 + 2]);
-  }
-  const firstX = values[0];
-  const lastX = values[(frames - 1) * 3];
-
-  if (maxY - minY > 1e-4) throw new Error(`walk 根骨骼 Y 未锁定（波动 ${(maxY - minY).toFixed(4)}）`);
-  if (Math.abs(lastX - firstX) > 1e-4) {
-    throw new Error(`walk 根骨骼 X 仍存在线性漂移（${(lastX - firstX).toFixed(4)}）`);
-  }
-  if (maxZ - minZ < 0.005) throw new Error('walk 根骨骼 Z 步态起伏丢失');
-
-  return {
-    animations: names,
-    frames,
-    yRange: maxY - minY,
-    xDrift: lastX - firstX,
-    zRange: maxZ - minZ,
-    skin: inspectSkin(doc),
-  };
+  const skin = inspectSkin(doc);
+  if (skin.skins !== 1 || skin.joints !== 41) throw new Error('输出必须保留单套 41 骨蒙皮');
+  return { animations: names, motion, skin };
 }
 
-await MeshoptSimplifier.ready;
-await MeshoptEncoder.ready;
+/** 硬 UV 校验针对最终 meshopt GLB 的解码结果，失败时绝不写出文件。 */
+export function assertOutputUv(doc, label) {
+  const uv = countUvTears(doc);
+  if (uv.overHard !== 0) throw new Error(`${label} UV 硬阈值失败：${uv.overHard} 面 > 0.25，拒绝写出`);
+  return uv;
+}
 
-console.log('模型\t原始面数\t原始MB\t压缩面数\t压缩MB\tUV>0.25\tUV>0.10\t误差');
-let allClean = true;
-for (const model of MODELS) {
-  const rawDoc = await IO.read(model.raw);
+async function compressModel(model) {
+  const rawPath = resolve(PROJECT_ROOT, model.raw);
+  const outPath = resolve(PROJECT_ROOT, model.out);
+  const rawDoc = await IO.read(rawPath);
   const rawTris = countTris(rawDoc);
-  const rawMb = fileSizeMb(model.raw);
   const rawUv = countUvTears(rawDoc);
+  console.log(`[原始] ${model.id}：${rawTris} 面 / ${fileSizeMb(rawPath).toFixed(3)} MiB / UV 硬 ${rawUv.overHard}、软 ${rawUv.overSoft}`);
 
-  let animationNote = '';
+  const snapshots = [];
   if (model.animated) {
     const removed = pruneAnimations(rawDoc, model.keepAnimations);
-    const strip = stripWalkRootMotion(rawDoc);
-    animationNote =
-      `\n  [骨骼动画] 保留 [${model.keepAnimations.join(', ')}]；删除 [${removed.join(', ')}]` +
-      `；walk 根骨骼 ${strip.node} 原地化（X 漂移 ${strip.driftX.toFixed(4)}，${strip.frames} 帧）`;
+    const stripped = stripRootMotion(rawDoc, model.rootMotion);
+    for (const config of model.rootMotion) {
+      snapshots.push(Float32Array.from(motionTrack(rawDoc, config).channel.getSampler().getOutput().getArray()));
+    }
+    console.log(`  [动画] 保留 [${model.keepAnimations.join(', ')}]；删除 ${removed.length} 个剪辑`);
+    for (const report of stripped) console.log(`  [原地化] ${JSON.stringify(report)}`);
   }
 
   const errors = simplifyModel(rawDoc, TARGET_TRIS);
-  const worstError = errors.length > 0 ? Math.max(...errors) : 0;
-
-  // 骨骼动画模型：贴图重编码为质量 84 的 JPEG，把总包体积压回 1.1–1.5MB 目标区间
+  if (model.id === 'linxia') {
+    for (const mesh of rawDoc.getRoot().listMeshes()) {
+      for (const primitive of mesh.listPrimitives()) {
+        if (primitive.getMaterial()?.getName() !== 'Shoe inner leather') continue;
+        // 平面鞋内衬使用连续投影，避免补丁原有随机 UV 跨越整张皮革贴图。
+        const position = primitive.getAttribute('POSITION');
+        const bounds = [0, 1, 2].map((axis) => {
+          const values = readFloatAttribute(position, 3);
+          const samples = Array.from({ length: position.getCount() }, (_, i) => values[i * 3 + axis]);
+          return { axis, min: Math.min(...samples), span: Math.max(...samples) - Math.min(...samples) };
+        }).sort((a, b) => b.span - a.span);
+        const positions = readFloatAttribute(position, 3);
+        const uv = new Float32Array(position.getCount() * 2);
+        for (let i = 0; i < position.getCount(); i += 1) {
+          for (let axis = 0; axis < 2; axis += 1) {
+            uv[i * 2 + axis] = 0.4 + (positions[i * 3 + bounds[axis].axis] - bounds[axis].min) * 0.5;
+          }
+        }
+        primitive.setAttribute('TEXCOORD_0', rawDoc.createAccessor().setType('VEC2').setArray(uv));
+      }
+    }
+  }
+  // 沿用可动模型的贴图管线，不改变材质或蒙皮语义。
   if (model.animated) {
     const { default: sharp } = await import('sharp');
-    await rawDoc.transform(textureCompress({ encoder: sharp, quality: 84 }));
+    await rawDoc.transform(textureCompress({ encoder: sharp, quality: 84,
+      ...(model.textureSize ? { resize: [model.textureSize, model.textureSize] } : {}),
+    }));
   }
-
   await rawDoc.transform(prune());
   await rawDoc.transform(meshopt({ encoder: MeshoptEncoder, level: 'high' }));
-  await IO.write(model.out, rawDoc);
 
-  const outDoc = await IO.read(model.out);
-  const outTris = countTris(outDoc);
-  const outMb = fileSizeMb(model.out);
-  const outUv = countUvTears(outDoc);
-  const clean = outUv.overHard === 0;
-  if (!clean) allClean = false;
+  // 在内存中生成并解码实际 GLB，所有硬门禁通过后才写入 public/models。
+  const binary = await IO.writeBinary(rawDoc);
+  const outDoc = await IO.readBinary(binary);
+  const outUv = assertOutputUv(outDoc, model.id);
+  if (binary.byteLength > MAX_BYTES) throw new Error(`${model.id} ${(binary.byteLength / 1024 ** 2).toFixed(3)} MiB 超过 2 MiB，拒绝写出`);
+  const report = model.animated ? verifyAnimatedOutput(outDoc, model, snapshots) : null;
+  await writeFile(outPath, binary);
+  console.log(`[产物] ${outPath}：${countTris(outDoc)} 面 / ${binary.byteLength} 字节 / ${(binary.byteLength / 1024 ** 2).toFixed(3)} MiB / UV 硬 ${outUv.overHard}、软 ${outUv.overSoft} / 误差 ${Math.max(0, ...errors).toFixed(4)}`);
+  if (report) console.log(`  [校验] ${JSON.stringify(report)}`);
+}
 
-  console.log(
-    `${model.name}\t${rawTris.toLocaleString('zh-CN')}\t${rawMb.toFixed(1)}\t${outTris.toLocaleString('zh-CN')}\t${outMb.toFixed(2)}\t${outUv.overHard}\t${outUv.overSoft}\t${worstError.toFixed(4)}` +
-      (rawUv.overHard > 0 ? `\t[原始模型已有硬撕裂 ${rawUv.overHard}]` : '') +
-      animationNote,
-  );
-
-  if (model.animated) {
-    const report = await verifyAnimatedOutput(model.out, model.keepAnimations);
-    console.log(
-      `  [校验] 动画 [${report.animations.join(', ')}]；walk ${report.frames} 帧，` +
-        `Hip Y 波动 ${report.yRange.toFixed(6)}，X 漂移 ${report.xDrift.toFixed(6)}，` +
-        `Z 起伏 ${report.zRange.toFixed(4)}；Skin ${report.skin.skins} 个 / ` +
-        `${report.skin.joints} 骨骼，蒙皮 primitive ${report.skin.skinnedPrimitives} 个，` +
-        `共享 accessor ${report.skin.sharedAccessors} 个`,
-    );
-    for (const prim of report.skin.primitives) {
-      console.log(`  [primitive] ${prim.material}：${prim.tris.toLocaleString('zh-CN')} 面 / ${prim.verts.toLocaleString('zh-CN')} 顶点`);
+async function main() {
+  const models = selectModels(process.argv.slice(2));
+  await Promise.all([MeshoptSimplifier.ready, MeshoptEncoder.ready, MeshoptDecoder.ready]);
+  for (const model of models) {
+    try {
+      await compressModel(model);
+    } catch (error) {
+      // 单模型阻断不能阻止其他独立资源得到处理，也不得留下不合格的新产物。
+      console.error(`[阻断] ${model.id}：${error instanceof Error ? error.message : error}`);
+      process.exitCode = 1;
     }
   }
 }
 
-if (!allClean) {
-  console.error('存在 UV 硬撕裂（> 0.25）！请上调该模型目标面数或 UV 权重后重新压缩。');
-  process.exitCode = 1;
-} else {
-  console.log('全部模型 UV 硬撕裂校验通过（> 0.25 数量为 0）。');
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }

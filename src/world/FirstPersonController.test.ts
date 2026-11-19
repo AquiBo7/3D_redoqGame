@@ -140,7 +140,7 @@ describe('FirstPersonController 疾跑开关', () => {
     expect(camera.position.z).toBeLessThan(-0.7);
   });
 
-  it('S1 只允许环视时不响应 Shift', () => {
+  it('显式环视模式不响应 Shift', () => {
     controller = createController();
     controller.setLookOnly(true);
 
@@ -161,6 +161,40 @@ describe('FirstPersonController 疾跑开关', () => {
 
     reset(controller);
     expect(controller.isSprintToggled()).toBe(false);
+  });
+
+  it('未设置环视限制时可以直接走动，手机锁定后停止', () => {
+    controller = createController();
+    pressKey('KeyW');
+    controller.update(0.05);
+    expect(camera.position.z).toBeLessThan(0);
+    controller.lockControls();
+    const position = camera.position.clone();
+    pressKey('KeyW');
+    controller.update(0.05);
+    expect(camera.position.x).toBe(position.x);
+    expect(camera.position.z).toBe(position.z);
+    expect(controller.getMoveSpeed()).toBe(0);
+    controller.unlockControls();
+    pressKey('KeyW');
+    controller.update(0.05);
+    expect(camera.position.z).toBeLessThan(position.z);
+  });
+
+  it('脚底与相机高度沿平台同步，上台后不回落平地', () => {
+    controller = createController();
+    controller.setNavigation({
+      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 }, obstacles: [],
+      surfaces: [{ minX: -2, maxX: 2, minZ: -10, maxZ: -0.1, height: 0.42 }],
+    });
+    const eyeHeight = camera.position.y;
+    pressKey('KeyW');
+    for (let i = 0; i < 20; i += 1) controller.update(0.05);
+    expect(controller.getFeetPosition().y).toBeCloseTo(0.42);
+    expect(camera.position.y).toBeGreaterThan(eyeHeight + 0.39);
+    releaseKey('KeyW');
+    controller.update(0.05);
+    expect(controller.getFeetPosition().y).toBeCloseTo(0.42);
   });
 
   it('dispose 复位疾跑并移除输入监听', () => {

@@ -5,8 +5,8 @@
 import * as THREE from 'three';
 import { FIRST_PERSON_CONFIG } from './worldConfig';
 import type { FirstPersonConfig } from './worldConfig';
-import { clampToNearestWalkable, distance2D, resolveMovement } from './navMath';
-import type { ObstacleAabb, Vec2, WalkBounds } from './navMath';
+import { clampToNearestWalkable, distance2D, intersectGroundRay, resolveMovement, sampleGroundHeight } from './navMath';
+import type { GroundSurface, ObstacleAabb, Vec2, WalkBounds } from './navMath';
 import type { SceneSpawn } from './worldSceneTypes';
 
 const MOVE_KEYS = new Set([
@@ -36,6 +36,7 @@ export interface FirstPersonNavigation {
   bounds: WalkBounds;
   obstacles: ObstacleAabb[];
   groundY?: number;
+  surfaces?: GroundSurface[];
 }
 
 export interface FirstPersonCallbacks {
@@ -103,7 +104,6 @@ export class FirstPersonController {
   private bobFreq: number;
   private bobPhase = 0;
 
-  private groundPlane: THREE.Plane;
   private readonly tapRaycaster = new THREE.Raycaster();
 
   constructor(options: FirstPersonControllerOptions) {
@@ -123,7 +123,6 @@ export class FirstPersonController {
 
     this.bobAmp = this.config.bob.idleAmp;
     this.bobFreq = this.config.bob.idleFreq;
-    this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -this.groundY);
 
     this.camera.rotation.order = 'YXZ';
 
@@ -271,7 +270,12 @@ export class FirstPersonController {
     this.applyCamera(bobY, roll);
   }
 
+  getFeetPosition(): { x: number; y: number; z: number } {
+    return { ...this.feet, y: sampleGroundHeight(this.feet, this.navigation.surfaces, this.navigation.groundY) };
+  }
+
   private applyCamera(bobY: number, roll: number): void {
+    this.groundY = sampleGroundHeight(this.feet, this.navigation.surfaces, this.navigation.groundY);
     this.camera.position.set(
       this.feet.x,
       this.groundY + this.config.eyeHeight + bobY,
@@ -407,8 +411,11 @@ export class FirstPersonController {
     );
     this.tapRaycaster.setFromCamera(ndc, this.camera);
 
-    const hitPoint = new THREE.Vector3();
-    if (!this.tapRaycaster.ray.intersectPlane(this.groundPlane, hitPoint)) return;
+    const hitPoint = intersectGroundRay(
+      this.tapRaycaster.ray.origin, this.tapRaycaster.ray.direction,
+      this.navigation.surfaces, this.navigation.groundY,
+    );
+    if (!hitPoint) return;
 
     const target = clampToNearestWalkable({ x: hitPoint.x, z: hitPoint.z }, this.navigation.bounds);
     if (distance2D(this.feet, target) <= this.config.autoWalkStopDistance) return;
@@ -416,7 +423,7 @@ export class FirstPersonController {
     this.autoTarget = target;
     this.blockedTime = 0;
 
-    this.marker.position.set(target.x, this.groundY + 0.02, target.z);
+    this.marker.position.set(target.x, sampleGroundHeight(target, this.navigation.surfaces, this.navigation.groundY) + 0.02, target.z);
     this.marker.scale.setScalar(1);
     this.markerMaterial.opacity = 0.55;
     this.markerOpacity = 0.55;
@@ -569,7 +576,6 @@ export class FirstPersonController {
   setNavigation(navigation: FirstPersonNavigation): void {
     this.navigation = navigation;
     this.groundY = navigation.groundY ?? 0;
-    this.groundPlane.set(new THREE.Vector3(0, 1, 0), -this.groundY);
     this.feet = clampToNearestWalkable(this.feet, navigation.bounds);
     this.applyCamera(0, 0);
   }

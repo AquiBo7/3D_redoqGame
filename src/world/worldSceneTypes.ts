@@ -6,7 +6,7 @@ import type * as THREE from 'three';
 import type { EventBus } from '../core/eventBus';
 import type { SceneId, SceneKey } from '../data/storySchema';
 import type { CharacterModelId } from '../scenes3d/modelManifest';
-import type { ObstacleAabb, WalkBounds } from './navMath';
+import type { GroundSurface, ObstacleAabb, WalkBounds } from './navMath';
 
 export interface Point3 {
   x: number;
@@ -29,6 +29,7 @@ export interface NavigationConfig {
   obstacles: ObstacleAabb[];
   /** 地面高度，默认 0 */
   groundY?: number;
+  surfaces?: GroundSurface[];
 }
 
 export interface InteractableConfig {
@@ -70,6 +71,11 @@ export type ZoneConfig =
       radius: number;
       once?: boolean;
     };
+
+export interface ExitAnchor {
+  position: Point3;
+  stopDistance: number;
+}
 
 export interface TargetGuideConfig {
   id: string;
@@ -130,6 +136,9 @@ export interface WorldSceneDefinition {
   hotspots?: HotspotConfig[];
   zones?: ZoneConfig[];
   targetGuides?: TargetGuideConfig[];
+  exitAnchor?: ExitAnchor;
+  footstepSurface?: 'wood' | 'stone';
+  footstepActors?: readonly string[];
   /** 场景专属雾效；缺省时清除上一场景残留的雾 */
   fog?: SceneFog;
   /** S6 开场 CG 的全景锚点（gate 场景提供） */

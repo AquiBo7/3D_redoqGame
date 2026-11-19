@@ -7,6 +7,8 @@ import {
   isPointInZone,
   normalizeBounds,
   resolveMovement,
+  sampleGroundHeight,
+  intersectGroundRay,
 } from './navMath';
 import type { ObstacleAabb, RectBounds } from './navMath';
 
@@ -14,6 +16,35 @@ const L_SHAPE: RectBounds[] = [
   { minX: 0, maxX: 10, minZ: 0, maxZ: 10 },
   { minX: 10, maxX: 20, minZ: 0, maxZ: 5 },
 ];
+
+describe('navMath 地形高度与触屏落点', () => {
+  const surfaces = [
+    { minX: -2, maxX: 2, minZ: -3, maxZ: 0, height: 0.42 },
+    { minX: 2, maxX: 4, minZ: 0, maxZ: 3, height: 0.42, slopeZ: -0.14 },
+    { minX: -2, maxX: 2, minZ: 0, maxZ: 1, height: 0.35 },
+  ];
+  it('采样平台、台阶、坡道及重叠边界，平台外回到底高', () => {
+    expect(sampleGroundHeight({ x: 0, z: -1 }, surfaces)).toBeCloseTo(0.42);
+    expect(sampleGroundHeight({ x: 0, z: 0.5 }, surfaces)).toBeCloseTo(0.35);
+    expect(sampleGroundHeight({ x: 0, z: 0 }, surfaces)).toBeCloseTo(0.42);
+    expect(sampleGroundHeight({ x: 3, z: 1.5 }, surfaces)).toBeCloseTo(0.21);
+    expect(sampleGroundHeight({ x: 5, z: 4 }, surfaces, 0.02)).toBeCloseTo(0.02);
+  });
+  it('射线取平台顶面，不取其下被遮蔽的平地', () => {
+    const platformHit = intersectGroundRay({ x: 0, y: 2, z: -1 }, { x: 0, y: -1, z: 0 }, surfaces);
+    expect(platformHit?.x).toBe(0);
+    expect(platformHit?.y).toBeCloseTo(0.42, 8);
+    expect(platformHit?.z).toBe(-1);
+    const hit = intersectGroundRay({ x: 3, y: 2, z: 1.5 }, { x: 0, y: -1, z: 0 }, surfaces);
+    expect(hit?.y).toBeCloseTo(0.21);
+  });
+  it('斜向射线落到最近有效表面，朝天或水平射线无平地交点', () => {
+    const hit = intersectGroundRay({ x: 0, y: 2, z: 2 }, { x: 0, y: -1, z: -2 }, surfaces);
+    expect(hit?.y).toBeCloseTo(0.42);
+    expect(intersectGroundRay({ x: 0, y: 2, z: -1 }, { x: 0, y: 1, z: 0 }, surfaces)).toBeNull();
+    expect(intersectGroundRay({ x: 0, y: 2, z: -1 }, { x: 1, y: 0, z: 0 }, surfaces)).toBeNull();
+  });
+});
 
 describe('navMath 可行走区域', () => {
   it('normalizeBounds 兼容单矩形与多矩形', () => {

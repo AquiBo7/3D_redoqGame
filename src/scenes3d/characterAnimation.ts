@@ -11,6 +11,36 @@ export interface CharacterPlayOptions {
   loop?: boolean;
 }
 
+export function posePiggybackPassenger(actor: THREE.Object3D): boolean {
+  const directions: Array<[string, string, THREE.Vector3]> = [
+    ['L_Thigh', 'L_Calf', new THREE.Vector3(-0.38, -0.35, 0.85)],
+    ['R_Thigh', 'R_Calf', new THREE.Vector3(0.38, -0.35, 0.85)],
+    ['L_Calf', 'L_Foot', new THREE.Vector3(0, -0.95, -0.3)],
+    ['R_Calf', 'R_Foot', new THREE.Vector3(0, -0.95, -0.3)],
+    ['L_Upperarm', 'L_Forearm', new THREE.Vector3(-0.1, -0.18, 0.98)],
+    ['R_Upperarm', 'R_Forearm', new THREE.Vector3(0.1, -0.18, 0.98)],
+    ['L_Forearm', 'L_Hand', new THREE.Vector3(0.5, -0.15, 0.7)],
+    ['R_Forearm', 'R_Hand', new THREE.Vector3(-0.5, -0.15, 0.7)],
+  ];
+  const links = directions.map(([name, tipName, direction]) => ({
+    bone: actor.getObjectByName(name), tip: actor.getObjectByName(tipName), direction,
+  }));
+  if (links.some(({ bone, tip }) => !bone || !tip)) return false;
+
+  for (const { bone, tip, direction } of links) {
+    actor.updateWorldMatrix(true, true);
+    const joint = bone!;
+    const current = tip!.getWorldPosition(new THREE.Vector3())
+      .sub(joint.getWorldPosition(new THREE.Vector3())).normalize();
+    const target = direction.transformDirection(actor.matrixWorld);
+    const rotation = new THREE.Quaternion().setFromUnitVectors(current, target)
+      .multiply(joint.getWorldQuaternion(new THREE.Quaternion()));
+    joint.quaternion.copy(joint.parent!.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(rotation));
+  }
+  actor.updateWorldMatrix(true, true);
+  return true;
+}
+
 export interface CharacterAnimationController {
   /** 该角色是否自带动画剪辑 */
   hasAnimation(name: string): boolean;

@@ -3,6 +3,8 @@
 // 保证 cutscene key 均在过场播放器支持列表内。
 
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
+import { posePiggybackPassenger } from './characterAnimation';
 import { chapter1 } from '../data/story';
 import type { SceneId, SceneKey, StoryStep } from '../data/storySchema';
 import { getSceneDefinition, getSceneRuntime } from './index';
@@ -24,6 +26,57 @@ const EXPECTED_SCENE_KEYS: Record<SceneId, SceneKey> = {
   S8: 'building',
   S9: 'building',
 };
+
+describe('背负姿态', () => {
+  it('模型仍在占位时等待骨骼加载', () => {
+    expect(posePiggybackPassenger(new THREE.Group())).toBe(false);
+  });
+
+  it.each([0, Math.PI, -1.2])('朝向 %f 下屈膝抱肩且不改变共享母本', (yaw) => {
+    const template = new THREE.Group();
+    for (const [base, middle, tip, side] of [
+      ['L_Thigh', 'L_Calf', 'L_Foot', -1],
+      ['R_Thigh', 'R_Calf', 'R_Foot', 1],
+      ['L_Upperarm', 'L_Forearm', 'L_Hand', -1],
+      ['R_Upperarm', 'R_Forearm', 'R_Hand', 1],
+    ] as const) {
+      const joint = new THREE.Bone();
+      joint.name = base;
+      joint.position.set(side * 0.2, base.includes('Thigh') ? 0.8 : 1.3, 0);
+      joint.rotation.set(0.3, -0.2, 0.15);
+      const elbow = new THREE.Bone();
+      elbow.name = middle;
+      elbow.position.y = -0.3;
+      const end = new THREE.Bone();
+      end.name = tip;
+      end.position.y = -0.3;
+      elbow.add(end);
+      joint.add(elbow);
+      template.add(joint);
+    }
+    const instance = template.clone(true);
+    instance.rotation.y = yaw;
+    instance.position.set(2, 0.42, -3);
+    instance.scale.setScalar(1.7);
+    const before = template.children.map((bone) => bone.quaternion.clone());
+    expect(posePiggybackPassenger(instance)).toBe(true);
+    for (const [base, tip, target] of [
+      ['L_Thigh', 'L_Calf', new THREE.Vector3(-0.38, -0.35, 0.85)],
+      ['R_Thigh', 'R_Calf', new THREE.Vector3(0.38, -0.35, 0.85)],
+      ['L_Calf', 'L_Foot', new THREE.Vector3(0, -0.95, -0.3)],
+      ['R_Calf', 'R_Foot', new THREE.Vector3(0, -0.95, -0.3)],
+      ['L_Upperarm', 'L_Forearm', new THREE.Vector3(-0.1, -0.18, 0.98)],
+      ['R_Upperarm', 'R_Forearm', new THREE.Vector3(0.1, -0.18, 0.98)],
+    ] as const) {
+      const direction = instance.getObjectByName(tip)!.getWorldPosition(new THREE.Vector3())
+        .sub(instance.getObjectByName(base)!.getWorldPosition(new THREE.Vector3())).normalize();
+      expect(direction.dot(target.clone().transformDirection(instance.matrixWorld))).toBeCloseTo(1, 8);
+    }
+    expect(instance.position.toArray()).toEqual([2, 0.42, -3]);
+    expect(instance.rotation.y).toBe(yaw);
+    template.children.forEach((bone, index) => expect(bone.quaternion.equals(before[index])).toBe(true));
+  });
+});
 
 describe('剧情数据 ↔ 3D 场景注册表契约', () => {
   it('每个 sceneId 的 sceneKey 与故事数据一致', () => {
@@ -125,6 +178,49 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
     expect(getSceneRuntime('S4')).not.toBe(getSceneRuntime('S7'));
   });
 
+  it('校园美术保留校门与教学楼的导航和观察契约', () => {
+    const gate = getSceneDefinition('S5');
+    const building = getSceneDefinition('S8');
+    expect(gate.spawn).toEqual({ x: 0, z: 7.6, yaw: 0, pitchDeg: -4 });
+    expect(gate.nav.bounds).toEqual({ minX: -5.6, maxX: 5.6, minZ: -5.5, maxZ: 8.6 });
+    expect(gate.nav.obstacles.map((item) => item.id)).toEqual([
+      'gate-column-0', 'gate-column-1', 'gate-column-2',
+      'gate-crowd-0', 'gate-crowd-1', 'gate-crowd-2', 'gate-crowd-3', 'gate-typer',
+    ]);
+    expect(gate.hotspots?.map(({ id, position }) => ({ id, position }))).toEqual([
+      { id: 'typer', position: { x: -2.5, y: 1.35, z: 4.4 } },
+      { id: 'handoff-moment', position: { x: -0.45, y: 1.45, z: 2.45 } },
+      { id: 'father-bags', position: { x: -0.05, y: 0.6, z: 1.25 } },
+    ]);
+    expect(gate.panoramaAnchor).toEqual({
+      position: { x: 0, y: 3.6, z: 5.6 }, lookAt: { x: 0, y: 1.7, z: 1.4 },
+    });
+    expect(building.nav.bounds).toEqual({ minX: -5.8, maxX: 5.8, minZ: -49.2, maxZ: 9 });
+    expect(building.hotspots).toEqual([{
+      id: 'look-back-father', position: { x: 0, y: 1.5, z: 8.6 },
+      maxDistance: 45, maxAngleDeg: 12, requireLineOfSight: false,
+    }]);
+    expect(building.zones).toEqual([{
+      id: 'building-entrance', kind: 'box', center: { x: 0, y: 0.9, z: -46 },
+      size: { x: 7, y: 3.6, z: 5 },
+    }]);
+  });
+
+  it('台阶逐级抬升，台顶与门后平台连续；出口与脚步配置不耦合剧情', async () => {
+    const { sampleGroundHeight } = await import('../world/navMath');
+    const gate = getSceneDefinition('S5');
+    for (let step = 0; step < 6; step += 1) {
+      expect(sampleGroundHeight({ x: 0, z: 6 - (step + 0.5) * 0.55 }, gate.nav.surfaces)).toBeCloseTo((step + 1) * 0.07);
+    }
+    for (const z of [2.45, 1.2, 0, -5]) {
+      expect(sampleGroundHeight({ x: 0, z }, gate.nav.surfaces)).toBeCloseTo(0.42);
+    }
+    expect(getSceneDefinition('S3').exitAnchor?.stopDistance).toBeGreaterThan(0);
+    expect(getSceneDefinition('S1').footstepSurface).toBe('wood');
+    expect(gate.footstepActors).toContain('carryGroup');
+    expect(getSceneDefinition('S8').footstepActors).toContain('linxia');
+  });
+
   it('requiredModels 只引用角色清单内的模型 id', () => {
     const known = new Set(CHARACTER_MODELS.map((entry) => entry.id));
     for (const sceneId of SCENE_IDS) {
@@ -139,10 +235,10 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
       expect(getSceneDefinition(sceneId).requiredModels ?? []).toHaveLength(0);
     }
     expect(getSceneDefinition('S4').requiredModels).toEqual(['volunteer', 'ayuan']);
-    expect(getSceneDefinition('S5').requiredModels).toEqual(['linxia', 'father', 'ayuan', 'volunteer']);
-    expect(getSceneDefinition('S6').requiredModels).toEqual(['linxia', 'father', 'ayuan', 'volunteer']);
+    expect(getSceneDefinition('S5').requiredModels).toEqual(['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
+    expect(getSceneDefinition('S6').requiredModels).toEqual(['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S7').requiredModels).toEqual(['volunteer', 'linxia', 'father']);
-    expect(getSceneDefinition('S8').requiredModels).toEqual(['linxia', 'father']);
-    expect(getSceneDefinition('S9').requiredModels).toEqual(['linxia', 'father']);
+    expect(getSceneDefinition('S8').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
+    expect(getSceneDefinition('S9').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
   });
 });

@@ -18,6 +18,49 @@ export interface RectBounds {
 /** 单个矩形，或多矩形并集（L 型拐弯路线等） */
 export type WalkBounds = RectBounds | RectBounds[];
 
+export interface GroundSurface extends RectBounds {
+  height: number;
+  slopeZ?: number;
+}
+
+export function sampleGroundHeight(point: Vec2, surfaces: readonly GroundSurface[] = [], groundY = 0): number {
+  let height = groundY;
+  for (const surface of surfaces) {
+    if (isPointInRect(point, surface)) {
+      height = Math.max(height, surface.height + (surface.slopeZ ?? 0) * (point.z - surface.minZ));
+    }
+  }
+  return height;
+}
+
+export function intersectGroundRay(
+  origin: { x: number; y: number; z: number },
+  direction: { x: number; y: number; z: number },
+  surfaces: readonly GroundSurface[] = [],
+  groundY = 0,
+): { x: number; y: number; z: number } | null {
+  let nearest = Infinity;
+  let hit = null;
+  for (const surface of [null, ...surfaces]) {
+    const slope = surface?.slopeZ ?? 0;
+    const denominator = direction.y - slope * direction.z;
+    if (Math.abs(denominator) < 1e-9) continue;
+    const offset = surface ? surface.height - slope * surface.minZ : groundY;
+    const distance = (offset - origin.y + slope * origin.z) / denominator;
+    if (distance < 0 || distance >= nearest) continue;
+    const point = {
+      x: origin.x + direction.x * distance,
+      y: origin.y + direction.y * distance,
+      z: origin.z + direction.z * distance,
+    };
+    if (surface && !isPointInRect(point, surface)) continue;
+    if (Math.abs(sampleGroundHeight(point, surfaces, groundY) - point.y) > 1e-6) continue;
+    nearest = distance;
+    hit = point;
+  }
+  return hit;
+}
+
 export interface ObstacleAabb {
   id?: string;
   minX: number;
