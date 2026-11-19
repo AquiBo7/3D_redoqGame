@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const base = process.env.CAMPUS_URL ?? 'http://127.0.0.1:5180/';
@@ -7,7 +7,7 @@ const browser = await chromium.launch({
   executablePath: 'C:/Users/AnQi/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe',
   headless: true,
 });
-const report = { scope: ['M1: 模块1、2'], checks: [], screenshots: [], problems: [], diagnostics: {} };
+const report = { scope: ['M1: 模块1、2', 'M2: 模块3、4'], checks: [], screenshots: [], problems: [], diagnostics: {} };
 function check(name, ok, detail) {
   report.checks.push({ name, ok, detail });
   assert.ok(ok, `${name}: ${JSON.stringify(detail)}`);
@@ -85,7 +85,128 @@ async function guide(page, name, enterKey = 'KeyE', continued = false) {
   await page.waitForFunction(() => !!window.__worldApp, null, { timeout: 60000 });
   check(`${name} 指南键盘确认后进入世界`, await page.locator('.controls-guide').count() === 0);
 }
+async function roomChecks(page) {
+  const result = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/.vite/deps/three.js');
+    const { createRoomDefinition } = await import('/src/scenes3d/room.ts');
+    const root = new THREE.Group();
+    const definition = createRoomDefinition('S1');
+    definition.build(root);
+    root.updateMatrixWorld(true);
+    const get = (name) => root.getObjectByName(name);
+    const light = get('room-lamp-point-light');
+    const bulb = get('room-lamp-emissive-bulb');
+    const floor = get('room-oak-floor');
+    const basket = get('room-open-trapezoid-wastebasket');
+    const openingRay = new THREE.Raycaster(new THREE.Vector3(-3.08, .65, -1.75), new THREE.Vector3(0, -1, 0), 0, 1);
+    const result = {
+      walls: root.children.filter((object) => /room-(cream|terracotta)-wall/.test(object.name)).map((object) => ({ name: object.name, color: object.material.color.getHex(), z: object.position.z })),
+      lamp: { intensity: light.intensity, distance: light.distance, decay: light.decay, color: light.color.getHex(), shadow: light.castShadow, bulbColor: bulb.material.emissive.getHex(), bulbIntensity: bulb.material.emissiveIntensity, glow: get('room-lamp-soft-glow') instanceof THREE.Sprite },
+      floor: { texture: !!floor.material.map, roughness: !!floor.material.roughnessMap, linearRoughness: floor.material.roughnessMap?.colorSpace === THREE.NoColorSpace },
+      slats: get('room-blind-slats').count,
+      stripes: ['floor', 'wall'].map((side) => get(`room-sun-stripes-${side}`).geometry.getAttribute('position').count),
+      shelves: ['lower', 'upper'].map((level) => get(`room-shelf-${level}`).position.y),
+      books: ['brick', 'forest', 'yellow', 'lake'].map((color) => !!get(`room-shelf-book-${color}-white-pages`)),
+      desk: { monitors: [1, 2].every((i) => !!get(`room-monitor-${i}-dark-screen`)), keys: get('room-keyboard-keys').count, drawers: [1, 2].every((i) => !!get(`room-desk-black-handle-${i}`)), bag: get('document-bag').position.toArray(), mug: !!get('room-desk-mug'), mouse: !!get('room-desk-mouse') },
+      textiles: ['room-coral-fabric-duvet', 'room-white-folded-sheet'].every((name) => !!get(name).material.map),
+      basketOpeningHits: openingRay.intersectObject(basket, true).map((hit) => hit.point.y),
+      paper: [1, 2].map((i) => get(`room-crumpled-paper-${i}`).position.toArray()),
+      zeroGlb: definition.requiredModels.length === 0,
+    };
+    const { SHARED_RESOURCE_FLAG } = await import('/src/scenes3d/materials.ts');
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh || object instanceof THREE.Points)) return;
+      if (!object.geometry.userData[SHARED_RESOURCE_FLAG]) object.geometry.dispose();
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        if (!material.userData[SHARED_RESOURCE_FLAG]) material.dispose();
+      }
+    });
+    return result;
+  });
+  report.diagnostics.room = result;
+  check('S1 陶土后墙与米白侧墙分别染色', result.walls.every((wall) => wall.color === (wall.name.includes('terracotta') ? 0xc46d45 : 0xf1ece1)), result.walls);
+  check('S1 常亮双层吊灯和零阴影暖光符合参数', result.lamp.intensity === 1.15 && result.lamp.distance === 9 && result.lamp.decay === 1.6 && result.lamp.color === 0xffcb82 && !result.lamp.shadow && result.lamp.bulbColor === 0xffd27d && result.lamp.bulbIntensity === 1.8 && result.lamp.glow, result.lamp);
+  check('S1 橡木纹理包含线性清漆粗糙度贴图', result.floor.texture && result.floor.roughness && result.floor.linearRoughness, result.floor);
+  check('S1 十一片百叶和墙地真实条纹光斑', result.slats === 11 && result.stripes.every((vertices) => vertices > 400), { slats: result.slats, stripes: result.stripes });
+  check('S1 双层错落书架与四色白纸芯精装书', result.shelves[0] === 1.48 && result.shelves[1] === 1.76 && result.books.every(Boolean), { shelves: result.shelves, books: result.books });
+  check('S1 双屏键鼠双抽屉保留证件袋', result.desk.monitors && result.desk.keys === 36 && result.desk.drawers && result.desk.mug && result.desk.mouse && result.desk.bag[0] === 2.7 && result.desk.bag[2] === -2.2, result.desk);
+  check('S1 红被白折边与真实开口废纸篓及桶外纸团', result.textiles && result.basketOpeningHits.length > 0 && result.basketOpeningHits.every((y) => y < .04) && result.paper.length === 2, { textiles: result.textiles, opening: result.basketOpeningHits, paper: result.paper });
+  check('S1 卧室新增几何仍无模型依赖', result.zeroGlb);
+  await page.evaluate(() => window.__worldApp.teleport(0, 1.4, 0));
+  await shot(page, 'S1-warm-room');
+  await page.evaluate(() => window.__worldApp.teleport(-.6, -2.2, 5));
+  await shot(page, 'S1-shelves-blinds-wall');
+  await page.evaluate(() => window.__worldApp.teleport(.4, -.45, -55));
+  await shot(page, 'S1-dual-monitor-desk');
+  await page.evaluate(() => window.__worldApp.teleport(-1.3, -.7, 45));
+  await page.mouse.move(640, 230);
+  await page.mouse.down();
+  await page.mouse.move(640, 410, { steps: 6 });
+  await page.mouse.up();
+  await shot(page, 'S1-coral-bed-wastebasket');
+}
+async function gateChecks(page) {
+  const geometry = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/.vite/deps/three.js');
+    const { createGateDefinition, GATE_WALKERS } = await import('/src/scenes3d/gate.ts');
+    const { yawToward } = await import('/src/scenes3d/shared.ts');
+    const root = new THREE.Group();
+    const definition = createGateDefinition('S5');
+    const { actors } = definition.build(root);
+    const typer = actors.typer;
+    const direction = new THREE.Vector3(typer.position.x, 0, typer.position.z - definition.spawn.z);
+    const result = {
+      position: typer.position.toArray(),
+      yaw: typer.rotation.y,
+      expectedYaw: yawToward(typer.position, { x: -0.2, z: 2.8 }),
+      lean: typer.children[0].rotation.x,
+      angle: direction.angleTo(new THREE.Vector3(0, 0, -1)) * 180 / Math.PI,
+      hotspot: definition.hotspots.find((hotspot) => hotspot.id === 'typer').position,
+      walkers: GATE_WALKERS.map((path) => ({ ...path, position: actors[path.id].position.toArray(), nativeModel: !!actors[path.id].getObjectByName('actor-pose') })),
+      crowdYaw: [0, 1, 2, 3].map((i) => actors[`crowd-${i}`].rotation.y),
+    };
+    const { SHARED_RESOURCE_FLAG } = await import('/src/scenes3d/materials.ts');
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      if (!object.geometry.userData[SHARED_RESOURCE_FLAG]) object.geometry.dispose();
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        if (!material.userData[SHARED_RESOURCE_FLAG]) material.dispose();
+      }
+    });
+    return result;
+  });
+  check('S5 男生在左后方约96度且自然面向台阶', geometry.angle > 94 && geometry.angle < 98 && Math.abs(geometry.yaw - geometry.expectedYaw) < 1e-6 && geometry.lean <= .02, geometry);
+  check('S5 男生光点随真实站位迁移', geometry.position[0] === geometry.hotspot.x && geometry.position[2] === geometry.hotspot.z, geometry.hotspot);
+  check('S5 两侧路人真实模型走向校内远处', geometry.walkers.length === 2 && geometry.walkers.every((path) => path.nativeModel && Math.abs(path.x) === 2.85 && path.endZ <= -20 && path.endZ >= -24), geometry.walkers);
+  check('S5 围观人群存在错落朝向', Math.max(...geometry.crowdYaw) - Math.min(...geometry.crowdYaw) > 1.5, geometry.crowdYaw);
+  await page.evaluate(() => window.__worldApp.teleport(0, 7.6, 0));
+  await shot(page, 'S5-front-no-typer');
+  await page.evaluate(async () => {
+    const { eventBus } = await import('/src/core/eventBus.ts');
+    window.__polishGaze = [];
+    eventBus.on('scene:gazeHotspot', ({ hotspotId }) => window.__polishGaze.push(hotspotId));
+    window.__worldApp.teleport(0, 7.6, 95.55);
+  });
+  await page.waitForFunction(() => window.__polishGaze.includes('typer'), null, { timeout: 5000 });
+  check('S5 左转真实注视可触发男生热点', await page.evaluate(() => window.__polishGaze.includes('typer')));
+  await shot(page, 'S5-left-rear-typer');
+  const before = await page.evaluate(() => ['student-walker', 'student-walker-right'].map((id) => window.__worldApp.getActorPosition(id)));
+  await page.waitForTimeout(600);
+  const after = await page.evaluate(() => ['student-walker', 'student-walker-right'].map((id) => window.__worldApp.getActorPosition(id)));
+  check('S5 双侧路人实际逐帧向校内行走', after.every((position, i) => position[2] < before[i][2] && Math.abs(position[0]) === 2.85), { before, after });
+  await page.waitForFunction(() => window.__worldApp.getActorPosition('student-walker')?.[2] === -22 && window.__worldApp.getActorPosition('student-walker-right')?.[2] === -24, null, { timeout: 60000 });
+  const arrived = await page.evaluate(() => ['student-walker', 'student-walker-right'].map((id) => window.__worldApp.getActorPosition(id)));
+  check('S5 路人终点在校内且脚底贴平台', arrived.every((position) => Math.abs(position[1] - .42) < 1e-6), arrived);
+  await page.evaluate(() => window.__worldApp.teleport(0, 2.75, 0));
+  await shot(page, 'S5-walkers-inside');
+}
 try {
+  const entryHtml = readFileSync('dist/index.html', 'utf8');
+  const entryFiles = ['index.html', ...Array.from(entryHtml.matchAll(/(?:src|href)="\.\/assets\/([^"]+)"/g), (match) => `assets/${match[1]}`), 'fonts/yt-sans-400.woff2', 'fonts/yt-serif-600.woff2'];
+  const entryBytes = entryFiles.reduce((bytes, file) => bytes + statSync(`dist/${file}`).size, 0);
+  report.diagnostics.entry = { bytes: entryBytes, files: entryFiles };
+  check('首屏构建资源和本地字体≤3MB', entryBytes <= 3 * 1024 * 1024, report.diagnostics.entry);
+  check('构建资源使用相对assets路径', /(?:src|href)="\.\/assets\//.test(entryHtml) && !/(?:src|href)="\/assets\//.test(entryHtml));
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   watch(page);
   const glbs = [];
@@ -93,6 +214,7 @@ try {
   await guide(page, 'desktop');
   await waitObjective(page, 'S1');
   check('S1 首屏零 GLB', glbs.length === 0, [...glbs]);
+  await roomChecks(page);
   await page.evaluate(() => window.__worldApp.teleport(-2.85, -2.7, 0));
   await page.waitForTimeout(120);
   const phoneCooldown = await page.evaluate(() => {
@@ -157,6 +279,7 @@ try {
   await enter(page, 'S5');
   await dialogue(page);
   await waitObjective(page, 'S5');
+  await gateChecks(page);
   await enter(page, 'S7');
   await dialogue(page);
   await waitObjective(page, 'S7');

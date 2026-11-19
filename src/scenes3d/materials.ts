@@ -164,28 +164,46 @@ function pavingColor(u: number, v: number): [number, number, number] {
   return [154 * tone, 152 * tone, 144 * tone];
 }
 
-/** 墙面粉刷：米白浅灰 + 细腻砂面 + 极淡的大面积色差 */
+/** 中性乳胶漆底纹：低对比逐像素微粒，染色交给场景自有材质，不烘焙场景墙色。 */
 function plasterColor(u: number, v: number): [number, number, number] {
-  const grain = periodicNoise(u, v, 72, 72, 53);
-  const clouds = periodicNoise(u, v, 4, 4, 67);
-  const shade = 0.93 + grain * 0.08 + clouds * 0.05;
-  return [202 * shade, 201 * shade, 190 * shade];
+  const micro = hash2(Math.floor(u * 256), Math.floor(v * 256), 53) - 0.5;
+  const grain = periodicNoise(u, v, 128, 128, 59) - 0.5;
+  const clouds = periodicNoise(u, v, 4, 4, 67) - 0.5;
+  const value = 250 + micro * 2.4 + grain * 1.6 + clouds * 1.2;
+  return [value, value, value];
 }
 
-/** 木地板：4 块横拼板 + 顺纹拉伸噪声 + 板间缝与错位的端头接缝 */
+/** 橡木四条板：窄分缝、错缝端头、低对比弯曲年轮及稳定的板间色差。 */
+function woodFloorSample(u: number, v: number): { seam: boolean; tone: number; grain: number; row: number } {
+  const row = Math.floor(v * 4);
+  const fy = v * 4 - row;
+  const grain = periodicNoise(u, v, 4, 96, 71);
+  const bend = periodicNoise(u, v, 2, 8, 73);
+  const ring = Math.sin((v * 32 + bend * 0.32) * Math.PI * 2) * 0.018;
+  const jointU = 0.16 + hash2(row, 1, 83) * 0.68;
+  const seam = fy < 0.009 || fy > 0.991 || Math.abs(u - jointU) < 0.002;
+  return { seam, tone: 0.86 + hash2(row, 0, 79) * 0.16 + grain * 0.1 + ring, grain, row };
+}
+
 function woodFloorColor(u: number, v: number): [number, number, number] {
-  const rows = 4;
-  const row = Math.floor(v * rows);
-  const fy = v * rows - row;
-  const grain = periodicNoise(u, v, 4, 64, 71);
-  const ring = Math.sin((v * 24 + periodicNoise(u, v, 2, 2, 73) * 2) * Math.PI * 2) * 0.05;
-  const tone = 0.78 + hash2(row, 0, 79) * 0.22 + grain * 0.26 + ring;
-  // 板间横缝 + 每板一处错位的端头竖缝
-  const seam = fy < 0.02 || fy > 0.98;
-  const jointU = hash2(row, 1, 83);
-  const endJoint = Math.abs(u - jointU) < 0.0012;
-  if (seam || endJoint) return [82, 61, 44];
-  return [166 * tone, 128 * tone, 94 * tone];
+  const { seam, tone } = woodFloorSample(u, v);
+  if (seam) return [91, 66, 43];
+  return [181 * tone, 142 * tone, 102 * tone];
+}
+
+/** 清漆微光泽：板缝更粗糙，板内沿木纹柔和变化；数据贴图保持线性色彩空间。 */
+function woodFloorRoughness(u: number, v: number): [number, number, number] {
+  const { seam, grain, row } = woodFloorSample(u, v);
+  const value = (seam ? 0.96 : 0.58 + grain * 0.14 + hash2(row, 2, 89) * 0.04) * 255;
+  return [value, value, value];
+}
+
+/** 同一中性细织纹供被面与床单染色复用，不为每种布料色另建贴图缓存。 */
+function fabricColor(u: number, v: number): [number, number, number] {
+  const weave = (Math.floor(u * 128) % 2 + Math.floor(v * 128) % 2) * 2;
+  const fuzz = hash2(Math.floor(u * 128), Math.floor(v * 128), 149) * 3;
+  const value = 246 + weave + fuzz;
+  return [value, value, value];
 }
 
 /** 树皮：纵向沟壑 + 横向短裂 + 深裂纹 */
@@ -237,7 +255,46 @@ export function getPlasterMaterial(options: TiledMaterialOptions = {}): THREE.Me
 }
 
 export function getWoodFloorMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
-  return createTiledMaterial('wood-floor', 512, woodFloorColor, 0.72, 0, options.repeatX ?? 1, options.repeatY ?? 1);
+  return createTiledMaterial(
+    'wood-floor', 512, woodFloorColor, 0.72, 0,
+    options.repeatX ?? 1, options.repeatY ?? 1, woodFloorRoughness,
+  );
+}
+
+export function getFabricMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
+  return createTiledMaterial('fabric', 128, fabricColor, 0.98, 0, options.repeatX ?? 1, options.repeatY ?? 1);
+}
+
+// WorldApp 的网格清理不遍历 Sprite 材质；将这一张小光晕和材质纳入全局释放，重进房间不泄漏。
+let warmLampGlowTexture: THREE.CanvasTexture | null = null;
+let warmLampGlowMaterial: THREE.SpriteMaterial | null = null;
+
+export function getWarmLampGlowMaterial(): THREE.SpriteMaterial {
+  if (warmLampGlowMaterial) return warmLampGlowMaterial;
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('当前环境不支持 2D Canvas，无法生成程序化贴图');
+  const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+  gradient.addColorStop(0.28, 'rgba(255, 255, 255, 0.22)');
+  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 64, 64);
+  warmLampGlowTexture = new THREE.CanvasTexture(canvas);
+  warmLampGlowTexture.colorSpace = THREE.SRGBColorSpace;
+  markShared(warmLampGlowTexture);
+  warmLampGlowMaterial = new THREE.SpriteMaterial({
+    map: warmLampGlowTexture,
+    color: 0xffd27d,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  markShared(warmLampGlowMaterial);
+  return warmLampGlowMaterial;
 }
 
 export function getBarkMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
@@ -367,6 +424,11 @@ export function disposeMaterialCache(): void {
   }
   materialCache.clear();
   canvasCache.clear();
+
+  warmLampGlowMaterial?.dispose();
+  warmLampGlowTexture?.dispose();
+  warmLampGlowMaterial = null;
+  warmLampGlowTexture = null;
 
   contactShadowGeometry?.dispose();
   contactShadowMaterial?.dispose();

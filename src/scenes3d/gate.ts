@@ -698,13 +698,18 @@ const CROWD: Array<{
   yawBias?: number;
 }> = [
   { position: { x: -3.6, y: 0, z: 3.4 }, model: 'ayuan', color: 0x8f9aa3, phone: true, yawBias: -0.18 },
-  { position: { x: 3.8, y: 0, z: 3.0 }, model: 'studentFemale', color: 0x93a0a8, yawBias: 0.2 },
-  { position: { x: 4.4, y: 0, z: 1.4 }, model: 'ayuan', color: 0x8f9aa3, phone: true, yawBias: -0.12 },
-  { position: { x: -4.0, y: 0, z: 1.0 }, model: 'studentMale', color: 0x96a3ab, yawBias: 0.15 },
+  { position: { x: 3.8, y: 0, z: 3.0 }, model: 'studentFemale', color: 0x93a0a8, yawBias: -0.65 },
+  { position: { x: 4.4, y: 0, z: 1.4 }, model: 'ayuan', color: 0x8f9aa3, phone: true, yawBias: 0.4 },
+  { position: { x: -4.0, y: 0, z: 1.0 }, model: 'studentMale', color: 0x96a3ab, yawBias: 0.95 },
 ];
 
 /** 台阶旁低头打字的男生（橙色手机壳是认人暗号，不做特写） */
-const TYPER = { position: { x: -2.5, y: 0, z: 4.4 }, color: 0x7f8894 } as const;
+const TYPER = { position: { x: -3.6, y: 0, z: 7.95 }, color: 0x7f8894 } as const;
+
+export const GATE_WALKERS = [
+  { id: 'student-walker', model: 'studentMale', x: -2.85, startZ: 8.2, endZ: -22, speed: 1.15, delay: 0, height: 1.7, color: 0x96a3ab, arrivedClip: 'fold_arms' },
+  { id: 'student-walker-right', model: 'studentFemale', x: 2.85, startZ: 7.4, endZ: -24, speed: 1.08, delay: 1.4, height: 1.64, color: 0x93a0a8, arrivedClip: 'idle' },
+] as const;
 
 /** 合体胶囊起始位（台阶下）与拆分点（台阶顶平地） */
 const CARRY_START = { x: 0.9, z: 5.4 } as const;
@@ -756,7 +761,7 @@ const NAV: NavigationConfig = {
 };
 
 const HOTSPOTS: HotspotConfig[] = [
-  { id: 'typer', position: { x: -2.5, y: 1.35, z: 4.4 }, maxDistance: 18 },
+  { id: 'typer', position: { x: TYPER.position.x, y: 1.35, z: TYPER.position.z }, maxDistance: 18 },
   { id: 'handoff-moment', position: { x: -0.45, y: 1.45, z: 2.45 }, maxDistance: 16 },
   { id: 'father-bags', position: { x: -0.05, y: 0.6, z: 1.25 }, maxDistance: 15 },
 ];
@@ -811,8 +816,8 @@ function buildGate(parent: THREE.Object3D): {
 
   // 台阶旁低头打字的男生：面向台阶、微前倾，胸前手持橙色手机壳方块
   const typer = createCharacterActor('ayuan', 1.68, TYPER.color, {
-    yaw: yawToward(TYPER.position, { x: 0, z: 4.3 }) + 0.15,
-    leanRad: 0.22,
+    yaw: yawToward(TYPER.position, { x: -0.2, z: 2.8 }),
+    leanRad: 0.02,
     props: [{ kind: 'phone', color: 0xd98a4a, offset: { y: -0.04 } }],
   });
   typer.position.set(TYPER.position.x, gateGround(TYPER.position), TYPER.position.z);
@@ -866,10 +871,12 @@ function buildGate(parent: THREE.Object3D): {
 
   parent.add(linxiaSolo, fatherSolo, bagsSolo);
   occluders.push(carryFather, carryLinxia);
-  const studentWalker = createCharacterActor('studentMale', 1.7, 0x96a3ab, { yaw: Math.PI });
-  studentWalker.position.set(5.1, gateGround({ x: 5.1, z: -0.8 }), -0.8);
-  parent.add(studentWalker);
-  crowdActors['student-walker'] = studentWalker;
+  for (const path of GATE_WALKERS) {
+    const walker = createCharacterActor(path.model, path.height, path.color, { yaw: Math.PI });
+    walker.position.set(path.x, gateGround({ x: path.x, z: path.startZ }), path.startZ);
+    parent.add(walker);
+    crowdActors[path.id] = walker;
+  }
 
   return {
     occluders,
@@ -891,8 +898,7 @@ let performanceTimeline: gsap.core.Timeline | null = null;
 let linxiaAnimation: CharacterAnimationController | null = null;
 let gateActors: Record<string, THREE.Object3D> = {};
 const actorAnimations = new Map<string, CharacterAnimationController>();
-let walkerTween: gsap.core.Tween | null = null;
-let walkerArrived = false;
+const walkerStates = new Map<string, { delay: number; arrived: boolean }>();
 let linxiaWalking = false;
 let passengerPosed = false;
 
@@ -1008,12 +1014,10 @@ function startGateIdleMotions(actors: Record<string, THREE.Object3D>): void {
 export const gateRuntime: SceneRuntime = {
   enter(context: SceneRuntimeContext): void {
     gateActors = context.actors;
-    if (!walkerTween && context.actors['student-walker']) {
-      const walker = context.actors['student-walker'];
-      walkerArrived = false;
-      walkerTween = gsap.to(walker.position, { z: -8.5, duration: 12, ease: 'none',
-        onComplete: () => { walkerArrived = true; },
-      });
+    for (const path of GATE_WALKERS) {
+      if (context.actors[path.id] && !walkerStates.has(path.id)) {
+        walkerStates.set(path.id, { delay: path.delay, arrived: false });
+      }
     }
     // 站立角色呼吸微动在 S5/S6 共用；重复 enter 先杀掉旧补间
     stopIdleMotions();
@@ -1038,12 +1042,22 @@ export const gateRuntime: SceneRuntime = {
       const actor = gateActors[id];
       if (actor) actor.position.y = gateGround(actor.position);
     }
-    const clips = [
+    const clips: Array<[string, string, number]> = [
       ['carryFather', 'Piggyback_Walk_Loop', 0.85],
       ['crowd-1', 'idle', 0.7],
       ['crowd-3', 'fold_arms', 0.65],
-      ['student-walker', walkerArrived ? 'fold_arms' : 'walk', 0.65],
-    ] as const;
+    ];
+    for (const path of GATE_WALKERS) {
+      const actor = gateActors[path.id];
+      const state = walkerStates.get(path.id);
+      if (!actor || !state) continue;
+      const movingSeconds = Math.max(0, dtSeconds - state.delay);
+      state.delay = Math.max(0, state.delay - dtSeconds);
+      actor.position.z = Math.max(path.endZ, actor.position.z - movingSeconds * path.speed);
+      actor.position.y = gateGround(actor.position);
+      state.arrived = actor.position.z <= path.endZ;
+      clips.push([path.id, state.arrived || state.delay > 0 ? path.arrivedClip : 'walk', state.arrived ? 0.65 : 0.82]);
+    }
     for (const [id, clip, timeScale] of clips) {
       const actor = gateActors[id];
       if (!actor || (id === 'carryFather' && !gateActors.carryGroup.visible)) continue;
@@ -1063,8 +1077,7 @@ export const gateRuntime: SceneRuntime = {
   },
 
   exit(): void {
-    walkerTween?.kill();
-    walkerTween = null;
+    walkerStates.clear();
     for (const animation of actorAnimations.values()) animation.dispose();
     actorAnimations.clear();
     gateActors = {};
@@ -1084,7 +1097,7 @@ export function createGateDefinition(sceneId: SceneId): WorldSceneDefinition {
   return {
     sceneKey: 'gate',
     footstepSurface: 'stone',
-    footstepActors: ['carryGroup', 'linxiaSolo', 'fatherSolo', 'student-walker'],
+    footstepActors: ['carryGroup', 'linxiaSolo', 'fatherSolo', ...GATE_WALKERS.map((path) => path.id)],
     spawn: SPAWN,
     nav: NAV,
     // 围观 / 打字男生 / 爸爸背林夏与拆分演出共 4 位角色

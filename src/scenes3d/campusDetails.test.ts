@@ -47,6 +47,17 @@ function build(id: 'S5' | 'S8') {
 }
 
 describe('校园精装几何与运行契约', () => {
+  it('S5 真实演员朝向和前倾符合左后方观察，两位路人从台阶外起步', () => {
+    const { built } = build('S5');
+    const typer = built.actors!.typer;
+    expect(typer.position.toArray()).toEqual([-3.6, 0, 7.95]);
+    expect(typer.rotation.y).toBeCloseTo(Math.atan2(3.4, -5.15));
+    expect(typer.children[0].rotation.x).toBe(0.02);
+    expect(built.actors!['student-walker'].position.toArray()).toEqual([-2.85, 0, 8.2]);
+    expect(built.actors!['student-walker-right'].position.toArray()).toEqual([2.85, 0, 7.4]);
+    expect(built.actors!['student-walker'].rotation.y).toBe(Math.PI);
+    expect(built.actors!['student-walker-right'].rotation.y).toBe(Math.PI);
+  });
   it.each(['S5', 'S8'] as const)('%s 每个新增实体的完整几何与风摆幅避开中央视线', (id) => {
     const { root } = build(id);
     let details = 0;

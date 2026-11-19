@@ -1,4 +1,4 @@
-// scenes3d/room.ts —— 旅馆房间灰盒（S1 起床 / S2 手机教学 / S3 出门）
+// scenes3d/room.ts —— 程序化暖调卧室（S1 起床 / S2 手机教学 / S3 出门）
 // 坐标与站位全部数据化（ROOM_PROPS / SPAWN / PER_SCENE），后续替换正式 .glb 时只改 build 内部实现。
 
 import * as THREE from 'three';
@@ -13,9 +13,12 @@ import type {
 } from '../world/worldSceneTypes';
 import { addBox, createMatteMaterial } from './shared';
 import type { BoxSize, Vec3 } from './shared';
+import { SHARED_RESOURCE_FLAG } from '../world/resources';
 import {
   getDocumentLabelMaterial,
+  getFabricMaterial,
   getPlasterMaterial,
+  getWarmLampGlowMaterial,
   getWoodFloorMaterial,
 } from './materials';
 
@@ -62,6 +65,7 @@ const OBSTACLES: ObstacleAabb[] = [
   { id: 'room-desk', minX: 1.95, maxX: 3.45, minZ: -2.6, maxZ: -1.8, height: 0.75 },
   { id: 'room-chair', minX: 2.15, maxX: 2.65, minZ: -1.15, maxZ: -0.65, height: 0.46 },
   { id: 'room-suitcase', minX: 0.23, maxX: 0.98, minZ: 2.22, maxZ: 2.57, height: 0.55 },
+  { id: 'room-wastebasket', minX: -3.28, maxX: -2.88, minZ: -1.94, maxZ: -1.56, height: 0.34 },
 ];
 
 const NAV: NavigationConfig = {
@@ -70,8 +74,70 @@ const NAV: NavigationConfig = {
   obstacles: OBSTACLES,
 };
 
-const TRIM_COLOR = 0xb4aa9b;
+const TRIM_COLOR = 0x59412e;
 const WOOD_COLOR = 0x8f7f6d;
+const BOOK_COLORS = { brick: 0xa44735, forest: 0x365b44, yellow: 0xd7a841, lake: 0x397c89 } as const;
+
+interface BoxPart { center: Vec3; size: BoxSize; rotationX?: number }
+
+/** 现有清理入口释放几何时，同步释放实例矩阵/颜色缓冲；不需要修改 world。 */
+function releaseInstancesWithGeometry(mesh: THREE.InstancedMesh): void {
+  const release = () => {
+    mesh.dispose();
+    mesh.geometry.removeEventListener('dispose', release);
+  };
+  mesh.geometry.addEventListener('dispose', release);
+}
+
+/** 仅在一次 build 内复用单位盒几何与调色板；不打全局共享标记，随房间网格清理。 */
+function createRoomDetails() {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const palette = new Map<string, THREE.MeshStandardMaterial>();
+  const matte = (color: number, roughness = 0.92): THREE.MeshStandardMaterial => {
+    const key = `${color}:${roughness}`;
+    let material = palette.get(key);
+    if (!material) { material = createMatteMaterial(color, roughness); palette.set(key, material); }
+    return material;
+  };
+  const box = (parent: THREE.Object3D, name: string, center: Vec3, size: BoxSize,
+    material: THREE.Material, castShadow = false): THREE.Mesh => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = name;
+    mesh.position.set(center.x, center.y, center.z);
+    mesh.scale.set(size.w, size.h, size.d);
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = true;
+    parent.add(mesh);
+    return mesh;
+  };
+  const batch = (parent: THREE.Object3D, name: string, parts: BoxPart[], material: THREE.Material): THREE.InstancedMesh => {
+    const mesh = new THREE.InstancedMesh(geometry, material, parts.length);
+    releaseInstancesWithGeometry(mesh);
+    mesh.name = name;
+    mesh.receiveShadow = true;
+    const transform = new THREE.Object3D();
+    parts.forEach((part, index) => {
+      transform.position.set(part.center.x, part.center.y, part.center.z);
+      transform.scale.set(part.size.w, part.size.h, part.size.d);
+      transform.rotation.set(part.rotationX ?? 0, 0, 0);
+      transform.updateMatrix();
+      mesh.setMatrixAt(index, transform.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    parent.add(mesh);
+    return mesh;
+  };
+  return { box, batch, matte };
+}
+type RoomDetails = ReturnType<typeof createRoomDetails>;
+
+/** 克隆只拥有染色材质；共享贴图仍由 materials 缓存管理，绝不修改其他场景墙色。 */
+function tintForRoom(source: THREE.MeshStandardMaterial, color: number): THREE.MeshStandardMaterial {
+  const material = source.clone();
+  delete material.userData[SHARED_RESOURCE_FLAG];
+  material.color.setHex(color);
+  return material;
+}
 
 function addTexturedBox(
   parent: THREE.Object3D,
@@ -88,46 +154,45 @@ function addTexturedBox(
   return mesh;
 }
 
-function createSoftLightQuad(
-  nearLeft: Vec3,
-  nearRight: Vec3,
-  farLeft: Vec3,
-  farRight: Vec3,
-  opacity: number,
-): THREE.Mesh {
+type LightQuad = [Vec3, Vec3, Vec3, Vec3];
+
+/** 多块柔边光斑合成一个网格：百叶光纹只占墙 / 地板两个绘制批次。 */
+function createSoftLightBatch(quads: LightQuad[], opacity: number): THREE.Mesh {
   const columns = 4;
   const rows = 8;
   const positions: number[] = [];
   const colors: number[] = [];
   const indices: number[] = [];
 
-  for (let row = 0; row <= rows; row += 1) {
-    const v = row / rows;
-    for (let column = 0; column <= columns; column += 1) {
-      const u = column / columns;
-      const nearX = nearLeft.x + (nearRight.x - nearLeft.x) * u;
-      const nearY = nearLeft.y + (nearRight.y - nearLeft.y) * u;
-      const nearZ = nearLeft.z + (nearRight.z - nearLeft.z) * u;
-      const farX = farLeft.x + (farRight.x - farLeft.x) * u;
-      const farY = farLeft.y + (farRight.y - farLeft.y) * u;
-      const farZ = farLeft.z + (farRight.z - farLeft.z) * u;
-      positions.push(
-        nearX + (farX - nearX) * v,
-        nearY + (farY - nearY) * v,
-        nearZ + (farZ - nearZ) * v,
-      );
-      const alpha = Math.sin(Math.PI * u) * Math.sin(Math.PI * v) * 0.72;
-      colors.push(1, 1, 1, alpha);
+  for (const [nearLeft, nearRight, farLeft, farRight] of quads) {
+    const offset = positions.length / 3;
+    for (let row = 0; row <= rows; row += 1) {
+      const v = row / rows;
+      for (let column = 0; column <= columns; column += 1) {
+        const u = column / columns;
+        const nearX = nearLeft.x + (nearRight.x - nearLeft.x) * u;
+        const nearY = nearLeft.y + (nearRight.y - nearLeft.y) * u;
+        const nearZ = nearLeft.z + (nearRight.z - nearLeft.z) * u;
+        const farX = farLeft.x + (farRight.x - farLeft.x) * u;
+        const farY = farLeft.y + (farRight.y - farLeft.y) * u;
+        const farZ = farLeft.z + (farRight.z - farLeft.z) * u;
+        positions.push(
+          nearX + (farX - nearX) * v,
+          nearY + (farY - nearY) * v,
+          nearZ + (farZ - nearZ) * v,
+        );
+        const alpha = Math.sin(Math.PI * u) * Math.sin(Math.PI * v) * 0.72;
+        colors.push(1, 1, 1, alpha);
+      }
     }
-  }
-
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const a = row * (columns + 1) + column;
-      const b = a + 1;
-      const c = a + columns + 1;
-      const d = c + 1;
-      indices.push(a, c, b, b, c, d);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const a = offset + row * (columns + 1) + column;
+        const b = a + 1;
+        const c = a + columns + 1;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
     }
   }
 
@@ -152,20 +217,28 @@ function createSoftLightQuad(
   return mesh;
 }
 
-function buildShell(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
+function buildShell(parent: THREE.Object3D, occluders: THREE.Object3D[], details: RoomDetails): void {
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(7, 9.4),
     getWoodFloorMaterial({ repeatX: 2, repeatY: 12 }),
   );
+  floor.name = 'room-oak-floor';
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, -1.5);
   floor.receiveShadow = true;
   parent.add(floor);
 
-  const wallMaterial = getPlasterMaterial({ repeatX: 3, repeatY: 1 });
-  for (const wall of [...ROOM_WALLS, ...BACK_WALL_SEGMENTS]) {
-    occluders.push(addTexturedBox(parent, wall.center, wall.size, wallMaterial));
-  }
+  const plaster = getPlasterMaterial({ repeatX: 3, repeatY: 1 });
+  const creamWall = tintForRoom(plaster, 0xf1ece1);
+  const terracottaWall = tintForRoom(plaster, 0xc46d45);
+  ROOM_WALLS.forEach((wall, index) => {
+    const mesh = details.box(parent, `room-cream-wall-${index}`, wall.center, wall.size, creamWall);
+    occluders.push(mesh);
+  });
+  BACK_WALL_SEGMENTS.forEach((wall, index) => {
+    const mesh = details.box(parent, `room-terracotta-wall-${index}`, wall.center, wall.size, terracottaWall);
+    occluders.push(mesh);
+  });
   addTexturedBox(
     parent,
     { x: 0, y: 2.86, z: -1.5 },
@@ -175,17 +248,15 @@ function buildShell(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
   );
 
   for (const z of [-6.27, 3.27]) {
-    addBox(parent, { x: 0, y: 0.075, z }, { w: 6.75, h: 0.15, d: 0.045 }, TRIM_COLOR, {
-      castShadow: false,
-    });
+    details.box(parent, `room-dark-skirting-z-${z}`, { x: 0, y: 0.075, z },
+      { w: 6.75, h: 0.15, d: 0.045 }, details.matte(TRIM_COLOR));
     addBox(parent, { x: 0, y: 2.71, z }, { w: 6.75, h: 0.09, d: 0.055 }, TRIM_COLOR, {
       castShadow: false,
     });
   }
   for (const x of [-3.37, 3.37]) {
-    addBox(parent, { x, y: 0.075, z: -1.5 }, { w: 0.045, h: 0.15, d: 9.45 }, TRIM_COLOR, {
-      castShadow: false,
-    });
+    details.box(parent, `room-dark-skirting-x-${x}`, { x, y: 0.075, z: -1.5 },
+      { w: 0.045, h: 0.15, d: 9.45 }, details.matte(TRIM_COLOR));
     addBox(parent, { x, y: 2.71, z: -1.5 }, { w: 0.055, h: 0.09, d: 9.45 }, TRIM_COLOR, {
       castShadow: false,
     });
@@ -197,7 +268,7 @@ function buildShell(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
   }
 }
 
-function buildWindow(parent: THREE.Object3D): void {
+function buildWindow(parent: THREE.Object3D, details: RoomDetails): void {
   const frameColor = 0xd8d2c7;
   for (const x of [1.06, 2.54]) {
     addBox(parent, { x, y: 1.9, z: -6.25 }, { w: 0.065, h: 1.34, d: 0.09 }, frameColor);
@@ -278,24 +349,46 @@ function buildWindow(parent: THREE.Object3D): void {
     }
   }
 
-  parent.add(
-    createSoftLightQuad(
-      { x: 1.25, y: 0.018, z: -6.12 },
-      { x: 2.35, y: 0.018, z: -6.12 },
-      { x: -0.35, y: 0.018, z: -1.75 },
-      { x: 1.65, y: 0.018, z: -1.75 },
-      0.58,
-    ),
-  );
-  parent.add(
-    createSoftLightQuad(
-      { x: 1.34, y: 2.28, z: -6.08 },
-      { x: 2.24, y: 2.28, z: -6.08 },
-      { x: -0.12, y: 0.04, z: -2.05 },
-      { x: 1.35, y: 0.04, z: -2.05 },
-      0.12,
-    ),
-  );
+  const blinds = new THREE.Group();
+  blinds.name = 'room-venetian-blinds';
+  parent.add(blinds);
+  const blindWood = details.matte(0xb88750, 0.74);
+  details.box(blinds, 'room-blind-headbox', { x: 1.8, y: 2.48, z: -6.16 },
+    { w: 1.34, h: 0.075, d: 0.095 }, blindWood);
+  details.batch(blinds, 'room-blind-slats', Array.from({ length: 11 }, (_, index) => ({
+    center: { x: 1.8, y: 2.38 - index * 0.096, z: -6.15 },
+    size: { w: 1.31, h: 0.018, d: 0.075 }, rotationX: -0.2,
+  })), blindWood);
+  details.batch(blinds, 'room-blind-ladder-cords', [1.32, 2.28].map((x) => ({
+    center: { x, y: 1.89, z: -6.10 }, size: { w: 0.006, h: 1.1, d: 0.006 },
+  })), details.matte(0xe3d3b8));
+  details.box(blinds, 'room-blind-pull-cord', { x: 2.43, y: 1.73, z: -6.08 },
+    { w: 0.005, h: 1.44, d: 0.005 }, details.matte(0xe3d3b8));
+  details.box(blinds, 'room-blind-pull-toggle', { x: 2.43, y: 1.0, z: -6.08 },
+    { w: 0.02, h: 0.045, d: 0.02 }, blindWood);
+
+  const floorStripes: LightQuad[] = [];
+  const wallStripes: LightQuad[] = [];
+  for (let index = 0; index < 11; index += 1) {
+    const z = index * 0.12;
+    floorStripes.push([
+      { x: 1.12, y: 0.014, z: -5.95 + z }, { x: 1.12, y: 0.014, z: -5.90 + z },
+      { x: 3.3, y: 0.014, z: -4.30 + z }, { x: 3.3, y: 0.014, z: -4.25 + z },
+    ]);
+    const y = index * 0.085;
+    wallStripes.push([
+      { x: 3.393, y: 2.02 - y, z: -5.78 }, { x: 3.393, y: 1.975 - y, z: -5.78 },
+      { x: 3.393, y: 1.22 - y, z: -4.58 }, { x: 3.393, y: 1.175 - y, z: -4.58 },
+    ]);
+  }
+  for (const [name, quads, opacity] of [
+    ['room-sun-stripes-floor', floorStripes, 0.68],
+    ['room-sun-stripes-wall', wallStripes, 0.55],
+  ] as const) {
+    const stripes = createSoftLightBatch(quads, opacity);
+    stripes.name = name;
+    parent.add(stripes);
+  }
 
   const dustPositions: number[] = [];
   for (let index = 0; index < 26; index += 1) {
@@ -318,6 +411,8 @@ function buildWindow(parent: THREE.Object3D): void {
       depthWrite: false,
     }),
   );
+  dust.name = 'room-window-light-dust';
+  dust.raycast = () => {};
   parent.add(dust);
 }
 
@@ -344,6 +439,7 @@ function createPillow(): THREE.Mesh {
 
 function createPhone(): THREE.Group {
   const group = new THREE.Group();
+  group.name = 'room-bedside-phone';
   const halfW = 0.052;
   const halfH = 0.092;
   const radius = 0.013;
@@ -404,8 +500,11 @@ function buildBed(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
     addBox(parent, { x: -2.85, y: 0.355, z: -3.1 }, { w: 1.02, h: 0.19, d: 2.12 }, 0xd2ccc4),
   );
 
-  const duvetMaterial = createMatteMaterial(0xb9b6c0, 0.98);
+  const textile = getFabricMaterial({ repeatX: 6, repeatY: 8 });
+  const duvetMaterial = tintForRoom(textile, 0xcd705d);
   duvetMaterial.side = THREE.DoubleSide;
+  const sheetMaterial = tintForRoom(textile, 0xfffcf5);
+  sheetMaterial.side = THREE.DoubleSide;
   const duvetGeometry = new THREE.PlaneGeometry(1.1, 1.64, 12, 16);
   duvetGeometry.rotateX(-Math.PI / 2);
   const duvetPosition = duvetGeometry.getAttribute('position') as THREE.BufferAttribute;
@@ -418,7 +517,8 @@ function buildBed(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
   }
   duvetGeometry.computeVertexNormals();
   const duvet = new THREE.Mesh(duvetGeometry, duvetMaterial);
-  duvet.position.set(-2.85, 0.47, -2.94);
+  duvet.name = 'room-coral-fabric-duvet';
+  duvet.position.set(-2.85, 0.51, -2.94);
   duvet.castShadow = true;
   duvet.receiveShadow = true;
   parent.add(duvet);
@@ -432,8 +532,9 @@ function buildBed(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
   }
   sideGeometry.computeVertexNormals();
   const duvetSide = new THREE.Mesh(sideGeometry, duvetMaterial);
+  duvetSide.name = 'room-coral-duvet-drape';
   duvetSide.rotation.y = Math.PI / 2;
-  duvetSide.position.set(-2.295, 0.34, -2.94);
+  duvetSide.position.set(-2.295, 0.36, -2.94);
   duvetSide.castShadow = true;
   parent.add(duvetSide);
 
@@ -448,111 +549,280 @@ function buildBed(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
     addBox(parent, { x, y: 0.68, z: -4.25 }, { w: 0.07, h: 1.04, d: 0.1 }, 0x84735f);
   }
 
+  const sheetGeometry = new THREE.PlaneGeometry(1.03, 0.22, 20, 4);
+  sheetGeometry.rotateX(-Math.PI / 2);
+  const sheetPosition = sheetGeometry.getAttribute('position') as THREE.BufferAttribute;
+  for (let index = 0; index < sheetPosition.count; index += 1) {
+    sheetPosition.setY(index, Math.sin(sheetPosition.getX(index) * 24) * 0.006);
+  }
+  sheetGeometry.computeVertexNormals();
+  const sheet = new THREE.Mesh(sheetGeometry, sheetMaterial);
+  sheet.name = 'room-white-folded-sheet';
+  sheet.position.set(-2.85, 0.54, -3.61);
+  sheet.receiveShadow = true;
+  parent.add(sheet);
   const fold = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.045, 0.045, 0.96, 10),
-    duvetMaterial,
+    new THREE.CylinderGeometry(0.025, 0.025, 1.03, 10),
+    sheetMaterial,
   );
+  fold.name = 'room-white-sheet-rolled-edge';
   fold.rotation.z = Math.PI / 2;
-  fold.position.set(-2.85, 0.5, -3.69);
+  fold.position.set(-2.85, 0.54, -3.69);
   fold.castShadow = true;
   parent.add(fold);
   parent.add(createPillow());
   parent.add(createPhone());
 }
 
-function buildLamp(parent: THREE.Object3D): void {
-  const metal = new THREE.MeshStandardMaterial({ color: 0x6f767c, roughness: 0.62, metalness: 0.28 });
-  const lampBase = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.03, 12), metal);
-  lampBase.position.set(3.24, 0.765, -2.42);
-  parent.add(lampBase);
-  const lampPole = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.34, 8), metal);
-  lampPole.position.set(3.24, 0.95, -2.42);
-  parent.add(lampPole);
-  const lampShade = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.055, 0.13, 0.15, 12, 1, true),
-    new THREE.MeshStandardMaterial({
-      color: 0xd8cdb6,
-      emissive: 0x8a7350,
-      emissiveIntensity: 0.12,
-      roughness: 0.9,
-      metalness: 0,
-      side: THREE.DoubleSide,
-    }),
-  );
-  lampShade.position.set(3.24, 1.17, -2.42);
-  parent.add(lampShade);
-  const lampBulb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.035, 8, 6),
-    new THREE.MeshBasicMaterial({ color: 0xffe6b8 }),
-  );
-  lampBulb.position.set(3.24, 1.1, -2.42);
-  parent.add(lampBulb);
+function buildCeilingLamp(parent: THREE.Object3D): void {
+  const lamp = new THREE.Group();
+  lamp.name = 'room-ceiling-lamp';
+  lamp.position.set(0, 2.82, -1.6);
+  parent.add(lamp);
+  const brass = new THREE.MeshStandardMaterial({ color: 0xb89454, roughness: 0.48, metalness: 0.72, side: THREE.DoubleSide });
+  const cream = createMatteMaterial(0xeee3ca, 0.82);
+  cream.side = THREE.DoubleSide;
+  for (const [name, geometry, material, y] of [
+    ['room-lamp-canopy', new THREE.CylinderGeometry(0.09, 0.09, 0.04, 16), brass, -0.02],
+    ['room-lamp-stem', new THREE.CylinderGeometry(0.009, 0.009, 0.45, 8), brass, -0.255],
+    ['room-lamp-cream-shade', new THREE.CylinderGeometry(0.115, 0.25, 0.16, 24, 1, true), cream, -0.56],
+    ['room-lamp-brass-shade', new THREE.CylinderGeometry(0.10, 0.215, 0.12, 24, 1, true), brass, -0.57],
+  ] as const) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = name;
+    mesh.position.y = y;
+    mesh.receiveShadow = true;
+    lamp.add(mesh);
+  }
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshStandardMaterial({
+    color: 0xffefd5, emissive: 0xffd27d, emissiveIntensity: 1.8, roughness: 0.3,
+  }));
+  bulb.name = 'room-lamp-emissive-bulb';
+  bulb.position.y = -0.60;
+  lamp.add(bulb);
+  const glow = new THREE.Sprite(getWarmLampGlowMaterial());
+  glow.name = 'room-lamp-soft-glow';
+  glow.position.y = -0.62;
+  glow.scale.set(0.48, 0.48, 1);
+  glow.raycast = () => {};
+  lamp.add(glow);
+  const light = new THREE.PointLight(0xffcb82, 1.15, 9, 1.6);
+  light.name = 'room-lamp-point-light';
+  light.position.y = -0.62;
+  light.castShadow = false;
+  lamp.add(light);
 }
 
-function buildDesk(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
-  occluders.push(
-    addBox(parent, { x: 2.7, y: 0.715, z: -2.2 }, { w: 1.5, h: 0.07, d: 0.8 }, 0x8d8378),
-  );
-  for (const x of [2.03, 3.37]) {
-    for (const z of [-2.53, -1.87]) {
-      addBox(parent, { x, y: 0.35, z }, { w: 0.07, h: 0.7, d: 0.07 }, 0x766b60);
-    }
-  }
-  addBox(parent, { x: 3.13, y: 0.56, z: -2.2 }, { w: 0.43, h: 0.24, d: 0.65 }, 0x82766a);
-  addBox(parent, { x: 3.13, y: 0.57, z: -1.862 }, { w: 0.14, h: 0.025, d: 0.025 }, 0x565a5c, {
-    castShadow: false,
+/** 三片硬封皮合成一批，白纸内芯是真实实体而非封面上的白色贴片。 */
+function buildHardback(parent: THREE.Object3D, details: RoomDetails, name: string,
+  color: number, center: Vec3, thickness: number, height: number, stacked = false): THREE.Group {
+  const book = new THREE.Group();
+  book.name = name;
+  book.position.set(center.x, center.y, center.z);
+  if (stacked) book.rotation.z = Math.PI / 2;
+  const d = 0.18;
+  details.batch(book, `${name}-hard-covers`, [
+    { center: { x: -thickness / 2, y: 0, z: 0 }, size: { w: 0.008, h: height, d } },
+    { center: { x: thickness / 2, y: 0, z: 0 }, size: { w: 0.008, h: height, d } },
+    { center: { x: 0, y: 0, z: -d / 2 }, size: { w: thickness, h: height, d: 0.01 } },
+  ], details.matte(color));
+  details.box(book, `${name}-white-pages`, { x: 0, y: 0, z: 0.004 },
+    { w: thickness - 0.008, h: height - 0.018, d: d - 0.016 }, details.matte(0xfffcf3));
+  parent.add(book);
+  return book;
+}
+
+function buildShelves(parent: THREE.Object3D, details: RoomDetails): void {
+  const shelves = new THREE.Group();
+  shelves.name = 'room-staggered-shelves';
+  parent.add(shelves);
+  const wood = details.matte(0xa47748, 0.76);
+  details.box(shelves, 'room-shelf-lower', { x: -0.9, y: 1.48, z: -6.09 },
+    { w: 1.5, h: 0.055, d: 0.28 }, wood);
+  details.box(shelves, 'room-shelf-upper', { x: -0.05, y: 1.76, z: -6.09 },
+    { w: 1.45, h: 0.055, d: 0.28 }, wood);
+  details.batch(shelves, 'room-shelf-wall-brackets', [
+    { center: { x: -1.47, y: 1.40, z: -6.16 }, size: { w: 0.025, h: 0.14, d: 0.17 } },
+    { center: { x: -0.33, y: 1.40, z: -6.16 }, size: { w: 0.025, h: 0.14, d: 0.17 } },
+    { center: { x: -0.60, y: 1.68, z: -6.16 }, size: { w: 0.025, h: 0.14, d: 0.17 } },
+    { center: { x: 0.51, y: 1.68, z: -6.16 }, size: { w: 0.025, h: 0.14, d: 0.17 } },
+  ], details.matte(TRIM_COLOR));
+  Object.entries(BOOK_COLORS).forEach(([key, color], index) => {
+    const height = [0.25, 0.29, 0.23, 0.27][index];
+    buildHardback(shelves, details, `room-shelf-book-${key}`, color,
+      { x: -1.44 + index * 0.13, y: 1.511 + height / 2, z: -6.08 }, 0.074, height);
   });
-  buildLamp(parent);
+  buildHardback(shelves, details, 'room-shelf-stacked-book-lake', BOOK_COLORS.lake,
+    { x: -0.40, y: 1.824, z: -6.08 }, 0.064, 0.28, true);
+  const upperBook = buildHardback(shelves, details, 'room-shelf-stacked-book-yellow', BOOK_COLORS.yellow,
+    { x: -0.37, y: 1.89, z: -6.08 }, 0.052, 0.24, true);
+  upperBook.rotation.y = 0.08;
 
-  const books = [
-    { y: 0.77, color: 0x8b7a66, rotation: 0.12 },
-    { y: 0.8, color: 0x6e7f8a, rotation: -0.06 },
-  ];
-  for (const book of books) {
-    const group = new THREE.Group();
-    group.position.set(2.12, book.y, -1.98);
-    group.rotation.y = book.rotation;
-    addBox(group, { x: 0, y: 0, z: 0 }, { w: 0.24, h: 0.026, d: 0.17 }, 0xd8d1c2, {
-      castShadow: false,
-    });
-    addBox(group, { x: 0, y: 0.016, z: 0 }, { w: 0.252, h: 0.008, d: 0.18 }, book.color, {
-      castShadow: false,
-    });
-    addBox(group, { x: 0, y: -0.016, z: 0 }, { w: 0.252, h: 0.008, d: 0.18 }, book.color, {
-      castShadow: false,
-    });
-    parent.add(group);
+  const plant = new THREE.Group();
+  plant.name = 'room-shelf-potted-plant';
+  plant.position.set(0.40, 1.788, -6.08);
+  shelves.add(plant);
+  const potMaterial = details.matte(0x424444, 0.92);
+  potMaterial.side = THREE.DoubleSide;
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.088, 0.064, 0.13, 12, 1, true), potMaterial);
+  pot.name = 'room-plant-dark-gray-pot';
+  pot.position.y = 0.065;
+  plant.add(pot);
+  details.box(plant, 'room-plant-pot-base', { x: 0, y: 0.008, z: 0 },
+    { w: 0.09, h: 0.016, d: 0.09 }, potMaterial);
+  const soil = new THREE.Mesh(new THREE.CircleGeometry(0.078, 12), details.matte(0x433529));
+  soil.name = 'room-plant-soil';
+  soil.rotation.x = -Math.PI / 2;
+  soil.position.y = 0.116;
+  plant.add(soil);
+  details.batch(plant, 'room-plant-stems', [-0.025, 0, 0.026].map((x) => ({
+    center: { x, y: 0.205, z: 0 }, size: { w: 0.005, h: 0.19, d: 0.005 },
+  })), details.matte(0x516746));
+  const leaves = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), details.matte(0x52804d), 9);
+  releaseInstancesWithGeometry(leaves);
+  leaves.name = 'room-plant-green-leaves';
+  const transform = new THREE.Object3D();
+  for (let index = 0; index < 9; index += 1) {
+    const angle = index * 2.4;
+    transform.position.set(Math.sin(angle) * 0.058, 0.19 + index * 0.013, Math.cos(angle) * 0.045);
+    transform.scale.set(0.027, 0.065, 0.014);
+    transform.rotation.set(0.4, angle, Math.sin(angle) * 0.9);
+    transform.updateMatrix();
+    leaves.setMatrixAt(index, transform.matrix);
   }
-  const notebook = addBox(
-    parent,
-    { x: 2.13, y: 0.842, z: -1.98 },
-    { w: 0.25, h: 0.024, d: 0.18 },
-    0xb0a58f,
-    { castShadow: false },
-  );
-  notebook.rotation.y = 0.04;
-  addBox(parent, { x: 2.13, y: 0.856, z: -1.98 }, { w: 0.018, h: 0.004, d: 0.18 }, 0x716759, {
-    castShadow: false,
-  }).rotation.y = 0.04;
+  leaves.instanceMatrix.needsUpdate = true;
+  plant.add(leaves);
+}
 
-  const cupMaterial = createMatteMaterial(0xc9c4b8, 0.72);
+function buildWastebasket(parent: THREE.Object3D, details: RoomDetails, occluders: THREE.Object3D[]): void {
+  const basket = new THREE.Group();
+  basket.name = 'room-open-trapezoid-wastebasket';
+  basket.position.set(-3.08, 0, -1.75);
+  parent.add(basket);
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const quad = (a: number[], b: number[], c: number[], d: number[]) => {
+    const offset = positions.length / 3;
+    positions.push(...a, ...b, ...c, ...d);
+    indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
+  };
+  // 四壁外面、内面与窄顶边合成一体；中央开口没有任何盖面，底宽小于口宽。
+  const ring = (x: number, z: number, y: number): number[][] => [
+    [-x, y, -z], [-x, y, z], [x, y, z], [x, y, -z],
+  ];
+  const bottom = ring(0.11, 0.10, 0.02);
+  const top = ring(0.18, 0.17, 0.34);
+  const innerBottom = ring(0.098, 0.088, 0.02);
+  const innerTop = ring(0.168, 0.158, 0.34);
+  for (let side = 0; side < 4; side += 1) {
+    const next = (side + 1) % 4;
+    quad(bottom[side], bottom[next], top[next], top[side]);
+    quad(innerBottom[next], innerBottom[side], innerTop[side], innerTop[next]);
+    quad(top[side], top[next], innerTop[next], innerTop[side]);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const shell = new THREE.Mesh(geometry, details.matte(0xab7b4e, 0.84));
+  shell.name = 'room-wastebasket-hollow-shell';
+  shell.castShadow = true;
+  shell.receiveShadow = true;
+  basket.add(shell);
+  details.box(basket, 'room-wastebasket-bottom', { x: 0, y: 0.014, z: 0 },
+    { w: 0.22, h: 0.018, d: 0.20 }, details.matte(0x805a38));
+  occluders.push(basket);
+
+  const paperGeometry = new THREE.IcosahedronGeometry(0.075, 1);
+  const vertices = paperGeometry.getAttribute('position') as THREE.BufferAttribute;
+  for (let index = 0; index < vertices.count; index += 1) {
+    const x = vertices.getX(index), y = vertices.getY(index), z = vertices.getZ(index);
+    // 同坐标同形变，保持重复顶点的折面闭合；非球体的白纸褶皱轮廓。
+    const crease = 0.82 + 0.16 * Math.sin(x * 170 + y * 91 + z * 123);
+    vertices.setXYZ(index, x * crease, y * crease, z * crease);
+  }
+  paperGeometry.computeVertexNormals();
+  paperGeometry.computeBoundingBox();
+  const paperMaterial = details.matte(0xfffcf6, 0.98);
+  paperMaterial.flatShading = true;
+  for (const [index, x, z, yaw] of [[1, -2.71, -1.62, 0.3], [2, -3.04, -1.30, -0.8]]) {
+    const paper = new THREE.Mesh(paperGeometry, paperMaterial);
+    paper.name = `room-crumpled-paper-${index}`;
+    paper.rotation.y = yaw;
+    paper.position.set(x, -paperGeometry.boundingBox!.min.y + 0.002, z);
+    paper.castShadow = true;
+    paper.receiveShadow = true;
+    parent.add(paper);
+  }
+}
+
+function buildDesk(parent: THREE.Object3D, occluders: THREE.Object3D[], details: RoomDetails): void {
+  occluders.push(details.box(parent, 'room-desk-top', { x: 2.7, y: 0.715, z: -2.2 },
+    { w: 1.5, h: 0.07, d: 0.8 }, details.matte(0xa17b51, 0.76), true));
+  details.batch(parent, 'room-desk-legs', [2.03, 3.37].flatMap((x) => [-2.53, -1.87].map((z) => ({
+    center: { x, y: 0.35, z }, size: { w: 0.07, h: 0.7, d: 0.07 },
+  }))), details.matte(0x766b60));
+  occluders.push(details.box(parent, 'room-desk-drawer-cabinet', { x: 3.17, y: 0.43, z: -2.2 },
+    { w: 0.40, h: 0.52, d: 0.64 }, details.matte(0x926d46)));
+  for (const [index, y] of [0.55, 0.30].entries()) {
+    details.box(parent, `room-desk-drawer-front-${index + 1}`, { x: 3.17, y, z: -1.868 },
+      { w: 0.38, h: 0.225, d: 0.025 }, details.matte(0xac8254));
+    details.box(parent, `room-desk-black-handle-${index + 1}`, { x: 3.17, y, z: -1.845 },
+      { w: 0.14, h: 0.02, d: 0.025 }, details.matte(0x242728, 0.78));
+  }
+
+  const screenMaterial = new THREE.MeshStandardMaterial({ color: 0x19272d, roughness: 0.28, metalness: 0.18 });
+  for (const [index, x] of [2.28, 2.90].entries()) {
+    const monitor = new THREE.Group();
+    monitor.name = `room-monitor-${index + 1}`;
+    parent.add(monitor);
+    const frame = details.box(monitor, `room-monitor-${index + 1}-matte-frame`, { x, y: 1.10, z: -2.51 },
+      { w: 0.54, h: 0.33, d: 0.04 }, details.matte(0x3e4345, 0.85));
+    details.box(monitor, `room-monitor-${index + 1}-dark-screen`, { x, y: 1.102, z: -2.487 },
+      { w: 0.493, h: 0.281, d: 0.006 }, screenMaterial);
+    details.box(monitor, `room-monitor-${index + 1}-stand`, { x, y: 0.856, z: -2.52 },
+      { w: 0.038, h: 0.17, d: 0.035 }, details.matte(0x3e4345, 0.85));
+    details.box(monitor, `room-monitor-${index + 1}-foot`, { x, y: 0.759, z: -2.545 },
+      { w: 0.21, h: 0.018, d: 0.10 }, details.matte(0x3e4345, 0.85));
+    occluders.push(frame);
+  }
+  details.box(parent, 'room-keyboard-base', { x: 2.65, y: 0.765, z: -2.391 },
+    { w: 0.43, h: 0.02, d: 0.105 }, details.matte(0x555957, 0.84));
+  details.batch(parent, 'room-keyboard-keys', Array.from({ length: 36 }, (_, index) => ({
+    center: { x: 2.466 + (index % 12) * 0.033, y: 0.780, z: -2.422 + Math.floor(index / 12) * 0.029 },
+    size: { w: 0.025, h: 0.01, d: 0.022 },
+  })), details.matte(0xb9bdb6, 0.84));
+  const mouse = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), details.matte(0x414746, 0.7));
+  mouse.name = 'room-desk-mouse';
+  mouse.scale.set(0.036, 0.024, 0.055);
+  mouse.position.set(3.04, 0.774, -2.28);
+  parent.add(mouse);
+  details.box(parent, 'room-mouse-wheel', { x: 3.04, y: 0.798, z: -2.295 },
+    { w: 0.006, h: 0.004, d: 0.015 }, details.matte(0xb3b6af));
+  const notebook = buildHardback(parent, details, 'room-red-notebook', BOOK_COLORS.brick,
+    { x: 2.15, y: 0.774, z: -2.0 }, 0.035, 0.24, true);
+  notebook.rotation.y = 0.04;
+
+  const cupMaterial = details.matte(0xe4d9bf, 0.72);
+  cupMaterial.side = THREE.DoubleSide;
   const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.045, 0.11, 12, 1, true), cupMaterial);
-  cup.position.set(2.22, 0.805, -2.43);
+  cup.name = 'room-desk-mug';
+  cup.position.set(3.23, 0.805, -1.99);
   cup.castShadow = true;
   parent.add(cup);
   const cupBottom = new THREE.Mesh(new THREE.CircleGeometry(0.045, 12), cupMaterial);
+  cupBottom.name = 'room-mug-bottom';
   cupBottom.rotation.x = -Math.PI / 2;
-  cupBottom.position.set(2.22, 0.752, -2.43);
+  cupBottom.position.set(3.23, 0.752, -1.99);
   parent.add(cupBottom);
-  const coffee = new THREE.Mesh(
-    new THREE.CircleGeometry(0.046, 12),
-    createMatteMaterial(0x4a3b31, 0.5),
-  );
+  const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.046, 12), details.matte(0x4a3b31, 0.5));
+  coffee.name = 'room-mug-coffee';
   coffee.rotation.x = -Math.PI / 2;
-  coffee.position.set(2.22, 0.854, -2.43);
+  coffee.position.set(3.23, 0.854, -1.99);
   parent.add(coffee);
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.008, 6, 12), cupMaterial);
-  handle.position.set(2.278, 0.81, -2.43);
+  handle.name = 'room-mug-handle';
+  handle.position.set(3.288, 0.81, -1.99);
   parent.add(handle);
 
   const bagMaterial = createMatteMaterial(0xc4b49a, 0.86);
@@ -562,6 +832,7 @@ function buildDesk(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
     { w: 0.34, h: 0.06, d: 0.24 },
     0xc4b49a,
   );
+  documentBag.name = 'document-bag';
   occluders.push(documentBag);
   const flapShape = new THREE.Shape([
     new THREE.Vector2(-0.17, 0.12),
@@ -571,12 +842,14 @@ function buildDesk(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
   const flapGeometry = new THREE.ShapeGeometry(flapShape);
   flapGeometry.rotateX(-Math.PI / 2);
   const flap = new THREE.Mesh(flapGeometry, bagMaterial);
+  flap.name = 'document-bag-flap';
   flap.position.set(2.7, 0.824, -2.2);
   parent.add(flap);
   addBox(parent, { x: 2.7, y: 0.823, z: -2.08 }, { w: 0.34, h: 0.012, d: 0.018 }, 0xa89478, {
     castShadow: false,
   });
   const label = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.075), getDocumentLabelMaterial());
+  label.name = 'document-bag-label';
   label.rotation.x = -Math.PI / 2;
   label.position.set(2.68, 0.827, -2.17);
   parent.add(label);
@@ -596,6 +869,7 @@ function buildChairAndShirt(parent: THREE.Object3D, occluders: THREE.Object3D[])
   addBox(parent, { x: 2.42, y: 1.19, z: -0.68 }, { w: 0.56, h: 0.07, d: 0.1 }, 0x766b60);
 
   const shirt = new THREE.Group();
+  shirt.name = 'culture-shirt';
   shirt.position.set(2.42, 1.06, -0.62);
   const shirtMaterial = createMatteMaterial(0xd9c98f, 0.98);
   shirtMaterial.side = THREE.DoubleSide;
@@ -712,10 +986,14 @@ function buildDoor(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
 
 function buildRoom(parent: THREE.Object3D): { occluders: THREE.Object3D[] } {
   const occluders: THREE.Object3D[] = [];
-  buildShell(parent, occluders);
-  buildWindow(parent);
+  const details = createRoomDetails();
+  buildShell(parent, occluders, details);
+  buildWindow(parent, details);
+  buildCeilingLamp(parent);
+  buildShelves(parent, details);
   buildBed(parent, occluders);
-  buildDesk(parent, occluders);
+  buildDesk(parent, occluders, details);
+  buildWastebasket(parent, details, occluders);
   buildChairAndShirt(parent, occluders);
   buildSuitcase(parent, occluders);
   buildDoor(parent, occluders);

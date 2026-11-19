@@ -188,7 +188,7 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
       'gate-crowd-0', 'gate-crowd-1', 'gate-crowd-2', 'gate-crowd-3', 'gate-typer',
     ]);
     expect(gate.hotspots?.map(({ id, position }) => ({ id, position }))).toEqual([
-      { id: 'typer', position: { x: -2.5, y: 1.35, z: 4.4 } },
+      { id: 'typer', position: { x: -3.6, y: 1.35, z: 7.95 } },
       { id: 'handoff-moment', position: { x: -0.45, y: 1.45, z: 2.45 } },
       { id: 'father-bags', position: { x: -0.05, y: 0.6, z: 1.25 } },
     ]);
