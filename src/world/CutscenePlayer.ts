@@ -60,6 +60,7 @@ export class CutscenePlayer {
   private active: ActiveCutscene | null = null;
   private timeline: gsap.core.Timeline | null = null;
   private hardTimeout = 0;
+  private preparationTimer = 0;
   /** 出门步态的基准高度，打断时也要移除纵向起伏。 */
   private runBaseY: number | null = null;
 
@@ -100,6 +101,18 @@ export class CutscenePlayer {
   private play(payload: CutscenePayload): void {
     this.cancel();
     this.active = { stepId: payload.stepId, key: payload.key };
+    const preparationMs = payload.key === 's3-run' ? this.getExitAnchor()?.preparationMs ?? 0 : 0;
+    if (preparationMs > 0) {
+      this.preparationTimer = window.setTimeout(() => {
+        this.preparationTimer = 0;
+        this.beginAnimation(payload);
+      }, preparationMs);
+      return;
+    }
+    this.beginAnimation(payload);
+  }
+
+  private beginAnimation(payload: CutscenePayload): void {
     this.setCinematic(true);
     // 接管 WorldApp 正在进行的黑幕淡入 / 淡出
     gsap.killTweensOf(this.fadeEl);
@@ -295,6 +308,10 @@ export class CutscenePlayer {
   }
 
   private stopActive(): void {
+    if (this.preparationTimer !== 0) {
+      window.clearTimeout(this.preparationTimer);
+      this.preparationTimer = 0;
+    }
     this.timeline?.kill();
     this.timeline = null;
     if (this.hardTimeout !== 0) {

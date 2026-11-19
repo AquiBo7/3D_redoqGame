@@ -2,7 +2,7 @@
 // 提示条本身不阻塞控制；点击“查看”打开消息卡时由 gameUi 获取锁定。
 
 import type { GameEvents } from '../core/eventBus';
-import { createButton, createElement } from './uiDom';
+import { createButton, createElement, isShortcutKey } from './uiDom';
 import './phoneVibrate.css';
 
 type VibrationPayload = GameEvents['ui:phoneVibrate'];
@@ -24,6 +24,32 @@ export class PhoneVibrationView {
 
   private current: VibrationPayload | null = null;
   private autoHideTimer = 0;
+  private shortcutCooldownUntil = 0;
+
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (!isShortcutKey(event, 'KeyE')) return;
+    const messageOpen = !this.messageOverlay.hidden;
+    if (!messageOpen && (this.snackbar.hidden || this.hasOtherModal())) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const coolingDown = performance.now() < this.shortcutCooldownUntil;
+    this.refreshShortcutCooldown();
+    if (coolingDown) return;
+
+    if (messageOpen) this.closeMessage();
+    else this.handleView();
+  };
+
+  private refreshShortcutCooldown(): void {
+    this.shortcutCooldownUntil = performance.now() + 180;
+  }
+
+  private hasOtherModal(): boolean {
+    // 通过 DOM 展示状态让位于手机、对话、选择和指南，不耦合其他 UI 模块。
+    return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"]'))
+      .some((element) => element !== this.messageOverlay && !element.closest('[hidden]'));
+  }
 
   constructor(container: HTMLElement, callbacks: PhoneVibrationCallbacks) {
     this.callbacks = callbacks;
@@ -69,10 +95,12 @@ export class PhoneVibrationView {
     this.messageOverlay.append(card);
 
     container.append(this.snackbar, this.messageOverlay);
+    window.addEventListener('keydown', this.handleKeyDown, true);
   }
 
   show(payload: VibrationPayload): void {
     if (!this.messageOverlay.hidden) this.closeMessage();
+    this.refreshShortcutCooldown();
 
     this.current = payload;
     this.previewText.textContent = payload.preview;
@@ -94,6 +122,7 @@ export class PhoneVibrationView {
   }
 
   dispose(): void {
+    window.removeEventListener('keydown', this.handleKeyDown, true);
     window.clearTimeout(this.autoHideTimer);
     this.snackbar.remove();
     this.messageOverlay.remove();
@@ -103,6 +132,7 @@ export class PhoneVibrationView {
     const current = this.current;
     if (!current) return;
 
+    this.refreshShortcutCooldown();
     window.clearTimeout(this.autoHideTimer);
     this.snackbar.hidden = true;
     this.messageDetail.textContent = current.preview;
@@ -114,6 +144,7 @@ export class PhoneVibrationView {
     const current = this.current;
     if (!current) return;
 
+    this.refreshShortcutCooldown();
     window.clearTimeout(this.autoHideTimer);
     this.snackbar.hidden = true;
     this.current = null;
@@ -121,6 +152,7 @@ export class PhoneVibrationView {
   }
 
   private closeMessage(): void {
+    this.refreshShortcutCooldown();
     const current = this.current;
     this.messageOverlay.hidden = true;
     this.current = null;

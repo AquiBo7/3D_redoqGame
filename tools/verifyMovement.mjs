@@ -25,7 +25,10 @@ function watch(page) {
 }
 async function enter(page, id) {
   await page.goto(id === 'S1' ? base : `${base}?scene=${id}`, { waitUntil: 'load' });
-  if (await page.locator('#btn-start').isVisible()) await page.locator('#btn-start').click();
+  if (await page.locator('#btn-start').isVisible()) {
+    await page.locator('#btn-start').click();
+    await page.locator('.controls-guide__enter').click();
+  }
   await page.waitForFunction((id) => window.__worldApp?.getSceneId() === id, id, { timeout: 60000 });
   if (id === 'S1') {
     await page.waitForFunction(() => window.__worldApp.getPlayerPosition().enabled, null, { timeout: 60000 });

@@ -6,6 +6,7 @@ import { playUiClick, unlockAudio } from '../audio/audioManager';
 import { eventBus } from '../core/eventBus';
 import { openCredits } from './credits';
 import { installFilmGrain } from './filmGrain';
+import { showControlsGuide } from './controlsGuide';
 import './startPage.css';
 
 /** 与 startPage.css 的淡出过渡时长保持一致 */
@@ -67,7 +68,7 @@ export function initStartPage(options: StartPageOptions = {}): void {
     startPage.classList.add('is-leaving');
     window.setTimeout(() => {
       startPage.hidden = true;
-      eventBus.emit(event);
+      void showControlsGuide().then(() => eventBus.emit(event));
     }, FADE_DURATION_MS);
   };
 

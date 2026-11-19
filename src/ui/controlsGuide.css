@@ -1,0 +1,40 @@
+.controls-guide {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: safe center;
+  padding: 24px max(20px, env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  background: radial-gradient(ellipse at 50% 0%, #283535, #0b1013 80%);
+  pointer-events: auto;
+  overflow: auto;
+}
+.controls-guide__card {
+  width: min(760px, 100%);
+  padding: clamp(18px, 4vw, 42px);
+  border: 1px solid rgba(232, 199, 154, .36);
+  background: linear-gradient(#26302bdd, #171e1bdd), var(--yt-grain);
+  box-shadow: 0 20px 80px #0005;
+  color: var(--yt-text);
+}
+.controls-guide__eyebrow { font-size: 11px; letter-spacing: .35em; color: var(--yt-warm); }
+.controls-guide__title { margin: 8px 0 26px; font: 600 clamp(22px, 3vw, 30px) var(--yt-font-serif); }
+.controls-guide__columns { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.controls-guide__column h3 { font: 600 16px var(--yt-font-serif); color: var(--yt-warm); }
+.controls-guide__column dl { display: grid; grid-template-columns: auto 1fr; gap: 14px 14px; font-size: 12px; line-height: 1.8; }
+.controls-guide__column dt { color: #f4e8d5; }
+.controls-guide__column dd { margin: 0; color: var(--yt-text-dim); }
+.controls-guide__enter { display: block; margin: 28px auto 0; padding: 12px 22px; min-height: 44px; min-width: 44px; border: 1px solid var(--yt-warm-soft); background: #dbc29112; color: var(--yt-warm); font: 400 13px var(--yt-font-sans); cursor: pointer; }
+.controls-guide__enter:focus-visible { outline: 2px solid var(--yt-warm); outline-offset: 4px; }
+@media (max-width: 600px) and (orientation: portrait) {
+  .controls-guide__columns { grid-template-columns: 1fr; gap: 10px; }
+  .controls-guide__column dl { gap: 8px 12px; }
+}
+@media (max-height: 480px) {
+  .controls-guide { padding-top: 10px; }
+  .controls-guide__card { padding: 12px 22px; }
+  .controls-guide__title { font-size: 20px; margin-bottom: 6px; }
+  .controls-guide__column h3 { margin: 6px 0; }
+  .controls-guide__column dl { margin: 0; gap: 4px 10px; font-size: 11px; }
+  .controls-guide__enter { margin-top: 12px; }
+}

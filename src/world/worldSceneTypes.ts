@@ -75,6 +75,7 @@ export type ZoneConfig =
 export interface ExitAnchor {
   position: Point3;
   stopDistance: number;
+  preparationMs?: number;
 }
 
 export interface TargetGuideConfig {

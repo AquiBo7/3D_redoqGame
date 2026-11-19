@@ -1,5 +1,5 @@
 // world/FirstPersonController.ts —— 双端第一人称控制器
-// 桌面：PointerLock / 鼠标拖拽兜底 / WASD + Shift；触摸：单指拖拽环视、轻点地面自动寻路。
+// 桌面：PointerLock / 鼠标拖拽兜底 / WASD + Shift；触摸：单指拖拽环视、轻点地面行走、双击地面疾跑。
 // 只负责移动与视角，不修改剧情状态；与 core 的通信由 InteractionSystem 走事件总线。
 
 import * as THREE from 'three';
@@ -21,6 +21,8 @@ const MOVE_KEYS = new Set([
 ]);
 const SPRINT_KEYS = new Set(['ShiftLeft', 'ShiftRight']);
 const MOUSE_TAP_MAX_MOVE_PX = 6;
+const TOUCH_DOUBLE_TAP_MAX_MS = 320;
+const TOUCH_DOUBLE_TAP_MAX_DISTANCE_PX = 48;
 
 interface PointerTrack {
   id: number;
@@ -90,6 +92,9 @@ export class FirstPersonController {
   private pointerMoved = false;
 
   private autoTarget: Vec2 | null = null;
+  private autoWalkSprint = false;
+  /** 只记录未被交互消费且能启动地面寻路的触屏轻点 */
+  private lastGroundTap: { clientX: number; clientY: number; at: number } | null = null;
   private blockedTime = 0;
   /** 本帧实际移动速度（米/秒），供脚步音效等只读系统采样 */
   private currentSpeed = 0;
@@ -177,7 +182,7 @@ export class FirstPersonController {
     }
 
     const keyMoving = forwardInput !== 0 || strafeInput !== 0;
-    const sprinting = keyMoving && this.sprintToggled;
+    let sprinting = keyMoving && this.sprintToggled;
 
     let directionX = 0;
     let directionZ = 0;
@@ -208,7 +213,10 @@ export class FirstPersonController {
       } else {
         directionX = toTargetX / targetDistance;
         directionZ = toTargetZ / targetDistance;
-        speed = this.config.walkSpeed;
+        sprinting = this.autoWalkSprint;
+        speed = sprinting ? this.config.sprintSpeed : this.config.walkSpeed;
+        // 疾跑的单帧步长可能跨过停止半径，限制到目标距离，避免来回震荡。
+        if (stepDt > 0) speed = Math.min(speed, targetDistance / stepDt);
       }
     }
 
@@ -230,7 +238,9 @@ export class FirstPersonController {
       actualSpeed = stepDt > 0 ? movedDistance / stepDt : 0;
 
       if (autoWalking) {
-        if (actualSpeed < this.config.stuckSpeedThreshold) {
+        if (this.autoTarget && distance2D(this.feet, this.autoTarget) <= this.config.autoWalkStopDistance) {
+          this.cancelAutoWalk();
+        } else if (actualSpeed < this.config.stuckSpeedThreshold) {
           this.blockedTime += stepDt;
           if (this.blockedTime * 1000 >= this.config.stuckTimeoutMs) {
             // 贴墙原地踏步：自动停止寻路，落点圈随之淡出
@@ -245,7 +255,7 @@ export class FirstPersonController {
     }
 
     this.currentSpeed = actualSpeed;
-    this.updateBob(stepDt, actualSpeed, sprinting && !autoWalking);
+    this.updateBob(stepDt, actualSpeed, sprinting);
     this.updateMarker(stepDt);
   }
 
@@ -346,6 +356,7 @@ export class FirstPersonController {
       Math.abs(event.clientY - pointer.startY) > this.config.tapMaxMovePx
     ) {
       this.pointerMoved = true;
+      this.lastGroundTap = null;
     }
 
     const sensitivity =
@@ -360,20 +371,25 @@ export class FirstPersonController {
     if (!pointer || pointer.id !== event.pointerId) return;
 
     const elapsed = performance.now() - pointer.downAt;
+    const maxTapMove = pointer.type === 'mouse' ? MOUSE_TAP_MAX_MOVE_PX : this.config.tapMaxMovePx;
     const wasTap =
       !this.pointerMoved &&
       elapsed <= this.config.tapMaxDurationMs &&
-      (pointer.type !== 'mouse' ||
-        (Math.abs(event.clientX - pointer.startX) <= MOUSE_TAP_MAX_MOVE_PX &&
-          Math.abs(event.clientY - pointer.startY) <= MOUSE_TAP_MAX_MOVE_PX));
+      Math.abs(event.clientX - pointer.startX) <= maxTapMove &&
+      Math.abs(event.clientY - pointer.startY) <= maxTapMove;
 
     this.releasePointer(event.pointerId);
-    if (!this.isBlocked() && wasTap) this.handleTap(event.clientX, event.clientY, pointer.type);
+    if (!this.isBlocked() && wasTap) {
+      this.handleTap(event.clientX, event.clientY, pointer.type);
+    } else {
+      this.lastGroundTap = null;
+    }
   };
 
   private readonly handlePointerCancel = (event: PointerEvent): void => {
     if (!this.pointer || this.pointer.id !== event.pointerId) return;
     this.releasePointer(event.pointerId);
+    this.lastGroundTap = null;
   };
 
   private releasePointer(pointerId: number): void {
@@ -390,16 +406,23 @@ export class FirstPersonController {
 
   private handleTap(clientX: number, clientY: number, pointerType: string): void {
     const consumed = this.callbacks.onTap?.(clientX, clientY) ?? false;
-    if (consumed) return;
+    if (consumed) {
+      this.lastGroundTap = null;
+      return;
+    }
 
     if (pointerType === 'touch') {
       this.startTapMove(clientX, clientY);
     } else {
+      this.lastGroundTap = null;
       this.requestPointerLock();
     }
   }
 
   private startTapMove(clientX: number, clientY: number): void {
+    const previousTap = this.lastGroundTap;
+    // 本次无有效地面、过近或被锁定时，不得留下可拼成双击的记录。
+    this.lastGroundTap = null;
     if (this.isBlocked() || this.lookOnly) return;
 
     const rect = this.domElement.getBoundingClientRect();
@@ -420,9 +443,15 @@ export class FirstPersonController {
     const target = clampToNearestWalkable({ x: hitPoint.x, z: hitPoint.z }, this.navigation.bounds);
     if (distance2D(this.feet, target) <= this.config.autoWalkStopDistance) return;
 
+    const now = performance.now();
+    this.autoWalkSprint = previousTap !== null &&
+      now - previousTap.at <= TOUCH_DOUBLE_TAP_MAX_MS &&
+      Math.hypot(clientX - previousTap.clientX, clientY - previousTap.clientY) <= TOUCH_DOUBLE_TAP_MAX_DISTANCE_PX;
+    this.lastGroundTap = { clientX, clientY, at: now };
     this.autoTarget = target;
     this.blockedTime = 0;
 
+    this.markerMaterial.color.setHex(this.autoWalkSprint ? 0xf4c773 : 0xdde8ee);
     this.marker.position.set(target.x, sampleGroundHeight(target, this.navigation.surfaces, this.navigation.groundY) + 0.02, target.z);
     this.marker.scale.setScalar(1);
     this.markerMaterial.opacity = 0.55;
@@ -434,6 +463,8 @@ export class FirstPersonController {
 
   private cancelAutoWalk(): void {
     this.autoTarget = null;
+    this.autoWalkSprint = false;
+    this.lastGroundTap = null;
     this.blockedTime = 0;
     this.markerHolding = false;
   }
@@ -454,7 +485,7 @@ export class FirstPersonController {
       return;
     }
 
-    const pulse = 1 + Math.sin(this.markerElapsed * 5) * 0.06;
+    const pulse = 1 + Math.sin(this.markerElapsed * (this.autoWalkSprint ? 9 : 5)) * 0.06;
     this.marker.scale.setScalar(pulse);
   }
 
@@ -480,6 +511,7 @@ export class FirstPersonController {
     if (locked) {
       this.pointer = null;
       this.pointerMoved = false;
+      this.lastGroundTap = null;
     }
     this.callbacks.onPointerLockChange?.(locked);
   };
@@ -490,6 +522,7 @@ export class FirstPersonController {
     if (event.repeat) return;
     if (MOVE_KEYS.has(event.code)) {
       this.keys.add(event.code);
+      this.cancelAutoWalk();
       event.preventDefault();
       return;
     }
@@ -508,6 +541,7 @@ export class FirstPersonController {
     this.keys.clear();
     this.pointer = null;
     this.pointerMoved = false;
+    this.cancelAutoWalk();
   };
 
   /**
@@ -632,6 +666,7 @@ export class FirstPersonController {
   }
 
   dispose(): void {
+    this.cancelAutoWalk();
     this.sprintToggled = false;
     this.domElement.removeEventListener('pointerdown', this.handlePointerDown);
     this.domElement.removeEventListener('pointermove', this.handlePointerMove);

@@ -924,7 +924,7 @@ function resetPerformanceState(actors: Record<string, THREE.Object3D>): void {
   bags.position.set(SPLIT_POS.bags.x, gateGround(SPLIT_POS.bags), SPLIT_POS.bags.z);
 }
 
-function playPerformance(actors: Record<string, THREE.Object3D>): void {
+function playPerformance(actors: Record<string, THREE.Object3D>, onReady: () => void): void {
   resetPerformanceState(actors);
   disposeLinxiaAnimation();
   passengerPosed = false;
@@ -975,6 +975,7 @@ function playPerformance(actors: Record<string, THREE.Object3D>): void {
   timeline.add(() => {
     linxiaWalking = false;
     linxiaAnimation?.play('afraid', { timeScale: 0.25, fadeIn: 0.7 });
+    onReady();
   }, 12.05);
 
   performanceTimeline = timeline;
@@ -1023,7 +1024,9 @@ export const gateRuntime: SceneRuntime = {
       performanceTimeline.kill();
       performanceTimeline = null;
     }
-    playPerformance(context.actors);
+    playPerformance(context.actors, () => {
+      context.bus.emit('ui:showObjective', { sceneId: 'S5' });
+    });
   },
 
   tick(dtSeconds: number): void {

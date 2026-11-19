@@ -1,0 +1,20 @@
+.objective-prompt {
+  position: absolute;
+  top: 21%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(720px, calc(100% - 48px));
+  text-align: center;
+  color: var(--yt-text);
+  text-shadow: var(--yt-text-shadow);
+  pointer-events: none;
+  animation: objective-enter .8s var(--yt-ease);
+  transition: opacity 1.2s ease;
+}
+.objective-prompt.is-fading { opacity: 0; }
+.objective-prompt__text { margin: 0 0 10px; font: 600 clamp(16px, 2vw, 23px)/1.65 var(--yt-font-serif); }
+.objective-prompt__hint { display: inline-block; margin: 0; padding-top: 9px; border-top: 1px solid var(--yt-warm-soft); font-size: 11px; letter-spacing: .07em; color: #eee2cbbf; }
+.objective-prompt__goal { position: absolute; top: max(18px, env(safe-area-inset-top)); left: max(20px, env(safe-area-inset-left)); max-width: calc(100% - 130px); padding: 7px 12px; border: 1px solid #e8c79a30; border-radius: 20px; background: #101a2255; color: #f2e6d1b8; font-size: 11px; text-shadow: var(--yt-text-shadow); }
+@keyframes objective-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (max-height: 480px) { .objective-prompt__text { font-size: 15px; } .objective-prompt__hint { font-size: 10px; padding-top: 5px; } }
+@media (prefers-reduced-motion: reduce) { .objective-prompt { animation: none; transition: none; } }

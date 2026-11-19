@@ -6,6 +6,7 @@ import type { EventBus } from '../core/eventBus';
 import { eventBus as defaultEventBus } from '../core/eventBus';
 import type { SpeakerId } from '../data/storySchema';
 import { CaptionView } from './captions';
+import { initObjectivePrompt } from './objectivePrompt';
 import { ChoicesPanel } from './choicesPanel';
 import { DialogueBox } from './dialogueBox';
 import { PhonePanelView } from './phonePanel';
@@ -35,6 +36,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   host.append(root);
 
   const lock = createUiLockCoordinator(options.getControls);
+  const disposeObjective = initObjectivePrompt(root, bus);
 
   let phoneBlockerId: string | null = null;
   let dialogueBlockerId: string | null = null;
@@ -60,6 +62,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       playUiClick();
       releaseDialogueLock();
       bus.emit('ui:dialogueEnd', { stepId });
+      if (stepId === 's7-volunteer') bus.emit('ui:showObjective', { sceneId: 'S7' });
     },
   });
 
@@ -68,6 +71,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       playUiClick();
       releaseChoicesLock();
       bus.emit('ui:chooseOption', { stepId, choiceId });
+      if (stepId === 's8-walk') bus.emit('ui:showObjective', { sceneId: 'S8' });
     },
   });
 
@@ -75,6 +79,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     container: root,
     onInnerEnd: (stepId) => {
       bus.emit('ui:dialogueEnd', { stepId });
+      if (stepId === 's1-caption') bus.emit('ui:showObjective', { sceneId: 'S1' });
     },
   });
 
@@ -191,8 +196,9 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       playPhoneChime();
     }),
 
-    bus.on('scene:transition', () => {
+    bus.on('scene:transition', ({ toSceneId }) => {
       cleanupAll();
+      if (toSceneId === 'S3') bus.emit('ui:showObjective', { sceneId: 'S3' });
     }),
 
     bus.on('game:chapterEnd', () => {
@@ -215,6 +221,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       choices.dispose();
       captions.dispose();
       vibration.dispose();
+      disposeObjective();
       root.remove();
     },
   };

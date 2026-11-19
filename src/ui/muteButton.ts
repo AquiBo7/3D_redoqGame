@@ -2,6 +2,7 @@
 // 边界：只操作音频模块的静音状态，不触碰剧情；避开调试面板与手机安全区。
 
 import { isMuted, playUiClick, setMuted, unlockAudio } from '../audio/audioManager';
+import { isShortcutKey } from './uiDom';
 import './muteButton.css';
 
 const ICON_ON = `
@@ -28,26 +29,40 @@ export function initMuteButton(): () => void {
     button.classList.toggle('is-muted', muted);
     button.setAttribute('aria-pressed', muted ? 'true' : 'false');
     button.setAttribute('aria-label', muted ? '取消静音' : '静音');
-    button.title = muted ? '取消静音' : '静音';
+    const shortcutHint = window.matchMedia('(pointer: coarse)').matches ? '' : ' (O)';
+    button.title = `${muted ? '取消静音' : '静音'}${shortcutHint}`;
   };
 
-  const handleClick = (event: MouseEvent): void => {
-    event.stopPropagation();
+  const toggle = (): void => {
     const next = !isMuted();
     setMuted(next);
     sync();
     if (!next) {
-      // 本次点击本身就是用户手势，可顺便解锁音频并给一声轻反馈
+      // 点击和键盘都是用户手势，可顺便解锁音频并给一声轻反馈
       unlockAudio();
       playUiClick();
     }
   };
 
+  const handleClick = (event: MouseEvent): void => {
+    event.stopPropagation();
+    toggle();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent): void => {
+    if (!isShortcutKey(event, 'KeyO')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toggle();
+  };
+
   button.addEventListener('click', handleClick);
+  window.addEventListener('keydown', handleKeyDown, true);
   sync();
   document.body.appendChild(button);
 
   return () => {
+    window.removeEventListener('keydown', handleKeyDown, true);
     button.removeEventListener('click', handleClick);
     button.remove();
   };

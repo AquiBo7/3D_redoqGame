@@ -2,7 +2,7 @@
 // 纯展示：所有内容来自 PhonePanel 数据；交互只通过回调交给 gameUi 转发事件总线。
 
 import type { PhonePanel, PhoneReplyOption, PhoneSection } from '../data/storySchema';
-import { createButton, createElement } from './uiDom';
+import { createButton, createElement, isShortcutKey } from './uiDom';
 import './phonePanel.css';
 
 type ChatSection = Extract<PhoneSection, { kind: 'chat' }>;
@@ -36,6 +36,31 @@ export class PhonePanelView {
   private readonly readSections = new Set<string>();
   private readonly answeredSections = new Set<string>();
   private readonly outgoing = new Map<string, string>();
+  private shortcutCooldownUntil = 0;
+
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (!this.isOpen() || !isShortcutKey(event, 'KeyE')) return;
+
+    // 冷却中的 E 也要消费，不能穿透到 World 交互或其他手机视图。
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const coolingDown = performance.now() < this.shortcutCooldownUntil;
+    this.refreshShortcutCooldown();
+    if (coolingDown) return;
+
+    if (this.view === 'lock') this.unlock();
+    else this.requestClose();
+  };
+
+  private refreshShortcutCooldown(): void {
+    this.shortcutCooldownUntil = performance.now() + 180;
+  }
+
+  private unlock(): void {
+    this.refreshShortcutCooldown();
+    this.view = 'home';
+    this.render();
+  }
 
   constructor(container: HTMLElement, callbacks: PhonePanelCallbacks) {
     this.callbacks = callbacks;
@@ -64,9 +89,11 @@ export class PhonePanelView {
     frame.append(status, this.body, footer);
     this.root.append(frame);
     container.append(this.root);
+    window.addEventListener('keydown', this.handleKeyDown, true);
   }
 
   open(panel: PhonePanel): void {
+    this.refreshShortcutCooldown();
     this.panel = panel;
     this.view = panel.lockTime ? 'lock' : 'home';
     this.openSectionId = null;
@@ -78,6 +105,7 @@ export class PhonePanelView {
   }
 
   hide(): void {
+    this.refreshShortcutCooldown();
     this.root.hidden = true;
     this.panel = null;
     this.openSectionId = null;
@@ -89,6 +117,8 @@ export class PhonePanelView {
   }
 
   dispose(): void {
+    window.removeEventListener('keydown', this.handleKeyDown, true);
+    this.hide();
     this.root.remove();
   }
 
@@ -134,10 +164,7 @@ export class PhonePanelView {
     }
 
     lockScreen.append(createElement('span', 'phone__lock-hint', '轻点进入'));
-    lockScreen.addEventListener('click', () => {
-      this.view = 'home';
-      this.render();
-    });
+    lockScreen.addEventListener('click', () => this.unlock());
 
     this.body.append(lockScreen);
   }
@@ -226,6 +253,7 @@ export class PhonePanelView {
   }
 
   private openSection(sectionId: string): void {
+    this.refreshShortcutCooldown();
     this.openSectionId = sectionId;
     this.readSections.add(sectionId);
     this.view = 'section';
@@ -244,6 +272,7 @@ export class PhonePanelView {
     const back = createButton('phone__back', '‹ 返回');
     back.setAttribute('aria-label', '返回手机主页');
     back.addEventListener('click', () => {
+      this.refreshShortcutCooldown();
       this.view = 'home';
       this.openSectionId = null;
       this.render();
@@ -353,6 +382,7 @@ export class PhonePanelView {
     const panel = this.panel;
     if (!panel) return;
 
+    this.refreshShortcutCooldown();
     this.answeredSections.add(section.id);
     const replyText = option.effects?.set?.momReply;
     if (typeof replyText === 'string' && replyText.trim().length > 0) {

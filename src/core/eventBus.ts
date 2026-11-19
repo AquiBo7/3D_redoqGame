@@ -74,6 +74,7 @@ export interface GameEvents {
     options: Array<{ id: string; text: string }>;
   };
   'ui:phoneVibrate': { vibrationId: string; preview: string };
+  'ui:showObjective': { sceneId: SceneId };
   'scene:cutscene': {
     stepId: string;
     key: string;

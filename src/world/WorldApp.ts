@@ -445,6 +445,7 @@ export class WorldApp {
 
     this.currentRuntime = getSceneRuntime(sceneId);
     this.currentRuntime?.enter(this.createRuntimeContext(sceneId));
+    if (sceneId === 'S4') this.bus.emit('ui:showObjective', { sceneId });
     this.syncHudHints();
     this.initialMounted = true;
 

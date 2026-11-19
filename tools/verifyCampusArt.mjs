@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 
-const base = process.env.CAMPUS_URL ?? 'http://localhost:5173/';
+const base = process.env.CAMPUS_URL ?? 'http://127.0.0.1:5174/';
 const browser = await chromium.launch({
   executablePath: 'C:/Users/AnQi/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe',
   headless: true,
@@ -175,7 +175,10 @@ async function enter(page, id) {
   await settle(page);
   await page.goto(id === 'S1' ? base : `${base}?scene=${id}`, { waitUntil: 'load' });
   const start = page.locator('#btn-start');
-  if (await start.isVisible()) await start.click();
+  if (await start.isVisible()) {
+    await start.click();
+    await page.locator('.controls-guide__enter').click();
+  }
   await page.waitForFunction((sceneId) => window.__worldApp?.getSceneId() === sceneId, id, { timeout: 60000 });
   await page.waitForFunction(() => {
     const fade = document.querySelector('.scene-fade');

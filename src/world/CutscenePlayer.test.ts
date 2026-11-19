@@ -106,6 +106,32 @@ describe('CutscenePlayer 出门过场', () => {
     vi.unstubAllGlobals();
   });
 
+  it('配置准备阶段时保留自由控制，准备结束再锁定并读取最新站位', () => {
+    anchor!.preparationMs = 4200;
+    playRun();
+    expect(player.isPlaying()).toBe(true);
+    expect(setCinematic).not.toHaveBeenCalledWith(true);
+    expect(animation.tweens).toHaveLength(0);
+    vi.advanceTimersByTime(4199);
+    expect(animation.tweens).toHaveLength(0);
+    camera.position.set(1, 1.6, 1);
+    vi.advanceTimersByTime(1);
+    expect(setCinematic).toHaveBeenCalledWith(true);
+    expect(animation.tweens.length).toBeGreaterThan(0);
+    updateMotion(0, 1);
+    expect(camera.position.toArray()).toEqual([1, 1.6, 1]);
+  });
+
+  it('准备阶段被跳关打断后不再延迟播放', () => {
+    anchor!.preparationMs = 4200;
+    playRun();
+    bus.emit('scene:transition', { fromSceneId: 'S3', toSceneId: 'S4', sceneKey: 'street', role: 'bystander', title: '' });
+    vi.advanceTimersByTime(9000);
+    expect(player.isPlaying()).toBe(false);
+    expect(animation.tweens).toHaveLength(0);
+    expect(onEnd).not.toHaveBeenCalled();
+  });
+
   it.each([
     [0, 0, 0, 0.4],
     [2, 1, Math.PI, -0.8],
