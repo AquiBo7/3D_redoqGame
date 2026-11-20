@@ -61,12 +61,13 @@ function createDetails() {
     }
     return material;
   };
-  const box = (parent: THREE.Object3D, name: string, p: V3, s: V3, material: THREE.Material): THREE.Mesh => {
+  const box = (parent: THREE.Object3D, name: string, p: V3, s: V3, material: THREE.Material,
+    castShadow = true): THREE.Mesh => {
     const mesh = new THREE.Mesh(boxGeometry, material);
     mesh.name = name;
     mesh.position.set(...p);
     mesh.scale.set(...s);
-    mesh.castShadow = true;
+    mesh.castShadow = castShadow;
     mesh.receiveShadow = true;
     parent.add(mesh);
     return mesh;
@@ -134,17 +135,18 @@ function group(parent: THREE.Object3D, name: string): THREE.Group {
   return result;
 }
 function sign(parent: THREE.Object3D, name: string, text: string, width: number, height: number, p: V3,
-  background = '#475b58', foreground = '#f1e8d2'): THREE.Mesh {
+  background = '#475b58', foreground = '#f1e8d2', castShadow = false): THREE.Mesh {
   const mesh = createTextSign(text, width, height, { background, foreground });
   mesh.name = name;
   mesh.position.set(...p);
+  mesh.castShadow = castShadow;
   parent.add(mesh);
   return mesh;
 }
 
 /** 几何褶皱而非一块平盒：布纹 UV 保留，底边有自然高低与前后摆幅。 */
 function drape(parent: THREE.Object3D, name: string, w: number, h: number, p: V3,
-  material: THREE.Material, yaw = 0): THREE.Mesh {
+  material: THREE.Material, yaw = 0, castShadow = true): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(w, h, Math.ceil(w * 22), 4);
   const positions = geometry.getAttribute('position');
   for (let i = 0; i < positions.count; i += 1) {
@@ -158,7 +160,7 @@ function drape(parent: THREE.Object3D, name: string, w: number, h: number, p: V3
   mesh.name = name;
   mesh.position.set(...p);
   mesh.rotation.y = yaw;
-  mesh.castShadow = true;
+  mesh.castShadow = castShadow;
   mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
@@ -211,7 +213,7 @@ function buildTent(parent: THREE.Object3D, d: Details): THREE.Group {
     ['left', 2.5, [-1.98, 2.86, -4.3], -Math.PI / 2], ['right', 2.5, [1.98, 2.86, -4.3], Math.PI / 2],
   ] as const) {
     drape(tent, `desk-tent-valance-${name}`, width, 0.32, [...p], green, yaw);
-    drape(tent, `desk-tent-hem-${name}`, width, 0.055, [p[0], 2.723, p[2]], cream, yaw);
+    drape(tent, `desk-tent-hem-${name}`, width, 0.055, [p[0], 2.723, p[2]], cream, yaw, false);
   }
   sign(tent, 'desk-registration-banner', '新生报到 · 迟到登记', 3.12, 0.26, [0, 2.875, -3.019]);
   return tent;
@@ -220,7 +222,7 @@ function buildTent(parent: THREE.Object3D, d: Details): THREE.Group {
 function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
   const table = group(parent, 'desk-registration-table');
   const metal = d.matte(0x536261, 0.48, 0.45);
-  d.box(table, 'desk-tabletop', [DESK.center.x, 0.775, DESK.center.z], [DESK.size.w, 0.05, DESK.size.d], d.matte(0x8d7f6c));
+  d.box(table, 'desk-tabletop', [DESK.center.x, 0.775, DESK.center.z], [DESK.size.w, 0.05, DESK.size.d], d.matte(0x8d7f6c), false);
   d.rods(table, 'desk-folding-table-legs', metal, [-1.08, 1.08].flatMap((x) => [
     { a: [x, 0.03, -3.65] as V3, b: [x, 0.75, -4.35] as V3, radius: 0.026 },
     { a: [x, 0.03, -4.35] as V3, b: [x, 0.75, -3.65] as V3, radius: 0.026 },
@@ -237,16 +239,17 @@ function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
   printing.name = 'desk-form-print';
   printing.rotation.x = -Math.PI / 2;
   printing.position.set(0, 0.841, -3.56);
+  printing.castShadow = false;
   table.add(printing);
   form.userData.hotspotId = 'reason-form';
   const heading = sign(table, 'desk-form-title', '迟到登记表', 0.3, 0.055, [0, 0.842, -3.67], '#e8e2d0', '#606759');
   heading.rotation.x = -Math.PI / 2;
   d.box(table, 'desk-register-book', [-0.58, 0.855, -3.62], [0.34, 0.04, 0.24], d.matte(0x7d5b52));
-  d.box(table, 'desk-register-pages', [-0.58, 0.878, -3.62], [0.3, 0.006, 0.2], d.matte(0xe9e4d6));
+  d.box(table, 'desk-register-pages', [-0.58, 0.878, -3.62], [0.3, 0.006, 0.2], d.matte(0xe9e4d6), false);
   d.rods(table, 'desk-signature-pen', metal, [{ a: [0.255, 0.856, -3.5], b: [0.425, 0.856, -3.5], radius: 0.008 }]);
   d.boxes(table, 'desk-pen-clip-and-tip', d.matte(0xc6c9bb, 0.35, 0.65), [
     { p: [0.26, 0.856, -3.5], s: [0.012, 0.01, 0.01] }, { p: [0.385, 0.866, -3.5], s: [0.055, 0.004, 0.005] },
-  ]);
+  ], false);
 
   const triangle = group(table, 'desk-triangle-nameplate');
   const front = sign(triangle, 'desk-triangle-sign', '迟到登记处', 0.72, 0.272, [-0.12, 0.938, -4.14]);
@@ -256,7 +259,7 @@ function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
   back.position.set(-0.12, 0.938, -4.3);
   back.rotation.x = Math.atan2(0.16, 0.22);
   triangle.add(back);
-  d.box(triangle, 'desk-triangle-base', [-0.12, 0.825, -4.22], [0.72, 0.01, 0.32], d.matte(0xe4ddc6));
+  d.box(triangle, 'desk-triangle-base', [-0.12, 0.825, -4.22], [0.72, 0.01, 0.32], d.matte(0xe4ddc6), false);
 
   for (const [stack, x, color] of [['teal', 0.59, 0x487d82], ['ochre', -0.76, 0xb58a46]] as const) {
     const books = group(table, `desk-guide-stack-${stack}`);
@@ -270,7 +273,7 @@ function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
         { p: [px, y + 0.018, -4.13], s: [0.36, 0.005, 0.26] },
         { p: [px - 0.177, y, -4.13], s: [0.006, 0.035, 0.26] });
     }
-    d.boxes(books, `desk-guide-${stack}-white-pages`, d.matte(0xf1eddf), pages);
+    d.boxes(books, `desk-guide-${stack}-white-pages`, d.matte(0xf1eddf), pages, false);
     d.boxes(books, `desk-guide-${stack}-covers`, d.matte(color), covers);
     const label = sign(books, `desk-guide-${stack}-title`, '新生报到指南', 0.29, 0.075, [x, 0.945, -4.13],
       stack === 'teal' ? '#487d82' : '#b58a46');
@@ -281,7 +284,7 @@ function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
   cup.material.side = THREE.DoubleSide;
   cup.position.set(1.09, 0.902, -4.28);
   holder.add(cup);
-  d.box(holder, 'desk-pen-cup-bottom', [1.09, 0.826, -4.28], [0.085, 0.008, 0.085], metal);
+  d.box(holder, 'desk-pen-cup-bottom', [1.09, 0.826, -4.28], [0.085, 0.008, 0.085], metal, false);
   d.rods(holder, 'desk-cup-stationery', d.matte(0xffffff, 0.55), Array.from({ length: 8 }, (_, i) => {
     const angle = i * 2.399;
     const x = 1.09 + Math.cos(angle) * 0.035;
@@ -294,11 +297,11 @@ function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
     { p: [-1.12, 0.958, -4.25], s: [0.065, 0.28, 0.065] },
     { p: [-1.12, 1.11, -4.25], s: [0.07, 0.024, 0.07] },
   ]);
-  d.box(flask, 'desk-flask-grip', [-1.052, 0.996, -4.25], [0.032, 0.112, 0.022], metal);
+  d.box(flask, 'desk-flask-grip', [-1.052, 0.996, -4.25], [0.032, 0.112, 0.022], metal, false);
   const clipboard = group(table, 'desk-volunteer-clipboard');
-  d.box(clipboard, 'desk-clipboard-board', [0.47, 0.827, -4.43], [0.34, 0.016, 0.18], d.matte(0x9c815d));
-  d.box(clipboard, 'desk-clipboard-paper', [0.47, 0.838, -4.43], [0.3, 0.006, 0.15], d.matte(0xeae6d7));
-  d.box(clipboard, 'desk-clipboard-clip', [0.47, 0.846, -4.49], [0.09, 0.012, 0.024], metal);
+  d.box(clipboard, 'desk-clipboard-board', [0.47, 0.827, -4.43], [0.34, 0.016, 0.18], d.matte(0x9c815d), false);
+  d.box(clipboard, 'desk-clipboard-paper', [0.47, 0.838, -4.43], [0.3, 0.006, 0.15], d.matte(0xeae6d7), false);
+  d.box(clipboard, 'desk-clipboard-clip', [0.47, 0.846, -4.49], [0.09, 0.012, 0.024], metal, false);
   const lanyards = group(table, 'desk-lanyard-box');
   d.boxes(lanyards, 'desk-lanyard-tray', d.matte(0xd6cfb7), [
     { p: [0.96, 0.825, -3.83], s: [0.4, 0.014, 0.26] },
@@ -308,10 +311,10 @@ function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
     { p: [1.166, 0.856, -3.83], s: [0.012, 0.062, 0.28] },
   ]);
   d.instances(lanyards, 'desk-lanyard-cord-loops', new THREE.TorusGeometry(0.043, 0.004, 4, 16), d.matte(0x427e79),
-    Array.from({ length: 5 }, (_, i) => ({ p: [0.82 + i * 0.062, 0.84 + i * 0.004, -3.86], s: [1, 1.5, 1], r: [-Math.PI / 2, 0, 0] })));
+    Array.from({ length: 5 }, (_, i) => ({ p: [0.82 + i * 0.062, 0.84 + i * 0.004, -3.86], s: [1, 1.5, 1], r: [-Math.PI / 2, 0, 0] })), false);
   d.boxes(lanyards, 'desk-lanyard-cards', d.matte(0xf1ead8), Array.from({ length: 5 }, (_, i) => ({
     p: [0.82 + i * 0.062, 0.845 + i * 0.004, -3.77], s: [0.045, 0.005, 0.065],
-  })));
+  })), false);
   return table;
 }
 
@@ -337,13 +340,13 @@ function buildSupplyBox(parent: THREE.Object3D, d: Details): THREE.Group {
     { p: [-0.31, 0.294, 0.361], s: [0.006, 0.51, 0.003] },
     { p: [0.31, 0.294, 0.361], s: [0.006, 0.51, 0.003] },
     { p: [0, 0.062, 0.363], s: [0.86, 0.016, 0.004] },
-  ]);
+  ], false);
   d.boxes(box, 'desk-supply-packed-guide-pages', d.matte(0xece6d7), [
     { p: [-0.25, 0.105, 0], s: [0.18, 0.12, 0.39] }, { p: [0.26, 0.095, -0.09], s: [0.18, 0.1, 0.24] },
-  ]);
+  ], false);
   d.boxes(box, 'desk-supply-packed-guide-covers', d.matte(0x527b79), [
     { p: [-0.25, 0.169, 0], s: [0.2, 0.006, 0.41] }, { p: [0.26, 0.149, -0.09], s: [0.2, 0.006, 0.26] },
-  ]);
+  ], false);
   sign(box, 'desk-supply-label', '迎新物资', 0.58, 0.18, [0, 0.32, 0.365], '#d8c5a1', '#68563c');
   return box;
 }
@@ -368,10 +371,10 @@ function buildWelcomeStand(parent: THREE.Object3D, d: Details): THREE.Group {
     { p: [0, 1.03, 0.012], s: [0.56, 0.43, 0.004] },
     { p: [0, 1.27, 0.012], s: [0.67, 0.055, 0.004] },
     { p: [0, 0.74, 0.012], s: [0.2, 0.15, 0.004] },
-  ]);
+  ], false);
   d.boxes(stand, 'desk-rollup-printed-windows', d.matte(0xe8dfb8), [-0.17, 0, 0.17].flatMap((x) => [0.96, 1.11].map((y) => ({
     p: [x, y, 0.016], s: [0.075, 0.075, 0.002],
-  }))));
+  }))), false);
   return stand;
 }
 
@@ -389,9 +392,10 @@ function buildCampus(parent: THREE.Object3D, d: Details, time: WindTime): void {
   const beds = group(parent, 'desk-side-planters');
   const bricks: Part[] = [];
   const caps: Part[] = [];
+  const soils: Part[] = [];
   for (const side of [-1, 1]) {
     const x = side * 6.5;
-    d.box(beds, `desk-planter-soil-${side}`, [x, 0.14, -13], [2, 0.28, 20], d.matte(0x524a39));
+    soils.push({ p: [x, 0.14, -13], s: [2, 0.28, 20] });
     for (let row = 0; row < 3; row += 1) {
       for (let z = -22.6; z < -3; z += 0.64) {
         for (const edge of [-1.05, 1.05]) bricks.push({ p: [x + edge, 0.06 + row * 0.115, z + row % 2 * 0.12], s: [0.18, 0.105, 0.6] });
@@ -403,6 +407,7 @@ function buildCampus(parent: THREE.Object3D, d: Details, time: WindTime): void {
     caps.push({ p: [x - 1.05, 0.36, -13], s: [0.25, 0.08, 20.2] },
       { p: [x + 1.05, 0.36, -13], s: [0.25, 0.08, 20.2] });
   }
+  d.boxes(beds, 'desk-planter-soil', d.matte(0x524a39), soils, false);
   d.boxes(beds, 'desk-planter-masonry-bricks', d.matte(0x997d68), bricks);
   d.boxes(beds, 'desk-planter-stone-caps', d.matte(0xc0bba6), caps);
   createCampusMeadow(parent, 'desk-campus', [-1, 1].map((side) => ({
@@ -456,13 +461,13 @@ function buildCampus(parent: THREE.Object3D, d: Details, time: WindTime): void {
       { p: [-1.2, 0.6, 0], s: [0.065, 1.2, 0.065] }, { p: [1.2, 0.6, 0], s: [0.065, 1.2, 0.065] },
     ]);
     sign(board, 'desk-notice-title', '校园活动 · 新生指南', 2.28, 0.28, [0, 2.22, 0.069]);
-    d.boxes(board, 'desk-notice-posters', d.matte(0xe8dfc5), [-0.8, 0, 0.8].map((x) => ({ p: [x, 1.6, 0.07], s: [0.62, 0.82, 0.006] })));
+    d.boxes(board, 'desk-notice-posters', d.matte(0xe8dfc5), [-0.8, 0, 0.8].map((x) => ({ p: [x, 1.6, 0.07], s: [0.62, 0.82, 0.006] })), false);
     sign(board, 'desk-notice-poster-1', '社团见面日', 0.59, 0.16, [-0.8, 1.82, 0.075], '#e8dfc5', '#786551');
     sign(board, 'desk-notice-poster-2', '图书借阅指南', 0.59, 0.16, [0, 1.82, 0.075], '#e8dfc5', '#526961');
     sign(board, 'desk-notice-poster-3', '校园漫步', 0.59, 0.16, [0.8, 1.82, 0.075], '#e8dfc5', '#786551');
     d.boxes(board, 'desk-notice-poster-lines', d.matte(0xb7b29d), [-0.8, 0, 0.8].flatMap((x) => [1.3, 1.45, 1.6].map((y) => ({
       p: [x, y, 0.075], s: [0.45, 0.025, 0.003],
-    }))));
+    }))), false);
     const guide = group(parent, `desk-campus-wayfinding-${side}`);
     guide.position.set(side * 4.4, 0, -12.3);
     d.rods(guide, 'desk-guide-post', metal, [{ a: [0, 0, 0], b: [0, 2.6, 0], radius: 0.035 }]);
@@ -507,18 +512,18 @@ function buildSchool(parent: THREE.Object3D, d: Details): void {
     }
     trims.push({ p: [x, 9.35, z], s: [width + 0.4, 0.16, depth + 0.4] });
   }
-  d.boxes(school, 'desk-school-window-recesses', d.matte(0x59665e), reveals);
-  d.boxes(school, 'desk-school-reflective-glass', getWindowGlassMaterial(), glass);
+  d.boxes(school, 'desk-school-window-recesses', d.matte(0x59665e), reveals, false);
+  d.boxes(school, 'desk-school-reflective-glass', getWindowGlassMaterial(), glass, false);
   const warmGlass = tint(getWindowGlassMaterial(), 0xe3b66c);
   warmGlass.emissive.setHex(0xefc284);
   warmGlass.emissiveIntensity = 0.4;
-  d.boxes(school, 'desk-school-warm-interior-windows', warmGlass, warm);
+  d.boxes(school, 'desk-school-warm-interior-windows', warmGlass, warm, false);
   d.boxes(school, 'desk-school-window-frames-and-sills', d.matte(0xb2b7a7, 0.64, 0.12), frames);
   d.boxes(school, 'desk-school-window-sky-reflections', d.matte(0xbfcfd0, 0.12, 0.4), reflections, false);
   d.boxes(school, 'desk-school-floor-and-roof-trims', d.matte(0x8c9788), trims);
   d.boxes(school, 'desk-school-entrance-glass-doors', getWindowGlassMaterial(), [
     { p: [-0.6, 1.2, -25.72], s: [1.15, 2.4, 0.045] }, { p: [0.6, 1.2, -25.72], s: [1.15, 2.4, 0.045] },
-  ]);
+  ], false);
   const metal = d.matte(0x475b58, 0.42, 0.5);
   d.boxes(school, 'desk-school-door-frames', metal, [-1.22, 0, 1.22].map((x) => ({ p: [x, 1.2, -25.66], s: [0.07, 2.4, 0.1] })));
   d.box(school, 'desk-school-entry-rain-canopy', [0, 2.75, -25.1], [4.2, 0.12, 2], metal);
@@ -554,15 +559,20 @@ function buildDesk(parent: THREE.Object3D): { occluders: THREE.Object3D[]; actor
   const medicineBag = group(parent, 'desk-medicine-bag');
   medicineBag.position.set(MEDICINE_BAG.center.x, MEDICINE_BAG.center.y, MEDICINE_BAG.center.z);
   d.box(medicineBag, 'desk-medicine-bag-body', [0, 0, 0], [MEDICINE_BAG.size.w, MEDICINE_BAG.size.h, MEDICINE_BAG.size.d], d.matte(0xc7b98f));
-  d.box(medicineBag, 'desk-medicine-label', [0, 0.093, 0], [0.18, 0.005, 0.14], d.matte(0xe9e3d3));
+  d.box(medicineBag, 'desk-medicine-label', [0, 0.093, 0], [0.18, 0.005, 0.14], d.matte(0xe9e3d3), false);
   d.boxes(medicineBag, 'desk-medicine-cross', d.matte(0xb45a52), [
     { p: [0, 0.098, 0], s: [0.1, 0.004, 0.024] }, { p: [0, 0.098, 0], s: [0.024, 0.004, 0.1] },
-  ]);
+  ], false);
   occluders.push(medicineBag);
-  for (const [index, column] of BACK_GATE_COLUMNS.entries()) {
-    occluders.push(d.box(parent, `desk-back-gate-column-${index}`, [column.center.x, column.center.y, column.center.z],
-      [column.size.w, column.size.h, column.size.d], d.matte(0x8d949a)));
-  }
+  occluders.push(d.boxes(
+    parent,
+    'desk-back-gate-columns',
+    d.matte(0x8d949a),
+    BACK_GATE_COLUMNS.map((column) => ({
+      p: [column.center.x, column.center.y, column.center.z] as V3,
+      s: [column.size.w, column.size.h, column.size.d] as V3,
+    })),
+  ));
   const volunteer = createCharacterActor('volunteer', 1.7, 0xb08a72, { yaw: 0 });
   volunteer.position.set(STANDS.volunteer.x, 0, STANDS.volunteer.z);
   const linxia = createCharacterActor('linxia', 1.62, 0xe8d9a8, { yaw: -0.8 });
@@ -582,10 +592,20 @@ function buildDesk(parent: THREE.Object3D): { occluders: THREE.Object3D[]; actor
 
 let stateSubscription: (() => void) | null = null;
 let idleDisposers: Array<() => void> = [];
-interface AnimatedActor { actor: THREE.Object3D; clip: string; timeScale: number; controller: CharacterAnimationController | null }
+interface AnimatedActor {
+  actor: THREE.Object3D;
+  clip: string;
+  timeScale: number;
+  controller: CharacterAnimationController | null;
+  throttleWhenFar: boolean;
+  accumDt: number;
+  tickCount: number;
+}
 let animatedActors: AnimatedActor[] = [];
 let walker: THREE.Object3D | null = null;
 let windTime: WindTime | null = null;
+let deskPlayerFeetGetter: ((target: THREE.Vector3) => THREE.Vector3) | undefined;
+const deskPlayerFeet = new THREE.Vector3();
 
 function clearRuntime(): void {
   stateSubscription?.();
@@ -596,20 +616,39 @@ function clearRuntime(): void {
   animatedActors = [];
   walker = null;
   windTime = null;
+  deskPlayerFeetGetter = undefined;
 }
 function updateAnimation(record: AnimatedActor, dt: number): void {
+  if (!record.actor.visible) return;
   // 预载超时后的模型热替换仍可补上原生动画；不改脚底外层位置。
   if (!record.controller) {
     record.controller = createActorAnimation(record.actor);
     record.controller?.play(record.clip, { timeScale: record.timeScale, fadeIn: 0.6 });
+    record.controller?.update(dt);
+    return;
   }
-  record.controller?.update(dt);
+  if (record.throttleWhenFar && deskPlayerFeetGetter && dt > 0) {
+    const dx = record.actor.position.x - deskPlayerFeet.x;
+    const dz = record.actor.position.z - deskPlayerFeet.z;
+    if (dx * dx + dz * dz > 16 * 16) {
+      record.accumDt += dt;
+      record.tickCount += 1;
+      if (record.tickCount % 2 !== 0) return;
+      record.controller.update(record.accumDt);
+      record.accumDt = 0;
+      return;
+    }
+  }
+  const updateDt = dt + record.accumDt;
+  record.accumDt = 0;
+  record.controller.update(updateDt);
 }
 
 export const deskRuntime: SceneRuntime = {
   enter(context: SceneRuntimeContext): void {
     if (context.sceneId !== 'S7') return;
     clearRuntime();
+    deskPlayerFeetGetter = context.getPlayerFeet;
     windTime = (context.actors.deskEnvironment?.userData.windTime as WindTime | undefined) ?? null;
     for (const [index, id] of ['volunteer', 'linxia', 'father'].entries()) {
       const actor = context.actors[id];
@@ -619,7 +658,16 @@ export const deskRuntime: SceneRuntime = {
     for (const [id, clip, timeScale] of [['linxia', 'afraid', 0.45], ['studentWalker', 'walk', 0.7], ['studentReader', 'fold_arms', 0.8]] as const) {
       const actor = context.actors[id];
       if (!actor) continue;
-      const record: AnimatedActor = { actor, clip: id === 'studentWalker' && actor.position.z <= -17.5 ? 'idle' : clip, timeScale, controller: null };
+      const isArrivedWalker = id === 'studentWalker' && actor.position.z <= -17.5;
+      const record: AnimatedActor = {
+        actor,
+        clip: isArrivedWalker ? 'idle' : clip,
+        timeScale,
+        controller: null,
+        throttleWhenFar: id === 'studentReader' || isArrivedWalker,
+        accumDt: 0,
+        tickCount: 0,
+      };
       animatedActors.push(record);
       updateAnimation(record, 0);
     }
@@ -633,12 +681,14 @@ export const deskRuntime: SceneRuntime = {
   tick(dtSeconds: number): void {
     if (dtSeconds <= 0) return;
     if (windTime) windTime.value += dtSeconds;
+    deskPlayerFeetGetter?.(deskPlayerFeet);
     if (walker) {
       walker.position.z = Math.max(-17.5, walker.position.z - 0.62 * dtSeconds);
       walker.position.y = NAV.groundY ?? 0;
       const record = animatedActors.find(({ actor }) => actor === walker);
       if (record && walker.position.z <= -17.5 && record.clip !== 'idle') {
         record.clip = 'idle';
+        record.throttleWhenFar = true;
         record.controller?.play('idle', { fadeIn: 0.4, timeScale: 0.8 });
       }
     }

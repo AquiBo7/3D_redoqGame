@@ -788,23 +788,28 @@ function buildGate(parent: THREE.Object3D): {
     if (object.boundingSphere) object.boundingSphere.radius += 0.09;
   }
 
-  for (const [index, step] of STEPS.entries()) {
-    const mesh = addBox(parent, step.center, step.size, 0x9aa3a0);
-    mesh.receiveShadow = true;
-    mesh.castShadow = false;
-    // 台阶前缘防滑条：随台阶抬升，仅 1.2cm 厚，不影响通行与热点
-    addBox(
-      parent,
-      {
-        x: 0,
-        y: STEP_RISE * (index + 1) + 0.006,
-        z: STEPS_Z_START - STEP_DEPTH * index - 0.035,
-      },
-      { w: 6.9, h: 0.012, d: 0.06 },
-      0xb7bcb6,
-      { castShadow: false },
-    );
-  }
+  gateBoxes(
+    parent,
+    'gate-steps-body',
+    STEPS.map((step) => [step.center.x, step.center.y, step.center.z, step.size.w, step.size.h, step.size.d]),
+    new THREE.MeshStandardMaterial({ color: 0x9aa3a0, roughness: 0.9 }),
+    false,
+  );
+  // 台阶前缘防滑条：随台阶抬升，仅 1.2cm 厚，合并为 InstancedMesh 以降低 DrawCall
+  gateBoxes(
+    parent,
+    'gate-steps-antislip',
+    STEPS.map((_, index) => [
+      0,
+      STEP_RISE * (index + 1) + 0.006,
+      STEPS_Z_START - STEP_DEPTH * index - 0.035,
+      6.9,
+      0.012,
+      0.06,
+    ]),
+    new THREE.MeshStandardMaterial({ color: 0xb7bcb6, roughness: 0.9 }),
+    false,
+  );
 
   // 围观人群：3D 角色错落面向台阶中央，部分举低饱和手机方块
   const crowdActors: Record<string, THREE.Object3D> = {};
@@ -856,21 +861,20 @@ function buildGate(parent: THREE.Object3D): {
   // 爸爸手提的两只袋子：与 createCharacterProp 的袋子同高同距（袋顶≈0.81m，贴手侧自然下垂），
   // 组原点回到地面 y=0，避免旧版 y=0.55 + 内层 0.5 造成箱子漂在胸口的穿帮
   const bagsSolo = new THREE.Group();
-  for (const side of [-1, 1]) {
-    addBox(
-      bagsSolo,
-      { x: side * 0.2, y: 0.6, z: 0 },
-      { w: 0.3, h: 0.42, d: 0.24 },
-      0x9b8f78,
-    );
-    addBox(
-      bagsSolo,
-      { x: side * 0.2, y: 0.84, z: 0 },
-      { w: 0.16, h: 0.035, d: 0.04 },
-      0x7e7464,
-      { castShadow: false },
-    );
-  }
+  gateBoxes(
+    bagsSolo,
+    'gate-bags-body',
+    [-1, 1].map((side) => [side * 0.2, 0.6, 0, 0.3, 0.42, 0.24]),
+    new THREE.MeshStandardMaterial({ color: 0x9b8f78, roughness: 0.9 }),
+    true,
+  );
+  gateBoxes(
+    bagsSolo,
+    'gate-bags-handle',
+    [-1, 1].map((side) => [side * 0.2, 0.84, 0, 0.16, 0.035, 0.04]),
+    new THREE.MeshStandardMaterial({ color: 0x7e7464, roughness: 0.9 }),
+    false,
+  );
   bagsSolo.position.set(SPLIT_POS.bags.x, gateGround(SPLIT_POS.bags), SPLIT_POS.bags.z);
   bagsSolo.visible = false;
 
@@ -904,8 +908,51 @@ let linxiaAnimation: CharacterAnimationController | null = null;
 let gateActors: Record<string, THREE.Object3D> = {};
 const actorAnimations = new Map<string, CharacterAnimationController>();
 const walkerStates = new Map<string, { delay: number; arrived: boolean }>();
+const actorThrottleState = new Map<string, { accum: number; tick: number }>();
+const gatePlayerFeet = new THREE.Vector3();
+let gatePlayerFeetGetter: ((target: THREE.Vector3) => THREE.Vector3) | undefined;
 let linxiaWalking = false;
 let passengerPosed = false;
+
+function consumeActorAnimationDt(
+  id: string,
+  actor: THREE.Object3D,
+  dtSeconds: number,
+  throttleWhenFar: boolean,
+): number | null {
+  if (!actor.visible) return null;
+  if (!throttleWhenFar || !gatePlayerFeetGetter || !actorAnimations.has(id)) {
+    const stale = actorThrottleState.get(id);
+    if (stale && stale.accum > 0) {
+      const total = dtSeconds + stale.accum;
+      stale.accum = 0;
+      return total;
+    }
+    return dtSeconds;
+  }
+  const dx = actor.position.x - gatePlayerFeet.x;
+  const dz = actor.position.z - gatePlayerFeet.z;
+  if (dx * dx + dz * dz <= 18 * 18) {
+    const stale = actorThrottleState.get(id);
+    if (stale && stale.accum > 0) {
+      const total = dtSeconds + stale.accum;
+      stale.accum = 0;
+      return total;
+    }
+    return dtSeconds;
+  }
+  let state = actorThrottleState.get(id);
+  if (!state) {
+    state = { accum: 0, tick: 0 };
+    actorThrottleState.set(id, state);
+  }
+  state.accum += dtSeconds;
+  state.tick += 1;
+  if (state.tick % 2 !== 0) return null;
+  const total = state.accum;
+  state.accum = 0;
+  return total;
+}
 
 function disposeLinxiaAnimation(): void {
   linxiaAnimation?.dispose();
@@ -1019,6 +1066,7 @@ function startGateIdleMotions(actors: Record<string, THREE.Object3D>): void {
 export const gateRuntime: SceneRuntime = {
   enter(context: SceneRuntimeContext): void {
     gateActors = context.actors;
+    gatePlayerFeetGetter = context.getPlayerFeet;
     for (const path of GATE_WALKERS) {
       if (context.actors[path.id] && !walkerStates.has(path.id)) {
         walkerStates.set(path.id, { delay: path.delay, arrived: false });
@@ -1040,6 +1088,7 @@ export const gateRuntime: SceneRuntime = {
 
   tick(dtSeconds: number): void {
     gateWindTime.value += dtSeconds;
+    gatePlayerFeetGetter?.(gatePlayerFeet);
     if (!passengerPosed && gateActors.carryLinxia) {
       passengerPosed = posePiggybackPassenger(gateActors.carryLinxia);
     }
@@ -1047,10 +1096,10 @@ export const gateRuntime: SceneRuntime = {
       const actor = gateActors[id];
       if (actor) actor.position.y = gateGround(actor.position);
     }
-    const clips: Array<[string, string, number]> = [
-      ['carryFather', 'Piggyback_Walk_Loop', 0.85],
-      ['crowd-1', 'idle', 0.7],
-      ['crowd-3', 'fold_arms', 0.65],
+    const clips: Array<[string, string, number, boolean]> = [
+      ['carryFather', 'Piggyback_Walk_Loop', 0.85, false],
+      ['crowd-1', 'idle', 0.7, true],
+      ['crowd-3', 'fold_arms', 0.65, true],
     ];
     for (const path of GATE_WALKERS) {
       const actor = gateActors[path.id];
@@ -1061,28 +1110,39 @@ export const gateRuntime: SceneRuntime = {
       actor.position.z = Math.max(path.endZ, actor.position.z - movingSeconds * path.speed);
       actor.position.y = gateGround(actor.position);
       state.arrived = actor.position.z <= path.endZ;
-      clips.push([path.id, state.arrived || state.delay > 0 ? path.arrivedClip : 'walk', state.arrived ? 0.65 : 0.82]);
+      clips.push([
+        path.id,
+        state.arrived || state.delay > 0 ? path.arrivedClip : 'walk',
+        state.arrived ? 0.65 : 0.82,
+        state.arrived,
+      ]);
     }
-    for (const [id, clip, timeScale] of clips) {
+    for (const [id, clip, timeScale, throttleWhenFar] of clips) {
       const actor = gateActors[id];
-      if (!actor || (id === 'carryFather' && !gateActors.carryGroup.visible)) continue;
+      if (!actor || (id === 'carryFather' && !gateActors.carryGroup?.visible)) continue;
+      const updateDt = consumeActorAnimationDt(id, actor, dtSeconds, throttleWhenFar);
+      if (updateDt === null) continue;
       let animation = actorAnimations.get(id);
       if (!animation) {
         animation = createActorAnimation(actor) ?? undefined;
         if (animation) actorAnimations.set(id, animation);
       }
       animation?.play(clip, { timeScale, fadeIn: 0.25 });
-      animation?.update(dtSeconds);
+      animation?.update(updateDt);
     }
-    if (!linxiaAnimation && gateActors.linxiaSolo?.visible) {
-      linxiaAnimation = createActorAnimation(gateActors.linxiaSolo);
-      linxiaAnimation?.play(linxiaWalking ? 'walk' : 'afraid', { timeScale: linxiaWalking ? 0.8 : 0.25 });
+    if (gateActors.linxiaSolo?.visible) {
+      if (!linxiaAnimation) {
+        linxiaAnimation = createActorAnimation(gateActors.linxiaSolo);
+        linxiaAnimation?.play(linxiaWalking ? 'walk' : 'afraid', { timeScale: linxiaWalking ? 0.8 : 0.25 });
+      }
+      linxiaAnimation?.update(dtSeconds);
     }
-    linxiaAnimation?.update(dtSeconds);
   },
 
   exit(): void {
     walkerStates.clear();
+    actorThrottleState.clear();
+    gatePlayerFeetGetter = undefined;
     for (const animation of actorAnimations.values()) animation.dispose();
     actorAnimations.clear();
     gateActors = {};

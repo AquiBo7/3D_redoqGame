@@ -377,8 +377,12 @@ try {
   await page.evaluate(() => window.__worldApp.teleport(4.6, -43.6, 22));
   await shot(page, 'S9-entry-right');
   await page.getByRole('button', { name: '不看。', exact: true }).click();
-  await page.locator('.chapter-end:not([hidden])').waitFor();
-  check('S9 选项到章节结尾', true);
+  await waitState(
+    page,
+    () => ['S10', 'S11'].includes(window.__worldApp.getSceneId()),
+    'S9 选项推进到 S10 过场',
+  );
+  check('S9 选项推进到 S10 过场', true);
   await settle(page);
   await page.close();
 

@@ -1228,19 +1228,24 @@ function buildBuilding(parent: THREE.Object3D): {
 
 let campusIdleActors: THREE.Object3D[] = [];
 const campusIdleAnimations = new Map<THREE.Object3D, CharacterAnimationController>();
+const campusIdleThrottle = new Map<THREE.Object3D, { accum: number; tick: number }>();
 let campusIdleDisposers: Array<() => void> = [];
 
 function disposeCampusIdle(): void {
   for (const idleAnimation of campusIdleAnimations.values()) idleAnimation.dispose();
   campusIdleAnimations.clear();
+  campusIdleThrottle.clear();
   for (const dispose of campusIdleDisposers) dispose();
   campusIdleDisposers = [];
   campusIdleActors = [];
 }
 
 function tickCampusIdle(dtSeconds: number): void {
+  const canThrottle = dtSeconds > 0 && Boolean(bloomContext?.getPlayerFeet);
   for (const actor of campusIdleActors) {
+    if (!actor.visible) continue;
     let idleAnimation = campusIdleAnimations.get(actor);
+    const initializedBefore = Boolean(idleAnimation);
     if (!idleAnimation) {
       idleAnimation = createActorAnimation(actor) ?? undefined;
       if (idleAnimation) {
@@ -1252,7 +1257,28 @@ function tickCampusIdle(dtSeconds: number): void {
         campusIdleAnimations.set(actor, idleAnimation);
       }
     }
-    idleAnimation?.update(dtSeconds);
+    if (!idleAnimation) continue;
+    let updateDt = dtSeconds;
+    if (canThrottle && initializedBefore) {
+      const dx = actor.position.x - playerFeet.x;
+      const dz = actor.position.z - playerFeet.z;
+      let state = campusIdleThrottle.get(actor);
+      if (dx * dx + dz * dz > 18 * 18) {
+        if (!state) {
+          state = { accum: 0, tick: 0 };
+          campusIdleThrottle.set(actor, state);
+        }
+        state.accum += dtSeconds;
+        state.tick += 1;
+        if (state.tick % 2 !== 0) continue;
+        updateDt = state.accum;
+        state.accum = 0;
+      } else if (state && state.accum > 0) {
+        updateDt += state.accum;
+        state.accum = 0;
+      }
+    }
+    idleAnimation.update(updateDt);
   }
 }
 
@@ -1273,6 +1299,8 @@ let phonePanPose: THREE.Object3D | null = null;
 let phonePanTime = 0;
 let walkingLinxia: THREE.Object3D | null = null;
 let linxiaAnimation: CharacterAnimationController | null = null;
+let linxiaThrottleAccum = 0;
+let linxiaThrottleTick = 0;
 let bloomContext: SceneRuntimeContext | null = null;
 let activeBloomUniforms: ColorBloomUniforms | null = null;
 const playerFeet = new THREE.Vector3();
@@ -1370,14 +1398,41 @@ export const buildingRuntime: SceneRuntime = {
       phonePanTime = (phonePanTime + dtSeconds) % 10;
       phonePanPose.rotation.y = Math.sin(phonePanTime * Math.PI / 5) * 0.3;
     }
-    if (!linxiaAnimation && walkingLinxia) {
-      linxiaAnimation = createActorAnimation(walkingLinxia);
-      linxiaAnimation?.play(walkArrived ? 'afraid' : 'walk', { timeScale: walkArrived ? 0.3 : WALK_TIME_SCALE });
+    if (walkingLinxia?.visible) {
+      const initializedBefore = Boolean(linxiaAnimation);
+      if (!linxiaAnimation) {
+        linxiaAnimation = createActorAnimation(walkingLinxia);
+        linxiaAnimation?.play(walkArrived ? 'afraid' : 'walk', { timeScale: walkArrived ? 0.3 : WALK_TIME_SCALE });
+      }
+      if (linxiaAnimation) {
+        let updateDt = dtSeconds;
+        if (walkArrived && initializedBefore && dtSeconds > 0 && bloomContext?.getPlayerFeet) {
+          const dx = walkingLinxia.position.x - playerFeet.x;
+          const dz = walkingLinxia.position.z - playerFeet.z;
+          if (dx * dx + dz * dz > 18 * 18) {
+            linxiaThrottleAccum += dtSeconds;
+            linxiaThrottleTick += 1;
+            if (linxiaThrottleTick % 2 === 0) {
+              linxiaAnimation.update(linxiaThrottleAccum);
+              linxiaThrottleAccum = 0;
+            }
+          } else {
+            updateDt += linxiaThrottleAccum;
+            linxiaThrottleAccum = 0;
+            linxiaAnimation.update(updateDt);
+          }
+        } else {
+          updateDt += linxiaThrottleAccum;
+          linxiaThrottleAccum = 0;
+          linxiaAnimation.update(updateDt);
+        }
+      }
     }
-    linxiaAnimation?.update(dtSeconds);
   },
 
   exit(): void {
+    linxiaThrottleAccum = 0;
+    linxiaThrottleTick = 0;
     bloomContext?.setAtmosphereProgress?.(0);
     bloomContext = null;
     activeBloomUniforms = null;
