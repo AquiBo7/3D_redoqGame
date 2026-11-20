@@ -146,6 +146,9 @@ export function yawToward(from: XZ, target: XZ): number {
   return Math.atan2(target.x - from.x, target.z - from.z);
 }
 
+/** 禁用高面数角色网格逐三角形 CPU 射线检测（避免转视角视线遮挡检测触发骨骼蒙皮矩阵重算） */
+const NOOP_RAYCAST = (): void => {};
+
 /** 按模型身高校准手持道具：手机举在胸前、袋子垂在身侧 */
 function createCharacterProp(spec: CharacterPropSpec, heightM: number): THREE.Mesh {
   const sideSign = spec.side === 'left' ? -1 : 1;
@@ -178,6 +181,7 @@ function createCharacterProp(spec: CharacterPropSpec, heightM: number): THREE.Me
   mesh.position.set(baseX + (offset.x ?? 0), baseY + (offset.y ?? 0), baseZ + (offset.z ?? 0));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.raycast = NOOP_RAYCAST;
   return mesh;
 }
 
@@ -254,6 +258,7 @@ export function createCharacterActor(
       if (object instanceof THREE.Mesh) {
         object.castShadow = castShadow;
         object.receiveShadow = true;
+        object.raycast = NOOP_RAYCAST;
       }
     });
     pose.add(model);

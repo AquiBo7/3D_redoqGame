@@ -46,8 +46,12 @@ const REFERENCE_ASPECT = 16 / 9;
 const PORTRAIT_MAX_FOV = 90;
 /** 手机端像素比上限（性能红线） */
 const MOBILE_PIXEL_RATIO = 1.5;
-/** 桌面端像素比上限 */
+/** 核显桌面端像素比上限（兼顾清晰度与填充率） */
+const INTEGRATED_GPU_PIXEL_RATIO = 1.25;
+/** 独显桌面端像素比上限 */
 const DESKTOP_PIXEL_RATIO = 2;
+/** 核显 / 移动端低功耗 GPU 特征匹配（用于关闭离屏 MSAA 与收紧像素比） */
+const INTEGRATED_GPU_PATTERN = /Radeon\(TM\)\s*610M|Radeon\s*\d{3}M|Intel.*(UHD|Iris|HD Graphics)|Mali|Adreno/i;
 /** 切图黑幕淡出 / 淡入时长（秒） */
 const FADE_OUT_SEC = 0.4;
 const FADE_IN_SEC = 0.55;
@@ -241,6 +245,8 @@ export class WorldApp {
   private readonly unsubscribers: Array<() => void> = [];
   /** 纯触摸设备：不显示桌面准星引导 / 疾跑角标（触屏笔记本仍按桌面处理） */
   private readonly pureTouch: boolean;
+  /** 是否命中核显特征（收紧像素比上限并关闭离屏 MSAA，零画质感知损失） */
+  private readonly integratedGpu: boolean;
 
   private currentSceneId: SceneId;
   private currentDefinition: WorldSceneDefinition;
@@ -261,9 +267,12 @@ export class WorldApp {
   /** 首屏黑幕是否已开始淡入（保证只执行一次） */
   private initialFadeDone = false;
   private disposed = false;
+  /** 构造函数同步触发的初始 scene:transition（由 mountInitialScene 接管，避免同帧 EventBus Set 遍历重入） */
+  private inConstructorEmit = false;
   private rafId = 0;
   private lastFrameTime = 0;
   private readonly motionPositions = new Map<string, THREE.Vector3>();
+  private readonly scratchWorldPos = new THREE.Vector3();
 
   constructor(container: HTMLElement, options: WorldAppOptions = {}) {
     const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
@@ -272,9 +281,13 @@ export class WorldApp {
     this.currentSceneId = options.sceneId ?? 'S1';
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio, isCoarsePointer ? MOBILE_PIXEL_RATIO : DESKTOP_PIXEL_RATIO),
-    );
+    this.integratedGpu = this.detectIntegratedGpu();
+    const maxPixelRatio = isCoarsePointer
+      ? MOBILE_PIXEL_RATIO
+      : this.integratedGpu
+        ? INTEGRATED_GPU_PIXEL_RATIO
+        : DESKTOP_PIXEL_RATIO;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.94;
@@ -375,6 +388,10 @@ export class WorldApp {
     });
 
     // 初始场景挂载 + 运行时装（震动定时器 / 胶囊演出 / 药袋隐藏）
+    this.inConstructorEmit = true;
+    queueMicrotask(() => {
+      this.inConstructorEmit = false;
+    });
     this.mountInitialScene();
 
     this.unsubscribers.push(
@@ -614,6 +631,11 @@ export class WorldApp {
 
   /** scene:transition：同 sceneKey 只换交互配置；异 key 黑幕淡出 → 重建 → 淡入 */
   private handleSceneTransition(payload: { toSceneId: SceneId; sceneKey: SceneKey; fromSceneId?: SceneId | null }): void {
+    if (this.inConstructorEmit && payload.fromSceneId === null && payload.toSceneId === this.currentSceneId) {
+      this.inConstructorEmit = false;
+      return;
+    }
+    this.inConstructorEmit = false;
     this.runtimeContextToken += 1;
     this.resetMotionAudio();
     this.currentSceneId = payload.toSceneId;
@@ -727,15 +749,29 @@ export class WorldApp {
     });
   }
 
+  private detectIntegratedGpu(): boolean {
+    try {
+      const gl = this.renderer.getContext();
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      const gpuName = debugInfo
+        ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? '')
+        : String(gl.getParameter(gl.RENDERER) ?? '');
+      return INTEGRATED_GPU_PATTERN.test(gpuName);
+    } catch {
+      return false;
+    }
+  }
+
   private setupPostprocessing(): void {
     if (this.pureTouch || window.matchMedia('(pointer: coarse)').matches) return;
 
+    const samples = this.integratedGpu ? 0 : Math.min(2, this.renderer.capabilities.maxSamples);
     const target = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.HalfFloatType,
       format: THREE.RGBAFormat,
       colorSpace: THREE.LinearSRGBColorSpace,
       depthBuffer: true,
-      samples: Math.min(2, this.renderer.capabilities.maxSamples),
+      samples,
     });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -985,7 +1021,8 @@ export class WorldApp {
   private attachContactShadows(): void {
     const grounded: THREE.Object3D[] = [];
     this.levelGroup.traverse((object) => {
-      const position = object.getWorldPosition(new THREE.Vector3());
+      if (!object.userData.actorModelId) return;
+      const position = object.getWorldPosition(this.scratchWorldPos);
       const groundY = sampleGroundHeight(position, this.currentDefinition.nav.surfaces, this.currentDefinition.nav.groundY);
       if (isGroundedActor(object, groundY)) grounded.push(object);
     });
@@ -1027,13 +1064,14 @@ export class WorldApp {
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 40;
-    sun.shadow.camera.left = -14;
-    sun.shadow.camera.right = 14;
-    sun.shadow.camera.top = 14;
-    sun.shadow.camera.bottom = -14;
+    // 收紧平行光阴影投影包围盒至核心活动视区（±11.5m），提高阴影像素利用率并减少边缘开销
+    sun.shadow.camera.left = -11.5;
+    sun.shadow.camera.right = 11.5;
+    sun.shadow.camera.top = 11.5;
+    sun.shadow.camera.bottom = -11.5;
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
-    sun.shadow.radius = 4;
+    sun.shadow.radius = 3;
     this.scene.add(sun);
     this.scene.add(sun.target);
   }
@@ -1142,7 +1180,7 @@ export class WorldApp {
         visible = visible && ancestor.visible;
         ancestor = ancestor.parent;
       }
-      const position = actor.getWorldPosition(new THREE.Vector3());
+      const position = actor.getWorldPosition(this.scratchWorldPos);
       const distance = position.distanceTo(this.camera.position);
       const gain = 0.48 * Math.max(0, 1 - distance / 8) ** 2;
       sample(id, position, visible && gain > 0, gain);
