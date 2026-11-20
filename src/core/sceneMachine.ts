@@ -17,6 +17,7 @@ import type { EventBus } from './eventBus';
 import type { ChapterSave } from './saveStore';
 import { applyStoryEffect, createInitialStoryState, evaluateCondition } from './state';
 import type { StoryState } from './state';
+import { buildPhonePresentation } from './phonePresentation';
 
 export interface MachineSnapshot {
   sceneId: SceneId;
@@ -249,6 +250,10 @@ export class SceneMachine {
     return this.role;
   }
 
+  suspend(): void {
+    this.started = false;
+  }
+
   isStarted(): boolean {
     return this.started;
   }
@@ -391,7 +396,7 @@ export class SceneMachine {
           return;
 
         case 'phone':
-          this.bus.emit('ui:showPhone', { stepId: step.id, panel: step.panel });
+          this.bus.emit('ui:showPhone', { stepId: step.id, panel: buildPhonePresentation(step.panel, this.state, this.sceneId, this.chapter) });
           return;
 
         case 'choice': {
@@ -520,6 +525,7 @@ export class SceneMachine {
   }
 
   private currentStep(): StoryStep | null {
+    if (!this.started) return null;
     const steps = this.currentScene().steps;
     return this.stepIndex >= 0 && this.stepIndex < steps.length ? steps[this.stepIndex] : null;
   }

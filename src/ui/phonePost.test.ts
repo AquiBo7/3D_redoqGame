@@ -278,11 +278,14 @@ describe('Phase B 校园墙帖子', () => {
       replyOptions: [{ id: 'chat-reply', text: '收到' }],
     });
     phone.open(panel);
+    query('.phone__tabs').querySelector('[data-phone-tab="messages"]')!.click();
     query('.phone__row').click();
     expect(query('.phone__message-text').textContent).toBe('欢迎大家。');
     query('.phone__reply').click();
     expect(onAction).toHaveBeenCalledExactlyOnceWith('wall-phone', 'reply', 'chat-reply');
     query('.phone__back').click();
+    expect(query('.phone__home-title').textContent).toBe('消息');
+    query('.phone__tabs').querySelector('[data-phone-tab="wall"]')!.click();
     expect(query('.phone__post-title').textContent).toBe('开学日的照片');
   });
 });

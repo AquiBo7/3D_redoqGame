@@ -1,1 +1,5 @@
-{}
+{
+  "cg_s6_gate_panorama": "./art/cg/s6_gate_panorama.png",
+  "cg_s11_post_crop": "./art/cg/s11_post_crop.png",
+  "cg_s13_walk_together": "./art/cg/s13_walk_together.png"
+}

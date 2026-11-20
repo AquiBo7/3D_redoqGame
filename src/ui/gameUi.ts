@@ -291,6 +291,11 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
 
     bus.on('game:chapterEnd', () => {
       cleanupAll();
+      lock.acquire('ending');
+    }),
+    bus.on('game:title', () => {
+      cleanupAll();
+      lock.acquire('title');
     }),
   ];
 

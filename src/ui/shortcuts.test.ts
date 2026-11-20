@@ -353,7 +353,7 @@ describe('PhonePanelView E', () => {
     vi.advanceTimersByTime(180);
     press();
     expect(fakeDocument.body.querySelector('.phone__lockscreen')).toBeNull();
-    expect(query('.phone__home-title').textContent).toBe('今天');
+    expect(query('.phone__home-title').textContent).toBe('备忘录');
     vi.advanceTimersByTime(179);
     expect(press().defaultPrevented).toBe(true);
     vi.advanceTimersByTime(179);
@@ -471,16 +471,22 @@ describe('Phase A 手机合照', () => {
     machine.startNew('S9', 'bystander');
     machine.onChooseOption('s9-choice', 's9-look');
     const logBefore = machine.getState().log.length;
+    // 四栏手机把合照放在置顶迎新群的附件里，先点开群聊再放大照片。
+    expect(query('.phone__row').getAttribute('data-section-id')).toBe('s9-group');
+    query('.phone__row').click();
+    expect(query('.phone__section-title').textContent).toBe('2026级新生迎新群');
     query('.phone__photo-thumbnail').click();
     const hotspot = query('.phone__photo-hotspot');
-    expect(hotspot.style.left).toBe('37.75%');
-    expect(hotspot.style.top).toBe('53.5%');
+    expect(hotspot.style.left).toBe('77%');
+    expect(hotspot.style.top).toBe('56%');
     hotspot.click();
     hotspot.click();
     expect(machine.getState().noticedPhoto).toBe(true);
     expect(machine.getState().likedPhoto).toBe(false);
-    query('.phone__photo-like').click();
-    query('.phone__photo-like').click();
+    const modalLikes = query('.phone__photo-modal').querySelectorAll('.phone__photo-like');
+    expect(modalLikes.length).toBe(1);
+    modalLikes[0].click();
+    modalLikes[0].click();
     expect(machine.getState().likedPhoto).toBe(true);
     expect(machine.getState().log.slice(logBefore).map((entry) => entry.summary)).toEqual([
       '在群合照的台阶上找到了浅黄色的小背影。', '给迎新群的合照点了赞。',

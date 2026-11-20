@@ -282,6 +282,8 @@ describe('GameEngine URL 直达与隔离调试', () => {
     bus.emit('ui:chooseOption', { stepId: 's14-choice', choiceId: 's14-joke' });
     expect(chapterEnds).toEqual([]);
     bus.emit('ui:dialogueEnd', { stepId: 's14-joke-blackout' });
+    expect(chapterEnds).toEqual([]);
+    bus.emit('ui:dialogueEnd', { stepId: 'e1-joined-close' });
     expect(chapterEnds).toEqual(['E1']);
     expect(loadChapterSave(storage)).toMatchObject({
       sceneId: 'E1', completed: true, state: { canteenSeen: 3, postChoice: 'joke', ending: 'joined' },

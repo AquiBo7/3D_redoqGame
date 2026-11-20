@@ -135,9 +135,9 @@ describe('Stage2D 场景展示', () => {
     expect(root.hidden).toBe(true);
   });
 
-  it('S10、E1 和自由行走场景不出现舞台；场景切换清理旧人物', () => {
+  it('S10 和自由行走场景不出现舞台；场景切换清理旧人物', () => {
     stage();
-    for (const id of ['S10', 'E1'] as const) {
+    for (const id of ['S10'] as const) {
       transition(id);
       dialogue();
       expect(host.children[0].hidden).toBe(true);
@@ -149,6 +149,22 @@ describe('Stage2D 场景展示', () => {
     dialogue();
     expect(host.children[0].hidden).toBe(true);
     expect(host.querySelectorAll('img')).toHaveLength(0);
+  });
+
+  it('E1 从字幕进入教室才呈现背景，并在接画后切换微笑立绘', () => {
+    stage();
+    transition('E1');
+    const root = host.children[0];
+    expect(root.hidden).toBe(true);
+    expect(root.querySelectorAll('img')).toHaveLength(0);
+    dialogue('e1-best-classroom', null);
+    expect(root.hidden).toBe(false);
+    expect(root.children[0].dataset.assetId).toBe('cg_ending_bystander_seat');
+    expect(root.children[1].querySelectorAll('img')[0].dataset.assetId).toBe('portrait_linxia_casual');
+    dialogue('e1-best-smile', null);
+    expect(root.children[1].querySelectorAll('img')[0].dataset.assetId).toBe('portrait_linxia_smile');
+    bus.emit('ui:showIntertitle', { stepId: 'closing', lines: ['片刻安静。'], lineDurationMs: 2000, skippable: true });
+    expect(root.hidden).toBe(true);
   });
 
   it('只取首个非空 speaker，未登记角色不猜测立绘，旧结束事件不清理新人物', () => {

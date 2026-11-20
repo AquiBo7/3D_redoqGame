@@ -1,105 +1,161 @@
-// ui/startPage.ts —— 合规开始页
-// 职责：标题与合规提示、竖屏温和提示、继续 / 开始 / 退出按钮、淡出后通知 core 进入 3D 场景。
-// 边界：纯展示，不含剧情逻辑；跨模块通信走 core 事件总线。
-
 import { playUiClick, unlockAudio } from '../audio/audioManager';
 import { eventBus } from '../core/eventBus';
+import { CHAPTER_PRESETS } from '../data/chapterPresets';
 import { openCredits } from './credits';
 import { installFilmGrain } from './filmGrain';
 import { showControlsGuide } from './controlsGuide';
 import './startPage.css';
 
-/** 与 startPage.css 的淡出过渡时长保持一致 */
 const FADE_DURATION_MS = 700;
 
 export interface StartPageOptions {
-  /** 是否存在可继续的单局章节存档 */
   hasSave?: boolean;
-  /** URL 直达场景等调试入口：直接隐藏开始页，由 core 自行启动 */
   autoStart?: boolean;
 }
 
-export function initStartPage(options: StartPageOptions = {}): void {
+export function initStartPage(options: StartPageOptions = {}): () => void {
   const startPage = document.querySelector<HTMLElement>('#start-page');
   const continueButton = document.querySelector<HTMLButtonElement>('#btn-continue');
   const startButton = document.querySelector<HTMLButtonElement>('#btn-start');
   const exitButton = document.querySelector<HTMLButtonElement>('#btn-exit');
   const exitScreen = document.querySelector<HTMLElement>('#exit-screen');
-  const portraitHint = document.querySelector<HTMLElement>('#portrait-hint');
-  const portraitHintClose = document.querySelector<HTMLButtonElement>('#portrait-hint-close');
-
   if (!startPage || !continueButton || !startButton || !exitButton || !exitScreen) {
     throw new Error('开始页 DOM 结构缺失，请检查 index.html');
   }
 
-  // 颗粒与纸纹变量必须在 ?scene 直达隐藏开始页之前安装
   installFilmGrain();
-  document.querySelector<HTMLButtonElement>('#btn-credits')?.addEventListener('click', (event) => {
-    event.stopPropagation();
+  const controller = new AbortController();
+  const listenOptions = { signal: controller.signal };
+  document.querySelector<HTMLButtonElement>('#btn-credits')?.addEventListener('click', () => {
     openCredits(document.querySelector<HTMLButtonElement>('#btn-credits') ?? undefined);
-  });
+  }, listenOptions);
+  document.querySelector<HTMLButtonElement>('#btn-achievements')?.addEventListener('click', () => eventBus.emit('ui:openAchievements'), listenOptions);
+  document.querySelector<HTMLButtonElement>('#btn-chapters')?.addEventListener('click', () => eventBus.emit('ui:openChapters'), listenOptions);
 
-  if (options.autoStart) {
-    startPage.hidden = true;
-    return;
-  }
+  const chapters = document.createElement('section');
+  chapters.className = 'chapter-select';
+  chapters.hidden = true;
+  chapters.setAttribute('role', 'dialog');
+  chapters.setAttribute('aria-modal', 'true');
+  chapters.setAttribute('aria-label', '章节选择');
+  const card = document.createElement('div');
+  card.className = 'chapter-select__card';
+  const title = document.createElement('h2');
+  title.textContent = '从这里，重新看见';
+  const note = document.createElement('p');
+  note.textContent = '第一至四章会以说明中的预设开启新一局并覆盖当前进度，成就保留。第五章仅预览，不覆盖进度。定向回档请使用结局页的“再试一次”。';
+  const close = document.createElement('button');
+  close.className = 'btn btn--ghost';
+  close.textContent = '返回';
+  close.type = 'button';
+  card.append(title, note);
+  chapters.append(card);
+  (document.querySelector('#ui-root') ?? document.body).append(chapters);
 
-  // 有存档时突出“继续体验”，开始按钮改为“重新开始”（会清空单局存档）
-  if (options.hasSave) {
-    continueButton.hidden = false;
-    startButton.textContent = '重新开始';
-    startButton.classList.remove('btn--primary');
-    startButton.classList.add('btn--ghost');
-  } else {
-    continueButton.hidden = true;
-  }
-
-  setupPortraitHint(portraitHint, portraitHintClose);
-
+  let previousFocus: HTMLElement | null = null;
   let leaving = false;
+  let generation = 0;
+  let fadeTimer = 0;
+  const closeChapters = (): void => {
+    chapters.hidden = true;
+    if (previousFocus?.isConnected) previousFocus.focus();
+  };
+  close.addEventListener('click', closeChapters, listenOptions);
 
-  const leaveWith = (event: 'game:start' | 'ui:continueGame'): void => {
+  const leaveWith = (action: () => void): void => {
     if (leaving) return;
     leaving = true;
-    // 必须在用户手势回调内解锁音频（iOS Safari 的自动播放限制）
+    const token = ++generation;
     unlockAudio();
     playUiClick();
-
+    chapters.hidden = true;
     startPage.classList.add('is-leaving');
-    window.setTimeout(() => {
+    fadeTimer = window.setTimeout(() => {
       startPage.hidden = true;
-      void showControlsGuide().then(() => eventBus.emit(event));
-    }, FADE_DURATION_MS);
+      void showControlsGuide().then(() => {
+        if (token !== generation) return;
+        leaving = false;
+        action();
+      });
+    }, startPage.hidden ? 0 : FADE_DURATION_MS);
   };
+  for (const preset of CHAPTER_PRESETS) {
+    const button = document.createElement('button');
+    button.className = 'chapter-select__item';
+    button.type = 'button';
+    button.dataset.chapterId = preset.id;
+    const heading = document.createElement('strong');
+    heading.textContent = preset.title;
+    const description = document.createElement('span');
+    description.textContent = preset.description;
+    button.append(heading, description);
+    button.addEventListener('click', () => leaveWith(() => eventBus.emit('ui:selectChapter', { chapterId: preset.id })), listenOptions);
+    card.append(button);
+  }
+  card.append(close);
+  chapters.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeChapters();
+    }
+    if (event.key !== 'Tab') return;
+    const buttons = Array.from(card.querySelectorAll<HTMLButtonElement>('button'));
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }, listenOptions);
 
-  continueButton.addEventListener('click', () => leaveWith('ui:continueGame'));
-  startButton.addEventListener('click', () => leaveWith('game:start'));
-
-  exitButton.addEventListener('click', () => {
-    // 浏览器通常只允许关闭由脚本打开的窗口；未关闭时展示收尾画面
-    window.close();
-    window.setTimeout(() => {
+  const updateSaveButton = (hasSave: boolean): void => {
+    continueButton.hidden = !hasSave;
+    startButton.textContent = hasSave ? '重新开始' : '开始体验';
+    startButton.classList.toggle('btn--primary', !hasSave);
+    startButton.classList.toggle('btn--ghost', hasSave);
+  };
+  updateSaveButton(options.hasSave ?? false);
+  startPage.hidden = options.autoStart ?? false;
+  const unsubscribers = [
+    eventBus.on('ui:openChapters', () => {
+      previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      chapters.hidden = false;
+      card.querySelector<HTMLButtonElement>('button')?.focus();
+    }),
+    eventBus.on('scene:transition', () => {
       startPage.hidden = true;
-      exitScreen.hidden = false;
-    }, 150);
-  });
-}
+      chapters.hidden = true;
+    }),
+    eventBus.on('game:title', ({ hasSave }) => {
+      generation += 1;
+      window.clearTimeout(fadeTimer);
+      leaving = false;
+      chapters.hidden = true;
+      exitScreen.hidden = true;
+      startPage.hidden = false;
+      startPage.classList.remove('is-leaving');
+      updateSaveButton(hasSave);
+      (hasSave ? continueButton : startButton).focus();
+    }),
+  ];
+  continueButton.addEventListener('click', () => leaveWith(() => eventBus.emit('ui:continueGame')), listenOptions);
+  startButton.addEventListener('click', () => leaveWith(() => eventBus.emit('game:start')), listenOptions);
+  exitButton.addEventListener('click', () => {
+    startPage.hidden = true;
+    exitScreen.hidden = false;
+  }, listenOptions);
 
-/** 手机竖屏时显示可关闭的温和提示；关闭后本次会话不再出现 */
-function setupPortraitHint(hint: HTMLElement | null, closeButton: HTMLButtonElement | null): void {
-  if (!hint || !closeButton) return;
-
+  const portraitHint = document.querySelector<HTMLElement>('#portrait-hint');
   const media = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
   let dismissed = false;
-
-  const update = (): void => {
-    hint.hidden = dismissed || !media.matches;
+  const updateHint = (): void => { if (portraitHint) portraitHint.hidden = dismissed || !media.matches; };
+  media.addEventListener('change', updateHint);
+  document.querySelector('#portrait-hint-close')?.addEventListener('click', () => { dismissed = true; updateHint(); }, listenOptions);
+  updateHint();
+  return () => {
+    generation += 1;
+    window.clearTimeout(fadeTimer);
+    controller.abort();
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    media.removeEventListener('change', updateHint);
+    chapters.remove();
   };
-
-  media.addEventListener('change', update);
-  closeButton.addEventListener('click', () => {
-    dismissed = true;
-    update();
-  });
-  update();
 }

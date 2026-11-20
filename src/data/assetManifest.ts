@@ -36,15 +36,15 @@ export const ASSET_MANIFEST = {
     alt: '穿灰蓝外套的少年背向镜头，单肩背着帆布包，手里拿着一支笔。',
   },
   cg_s6_gate_panorama: {
-    path: './art/cg/s6_gate_panorama.png', width: 1600, height: 900,
-    alt: '清晨校门前的新生合照：迎新横幅、行李和树影之间，台阶左侧有父亲背着浅黄外套女生的极小背影，旁边放着两只袋子。',
+    path: './art/cg/s6_gate_panorama.png', width: 1200, height: 896,
+    alt: '清晨校门前的新生合照：人群、行李和树影之间，台阶右侧有父亲背着浅黄外套女生的背影，手里提着两只袋子。',
   },
   cg_s11_post_crop: {
-    path: './art/cg/s11_post_crop.png', width: 800, height: 800,
+    path: './art/cg/s11_post_crop.png', width: 417, height: 417,
     alt: '同一张校门全景的台阶局部被放大：父亲背着浅黄外套女生走上石阶，旁边是两只布袋和栏杆。',
   },
   cg_s13_walk_together: {
-    path: './art/cg/s13_walk_together.png', width: 960, height: 720,
+    path: './art/cg/s13_walk_together.png', width: 1200, height: 896,
     alt: '斑驳树影落在林荫道上，浅黄外套的林夏独立行走，与灰蓝外套的少年并肩走向教学楼，两人都只露背影。',
   },
   cg_ending_best_drawing: {
@@ -98,6 +98,6 @@ export const READY_EXTERNAL_ASSETS: Partial<Record<AssetId, string>> = readyExte
 
 // 全景画布中左上角 x/y 与宽高，单位均为百分比（0–100），不是 0–1。
 // 交互层须相对实际图片内容区定位；object-fit: contain 的留白不属于图片。
-export const PHOTO_HOTSPOT = { x: 35.5, y: 48, width: 4.5, height: 11 } as const;
+export const PHOTO_HOTSPOT = { x: 69, y: 37, width: 16, height: 38 } as const;
 // S11 直接更换同一全景 SVG 的 viewBox，不另画一组背影。
-export const PHOTO_CROP = { x: 520, y: 395, width: 210, height: 210 } as const;
+export const PHOTO_CROP = { x: 1032, y: 295, width: 400, height: 400 } as const;

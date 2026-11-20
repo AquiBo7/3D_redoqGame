@@ -152,6 +152,8 @@ export type PhoneSection =
       unread: number;
       messages: PhoneChatMessage[];
       replyOptions?: PhoneReplyOption[];
+      pinned?: boolean;
+      attachments?: string[];
     }
   | { kind: 'memo'; id: string; title: string; updatedAt: string; items: string[] }
   | {
@@ -170,11 +172,19 @@ export type PhoneSection =
       text: string; comments: PhonePostComment[];
       actions?: PhoneReplyOption[];
       deleted?: boolean;
+      historicalTransfers?: number;
     }
   | { kind: 'notice'; id: string; text: string };
 
+export type PhoneTab = 'messages' | 'wall' | 'notes' | 'me';
+
 export interface PhonePanel {
   id: string;
+  defaultTab?: PhoneTab;
+  profile?: { name: string; account: string; drafts?: Array<{ text: string; unlocked: boolean }> };
+  notification?: { title: string; text: string; sectionId?: string };
+  likedPhoto?: boolean;
+  noticedPhoto?: boolean;
   lockTime?: string;
   sections: PhoneSection[];
   closeActionId: string;

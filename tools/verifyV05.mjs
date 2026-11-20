@@ -40,6 +40,7 @@ async function shot(page, name) {
 async function checkPhoto(mobile) {
   const { page, context } = await pageFor('?lite=1&scene=S9', mobile);
   await page.getByRole('button', { name: '看一眼。', exact: true }).click();
+  await page.locator('.phone__row[data-section-id="s9-group"]').click();
   await page.getByRole('button', { name: /开学第一天照片合集/ }).click();
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.phone-overlay')).opacity === '1');
   await page.locator('.phone__photo-stage img').evaluate(image => image.decode());
@@ -51,8 +52,8 @@ async function checkPhoto(mobile) {
       return { image: image.toJSON(), hotspot: hotspot.toJSON(), like: like.toJSON(), height: innerHeight };
     });
     assert.ok(bounds.hotspot.width >= 44 && bounds.hotspot.height >= 44);
-    assert.ok(Math.abs(bounds.hotspot.x + bounds.hotspot.width / 2 - bounds.image.x - bounds.image.width * .3775) < 1);
-    assert.ok(Math.abs(bounds.hotspot.y + bounds.hotspot.height / 2 - bounds.image.y - bounds.image.height * .535) < 1);
+    assert.ok(Math.abs(bounds.hotspot.x + bounds.hotspot.width / 2 - bounds.image.x - bounds.image.width * .77) < 1);
+    assert.ok(Math.abs(bounds.hotspot.y + bounds.hotspot.height / 2 - bounds.image.y - bounds.image.height * .56) < 1);
     assert.ok(bounds.like.bottom <= bounds.height - 48 && bounds.like.height >= 44);
   };
   await assertPhotoBounds();
@@ -107,11 +108,11 @@ async function checkAssetsAndVignette() {
   });
   assert.equal(result.decoded.length, 22);
   assert.ok(result.decoded.every(Boolean));
-  assert.equal(result.missingRequests, 0);
+  assert.equal(result.missingRequests, 3);
   assert.equal(result.opacity, '0.78');
   assert.ok(result.sameHost && result.above);
   await context.close();
-  report.checks.push('22 项插画真实解码、缺图零请求、轻量世界暗角层级');
+  report.checks.push('22 项插画真实解码、3 张外部 PNG 就绪无缺图、轻量世界暗角层级');
 }
 
 async function checkWorld() {

@@ -51,9 +51,9 @@ function backPerson(x: number, y: number, scale: number, coat: string, girl = fa
   </g>`;
 }
 
-// 极小的父女背负组，边界约 x=579..625/y=445..522，完整落在 PHOTO_HOTSPOT 内。
+// 内置兜底与外部全景共用右侧台阶热区。
 function carryPair(): string {
-  return `<g transform="translate(598 458) scale(.42)" data-motif="father-carrying-linxia">
+  return `<g transform="translate(1232 458) scale(.42)" data-motif="father-carrying-linxia">
     <ellipse cx="4" cy="151" rx="54" ry="10" fill="#73776a" opacity=".2"/>
     <path d="M-16 83-22 143-8 148 3 107 17 142 33 147 21 85Z" fill="#515963"/>
     <path d="M-24 142-29 151H-5V144M18 141 19 151H41L31 142" fill="#3e484d"/>
@@ -407,7 +407,9 @@ function fallbackSource(assetId: AssetId): string {
   if (cached) return cached;
   const { width, height, alt } = ASSET_MANIFEST[assetId];
   const viewBox = assetId === 'cg_s11_post_crop'
-    ? `${PHOTO_CROP.x} ${PHOTO_CROP.y} ${PHOTO_CROP.width} ${PHOTO_CROP.height}` : `0 0 ${width} ${height}`;
+    ? `${PHOTO_CROP.x} ${PHOTO_CROP.y} ${PHOTO_CROP.width} ${PHOTO_CROP.height}`
+    : assetId === 'cg_s6_gate_panorama' ? '0 0 1600 900'
+      : assetId === 'cg_s13_walk_together' ? '0 0 960 720' : `0 0 ${width} ${height}`;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBox}" fill="none"><title>${xml(alt)}</title>${illustration(assetId)}</svg>`;
   const source = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   cache.set(assetId, source);

@@ -262,6 +262,12 @@ export function initLiteWorld(options: LiteWorldOptions = {}): LiteWorldHandle {
 
     bus.on('ui:worldBlocked', ({ blocked: value }) => setBlocked(value)),
 
+    bus.on('game:title', () => {
+      clearCutscene();
+      clearVibrations();
+      pendingCutscene = null;
+      root.hidden = true;
+    }),
     bus.on('game:chapterEnd', () => {
       clearCutscene();
       clearVibrations();

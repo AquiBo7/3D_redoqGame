@@ -9,6 +9,7 @@ import { GameEngine } from './core/gameEngine';
 import { hasChapterSave } from './core/saveStore';
 import { parseUrlParams } from './core/urlParams';
 import { initChapterEnd } from './ui/chapterEnd';
+import { initAchievementsPanel } from './ui/achievementsPanel';
 import { initGameUi } from './ui/gameUi';
 import { initLiteWorld } from './ui/liteWorld';
 import { initMuteButton } from './ui/muteButton';
@@ -65,6 +66,7 @@ if (params.modelViewer) {
     autoStart: params.scene !== null,
   });
   initChapterEnd();
+  initAchievementsPanel(eventBus);
   initMuteButton();
 
   if (params.debug) {

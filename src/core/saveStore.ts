@@ -242,6 +242,16 @@ export function clearChapterSave(storage?: StorageLike | null): void {
   }
 }
 
+export function clearCheckpoints(storage?: StorageLike | null): void {
+  const target = resolveStorage(storage);
+  if (!target) return;
+  try {
+    for (const key of Object.values(CHECKPOINT_SAVE_KEYS)) target.removeItem(key);
+  } catch {
+    // 浏览器禁用存储时，不阻止本局继续。
+  }
+}
+
 function normalizeMeta(meta: MetaProgress): MetaProgress {
   const roles = Array.from(new Set<Role>(['bystander', ...meta.unlockedRoles]));
   const endings = Array.from(new Set(meta.unlockedEndings.filter((id) => id.length > 0)));

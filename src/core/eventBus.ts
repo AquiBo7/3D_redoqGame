@@ -9,12 +9,21 @@ import type {
   SceneId,
   SceneKey,
 } from '../data/storySchema';
-import type { StoryState } from './state';
+import type { MetaProgress, StoryState } from './state';
+import type { ChapterId } from '../data/chapterPresets';
 
 export interface GameEvents {
   // 生命周期 / 开始页
   'game:start': void;
   'ui:continueGame': void;
+  'ui:returnTitle': void;
+  'game:title': { hasSave: boolean };
+  'ui:openChapters': void;
+  'ui:selectChapter': { chapterId: ChapterId };
+  'ui:openAchievements': void;
+  'ui:openPhoneArchive': void;
+  'ui:requestMeta': void;
+  'meta:changed': { meta: Readonly<MetaProgress>; newlyUnlocked: string[] };
 
   // 3D / 降级层 → Core
   'scene:enterZone': { sceneId: SceneId; zoneId: string };

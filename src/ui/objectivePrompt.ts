@@ -37,6 +37,7 @@ export function initObjectivePrompt(container: HTMLElement, bus: EventBus): () =
     bus.on('scene:transition', clear),
     bus.on('ui:showPhone', clear),
     bus.on('game:chapterEnd', clear),
+    bus.on('game:title', clear),
     bus.on('state:changed', ({ sceneId, state }) => {
       if (sceneId === 'S7' && state.picked) clear();
     }),

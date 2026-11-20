@@ -91,6 +91,33 @@
 
 ---
 
+## 四·补、终版收官快照（2026-11-20，Phase D / F 完成）
+
+> 本段为第一章之后续：五结局复盘、成就系统与队友 v0.6 四栏手机合入的终版状态。验证与提交已全部通过，未部署。
+
+### 4B.1 剧情结局（`src/data/story.ending.ts` + `src/core/endingReview.ts` + `src/data/endingContent.ts`）
+- 五结局按优先级归一：`joined > bystander > worst > best > middle`，前向跳转只写入一次最终结局，不回改前章数值。
+- 最好结局含「夕阳教室递画 → 高信任送画 / 低信任未送画（线稿 CG）→ 三选回应 → 第一次轻笑 → 林夏发来消息 → 不可跳过定格句」完整演出。
+- 回望页（`chapterEnd.ts/css`）呈现：CG 与标题、后记两栏、原生 `<details>` 足迹、四份林夏草稿（信任阈值 1/3/5/7）、五张现实行动卡、按结局的「再试一次」检查点回退按钮，以及「手机 · 草稿箱」回看入口。
+
+### 4B.2 成就与章节选择（`src/data/achievements.ts` + `chapterPresets.ts` + `ui/achievementsPanel.ts`）
+- 成就 A1–A5 对应五结局，A6「看见」在五结局齐备后追加解锁；3.2 秒受限 toast，重复通关不重复弹，A6 恒排最后。
+- 标题页「章节选择」提供五章直达：第一至四章以明确预设覆盖式开新局，第五章为「一个月后」预览（不解锁成就、不覆盖正式存档）；结局页另有「返回标题 / 从头开始」。
+- 元数据 `yitiaojietu.meta.v1` 与单局存档 `yitiaojietu.ch1.save.v1` 分层；新开一局会同步清理旧检查点（`ch2_canteen / ch3_morning / ch4_platform`）。
+
+### 4B.3 队友 v0.6 四栏手机合入（`src/ui/phonePanel.ts/css` + `src/core/phonePresentation.ts`）
+- 浅灰白机身、四栏【消息 / 校园墙 / 备忘录 / 我】，图标改为内联 SVG（不占用字体子集字形）；横屏 68px 左栏 + 右侧独立滚动，底部保留 48px 安全区。
+- Lightbox 缩放 1×–3.2×（步长 0.55）、还原、拖拽平移、百分比热点静默记录（`left:69% top:37% width:16% height:38%`）与点赞幂等；E/Esc 在 Lightbox 打开时都只返回图片。
+- 校园墙按时序呈现：S11 低热度裁切帖、S13 双图与 A/C 跟评心声、D4 原帖已删除（历史转发 214 未归零）＋搬运帖留存；备忘录含迎新指南与 C5 实际线索；「我」含 2026 级资料与结局草稿。
+- 三张高清外部 PNG 落盘 `public/art/cg/`（校门全景 1200×896、同行照 1200×896、台阶裁切 417×417），其余 19 项插画仍为自包含 SVG 兜底；提取脚本 `tools/importPhoneV06Assets.mjs` 仅接受显式传入的 HTML 路径，不硬编码私密路径。
+
+### 4B.4 验证与产物
+- `npm run test`：52 文件 1484 项全绿；`npm run build`：零类型错误，首屏约 1.77MB（含双字体子集 327KB）。
+- 浏览器验收（headless Chromium，全部 `problems: []`）：`verifyV05.mjs`（第一章 7 项）、`verifyChapter2.mjs`（第二章 4 项）、`verifyChapter34.mjs`（三四章 4 项）、`verifyInterior.mjs`（室内 6 项）、`verifyEnding.mjs`（五结局/成就/章节/草稿箱 10 项）。
+- 关键截图位于 `tools/shots/final-phone-home.png`、`final-phone-lightbox.png`、`final-ending-best.png`（目录已 gitignore）。
+
+---
+
 ## 四、切换国际服 IDE 与环境迁移注意点
 
 1. **先建 Git 基线保护**（重要！当前 `E:\3D_Qoder` 尚未初始化 `.git`）：迁移前先在 `E:\3D_Qoder` 执行 `git init` 并做一次基线提交，确保任何新工具改坏都能秒回滚。

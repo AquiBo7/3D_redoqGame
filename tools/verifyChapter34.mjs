@@ -57,11 +57,27 @@ async function advanceTo(page, step) {
   throw new Error(`未到达 ${step}`);
 }
 async function waitEnding(page) {
-  for (let count = 0; count < 30; count++) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
     if (await page.locator('.chapter-end:not([hidden])').isVisible()) return;
-    for (const selector of ['.caption--inner.is-visible:not([hidden])', '.dialogue:not([hidden]) .dialogue__panel', '.intertitle:not([hidden]) .intertitle__skip:not([hidden])']) {
-      if (await page.locator(selector).isVisible()) { await page.locator(selector).click(); break; }
+    const art = page.locator('.art-view:not([hidden]) .art-view__close');
+    if (await art.isVisible()) { await art.click(); continue; }
+    const phone = page.locator('.phone-overlay:not([hidden]) .phone__close');
+    if (await phone.isVisible()) { await phone.click(); continue; }
+    if (await page.locator('.choices:not([hidden])').isVisible()) {
+      const options = await page.evaluate(() => window.__ch34.choices ?? []);
+      if (options.length > 0) {
+        await page.getByRole('button', { name: options[0].text, exact: true }).click();
+        continue;
+      }
     }
+    let clicked = false;
+    for (const selector of ['.caption--inner.is-visible:not([hidden])', '.dialogue:not([hidden]) .dialogue__panel', '.intertitle:not([hidden]) .intertitle__skip:not([hidden])']) {
+      const element = page.locator(selector);
+      if (await element.isVisible()) { await element.click(); clicked = true; break; }
+    }
+    if (clicked) continue;
+    await page.waitForTimeout(250);
   }
   await page.locator('.chapter-end:not([hidden])').waitFor();
 }

@@ -9,7 +9,7 @@ const BACKGROUNDS: Partial<Record<SceneId, AssetId>> = {
   C1: 'bg_dorm_morning', S11: 'bg_dorm_morning', S14: 'bg_dorm_morning',
   C3: 'bg_office_afternoon', C4: 'bg_stairwell_echo',
   D1: 'bg_platform_sunset', D2: 'bg_platform_sunset', D3: 'bg_platform_sunset',
-  D4: 'bg_platform_sunset', D6: 'bg_platform_sunset',
+  D4: 'bg_platform_sunset', D6: 'bg_platform_sunset', E1: 'cg_ending_bystander_seat',
 };
 const PORTRAITS: Partial<Record<SpeakerId, AssetId>> = {
   linxia: 'portrait_linxia_casual', father: 'portrait_father',
@@ -66,7 +66,9 @@ export class Stage2D {
         if (this.root.hidden) return;
         // 当前协议不广播逐句变化，不读取或劫持 DialogueBox 的内部 DOM。
         const speaker = lines.find((line) => line.speaker !== null)?.speaker;
-        const asset = speaker ? PORTRAITS[speaker] : undefined;
+        const asset = stepId === 'e1-best-smile' ? 'portrait_linxia_smile'
+          : stepId === 'e1-best-classroom' ? 'portrait_linxia_casual'
+            : speaker ? PORTRAITS[speaker] : undefined;
         if (asset) renderAssetImage(asset, this.portrait).alt = '';
       }),
       bus.on('ui:dialogueEnd', ({ stepId }) => {
@@ -90,6 +92,7 @@ export class Stage2D {
       bus.on('ui:showIntertitle', () => this.suspend()),
       bus.on('ui:showMinigame', () => this.suspend()),
       bus.on('game:chapterEnd', () => this.reset()),
+      bus.on('game:title', () => this.reset()),
     ];
   }
 
@@ -105,7 +108,8 @@ export class Stage2D {
     const scene = this.scene;
     const interior = scene?.sceneKey === 'interior'
       && (scene.toSceneId === 'C4' || scene.toSceneId === 'D1' || scene.toSceneId === 'D6');
-    const visible = !!scene && scene.toSceneId !== 'S10' && scene.toSceneId !== 'E1'
+    const visible = !!scene && scene.toSceneId !== 'S10'
+      && (scene.toSceneId !== 'E1' || this.interiorStarted)
       && (scene.sceneKey === 'stage2d' || (interior && this.interiorStarted));
     this.root.hidden = !visible;
     if (!visible || !scene) return;

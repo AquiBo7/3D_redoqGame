@@ -117,12 +117,13 @@ describe('Phase A 美术图片 API', () => {
       .toBe(crop.slice(crop.indexOf('<g data-composition')));
     expect(panorama).toContain('viewBox="0 0 1600 900"');
     expect(crop).toContain(`viewBox="${PHOTO_CROP.x} ${PHOTO_CROP.y} ${PHOTO_CROP.width} ${PHOTO_CROP.height}"`);
-    expect(PHOTO_HOTSPOT).toEqual({ x: 35.5, y: 48, width: 4.5, height: 11 });
+    expect(PHOTO_HOTSPOT).toEqual({ x: 69, y: 37, width: 16, height: 38 });
     for (const value of Object.values(PHOTO_HOTSPOT)) expect(value).toBeGreaterThanOrEqual(0);
     expect(PHOTO_HOTSPOT.x + PHOTO_HOTSPOT.width).toBeLessThanOrEqual(100);
     expect(PHOTO_HOTSPOT.y + PHOTO_HOTSPOT.height).toBeLessThanOrEqual(100);
-    expect(PHOTO_HOTSPOT.x * 16).toBeLessThan(579);
-    expect((PHOTO_HOTSPOT.x + PHOTO_HOTSPOT.width) * 16).toBeGreaterThan(625);
+    expect(panorama.includes('translate(1232 458) scale(.42)')).toBe(true);
+    expect(PHOTO_HOTSPOT.x * 16).toBeLessThan(1213);
+    expect((PHOTO_HOTSPOT.x + PHOTO_HOTSPOT.width) * 16).toBeGreaterThan(1259);
     expect(PHOTO_HOTSPOT.y * 9).toBeLessThan(445);
     expect((PHOTO_HOTSPOT.y + PHOTO_HOTSPOT.height) * 9).toBeGreaterThan(522);
   });

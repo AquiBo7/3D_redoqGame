@@ -230,7 +230,8 @@ describe('第四章数据与真实状态机', () => {
         const deletedPost = h.phones[0].panel.sections[0];
         expect(deletedPost).toMatchObject({ kind: 'post', deleted: true, text: '该内容已删除', assetIds: [] });
         expect(h.dialogues.some((event) => event.lines.some((line) => line.text === (joined ? '……我跟你一起。' : '我删了。别的，我不管了。')))).toBe(true);
-        const repost = h.phones[1].panel.sections.find((section) => section.kind === 'post');
+        const posts = h.phones[1].panel.sections.filter((section) => section.kind === 'post');
+        const repost = posts.find((section) => !section.deleted);
         expect(repost?.views).toBeGreaterThan(0);
         expect(repost?.text).toContain('转发 326 次');
         expect(repost?.comments.map((comment) => comment.text)).toEqual(['原来是脚崴了？可是我还是觉得……', '删了就想没事？']);
