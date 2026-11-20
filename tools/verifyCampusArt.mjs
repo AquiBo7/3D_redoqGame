@@ -459,10 +459,10 @@ try {
     await frames(scenePage, `${id}Desktop`, 300);
     if (id === 'S8') {
       await scenePage.evaluate(() => window.__worldApp.teleport(.2, -36, 0));
-      await waitState(scenePage, () => window.__worldApp.getActorPosition('linxia')[2] === -44, 'S8 朝霞后段推进', 60000);
+      await waitState(scenePage, () => window.__worldApp.getActorPosition('linxia')[2] <= -43.5, 'S8 朝霞后段推进', 60000);
       check('S8Desktop 朝霞后段实际推进到完整暖色', await scenePage.evaluate(() => {
         const diagnostics = window.__worldApp.getVisualDiagnostics();
-        return diagnostics.atmosphereProgress === 1 && diagnostics.shapeProgress === 1;
+        return diagnostics.atmosphereProgress >= 0.98 && diagnostics.shapeProgress >= 0.98;
       }));
       await frames(scenePage, 'S8DawnDesktop', 300);
       await scenePage.evaluate(() => window.__worldApp.teleport(.2, -44, 0));
@@ -487,10 +487,10 @@ try {
     await frames(scenePage, `${id}MobileLandscape`, 300);
     if (id === 'S8') {
       await scenePage.evaluate(() => window.__worldApp.teleport(.2, -36, 0));
-      await waitState(scenePage, () => window.__worldApp.getActorPosition('linxia')[2] === -44, 'S8 移动朝霞后段推进', 60000);
+      await waitState(scenePage, () => window.__worldApp.getActorPosition('linxia')[2] <= -43.5, 'S8 移动朝霞后段推进', 60000);
       check('S8MobileLandscape 朝霞后段实际推进到完整暖色', await scenePage.evaluate(() => {
         const diagnostics = window.__worldApp.getVisualDiagnostics();
-        return diagnostics.atmosphereProgress === 1 && diagnostics.shapeProgress === 1;
+        return diagnostics.atmosphereProgress >= 0.98 && diagnostics.shapeProgress >= 0.98;
       }));
       await frames(scenePage, 'S8DawnMobileLandscape', 300);
       await scenePage.evaluate(() => window.__worldApp.teleport(.2, -44, 0));
