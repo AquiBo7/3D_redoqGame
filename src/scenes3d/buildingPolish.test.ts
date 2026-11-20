@@ -6,6 +6,9 @@ import { disposeMaterialCache, getFoliageMaterial, getPavingMaterial, getPlaster
 import { EventBus } from '../core/eventBus';
 import type { ColorBloomUniforms } from './colorBloom';
 import { sampleColorBloomReveal } from './colorBloom';
+import { gsap } from 'gsap';
+import { InteractionSystem } from '../world/InteractionSystem';
+import { angleBetweenDeg } from '../world/gazeTracker';
 
 // 仅替代 Node 中不存在的 Canvas；场景、材质工厂、角色工厂和所有几何均使用真实实现。
 beforeEach(() => {
@@ -17,6 +20,7 @@ beforeEach(() => {
       beginPath: () => {}, arc: () => {}, ellipse: () => {}, fill: () => {},
       moveTo: () => {}, lineTo: () => {}, closePath: () => {},
       createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
     }),
   }) });
 });
@@ -446,6 +450,198 @@ describe('M3 模块6：教学楼真实几何封边', () => {
     expect(nextRing.instanceMatrix.count).toBe(144);
     foliage.removeEventListener('dispose', cacheDisposed);
     plaster.removeEventListener('dispose', cacheDisposed);
+  });
+});
+
+describe('Phase A：S8 路边手机取景伏笔', () => {
+  it('程序化人物双脚贴草坪，举臂握住横屏手机且不增加模型、灯光或通路障碍', () => {
+    const { root, built, definition } = build();
+    const actor = built.actors!.campusPhotographer;
+    expect(actor.position.toArray()).toEqual([6.45, -0.055, -10]);
+    expect(actor.rotation.y).toBe(-2.58);
+    expect(definition.requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
+    let triangles = 0;
+    actor.traverse((object) => {
+      expect(object.userData.actorModelId).toBeUndefined();
+      expect(object).not.toBeInstanceOf(THREE.Light);
+      expect(object).not.toBeInstanceOf(THREE.SkinnedMesh);
+      if (!(object instanceof THREE.Mesh)) return;
+      triangles += (object.geometry.index?.count ?? object.geometry.getAttribute('position').count) / 3;
+      const material = object.material as THREE.MeshStandardMaterial;
+      expect(material.map).toBeFalsy();
+      expect(material.userData[SHARED_RESOURCE_FLAG]).toBeUndefined();
+      expect(material.userData.colorBloomUniforms).toBeUndefined();
+      if (material.emissive) expect(material.emissive.getHex()).toBe(0);
+      expect(object.castShadow).toBe(false);
+    });
+    expect(triangles).toBeLessThan(1200);
+    const phone = actor.getObjectByName('building-phone-device') as THREE.Mesh<THREE.BoxGeometry>;
+    expect(phone.geometry.parameters.width).toBeGreaterThan(phone.geometry.parameters.height);
+    const phoneBounds = new THREE.Box3().setFromObject(phone);
+    const environment = root.children.filter((object) => !Object.values(built.actors!).includes(object));
+    for (const side of ['left', 'right']) {
+      const shoe = actor.getObjectByName(`building-phone-shoe-${side}`)!;
+      const sole = new THREE.Box3().setFromObject(shoe).min.y;
+      const from = shoe.getWorldPosition(new THREE.Vector3());
+      from.y = 0.1;
+      const ground = new THREE.Raycaster(from, new THREE.Vector3(0, -1, 0), 0, 0.3).intersectObjects(environment, true)[0];
+      expect(ground).toBeDefined();
+      expect(sole).toBeCloseTo(ground.point.y, 6);
+      const hand = actor.getObjectByName(`building-phone-hand-${side}`)!;
+      expect(phoneBounds.intersectsBox(new THREE.Box3().setFromObject(hand))).toBe(true);
+      expect(hand.getWorldPosition(new THREE.Vector3()).y).toBeGreaterThan(1.4);
+      const forearm = actor.getObjectByName(`building-phone-forearm-${side}`) as THREE.Mesh<THREE.CylinderGeometry>;
+      const wrist = new THREE.Vector3(0, forearm.geometry.parameters.height / 2, 0).applyMatrix4(forearm.matrixWorld);
+      expect(wrist.distanceTo(hand.getWorldPosition(new THREE.Vector3()))).toBeLessThan(1e-6);
+      const sleeve = actor.getObjectByName(`building-phone-upper-arm-${side}`) as THREE.Mesh<THREE.CylinderGeometry>;
+      const elbow = new THREE.Vector3(0, sleeve.geometry.parameters.height / 2, 0).applyMatrix4(sleeve.matrixWorld);
+      const forearmBase = new THREE.Vector3(0, -forearm.geometry.parameters.height / 2, 0).applyMatrix4(forearm.matrixWorld);
+      expect(elbow.distanceTo(forearmBase)).toBeLessThan(1e-6);
+    }
+    const pose = actor.getObjectByName('building-phone-pose')!;
+    for (const yaw of [-0.3, 0, 0.3]) {
+      pose.rotation.y = yaw;
+      root.updateMatrixWorld(true);
+      expect(new THREE.Box3().setFromObject(actor).min.x).toBeGreaterThan(5.8);
+      for (const side of ['left', 'right']) {
+        expect(new THREE.Box3().setFromObject(actor.getObjectByName(`building-phone-shoe-${side}`)!).min.y).toBeCloseTo(-0.055, 6);
+      }
+    }
+  });
+
+  it('S8 热点与手机重合，同行可见区留足两秒且 S9 不暴露热点', () => {
+    const { root, definition, built } = build();
+    const hotspot = definition.hotspots!.find((item) => item.id === 'phone-behind')!;
+    expect(hotspot).toMatchObject({ maxDistance: 9, maxAngleDeg: 12, dwellMs: 2000, requireLineOfSight: true });
+    const anchor = new THREE.Vector3(hotspot.position.x, hotspot.position.y, hotspot.position.z);
+    const phone = built.actors!.campusPhotographer.getObjectByName('building-phone-device')!;
+    expect(phone.getWorldPosition(new THREE.Vector3()).distanceTo(anchor)).toBeLessThan(1e-6);
+    // 原生几何射线而非只查声明：六米长的同行窗口中，手机不被树干、身体或手臂挡住。
+    for (const z of [-8, -10, -12, -14]) {
+      const from = new THREE.Vector3(0.2, 1.6, z);
+      expect(from.distanceTo(anchor)).toBeLessThan(hotspot.maxDistance!);
+      const ray = new THREE.Raycaster(from, anchor.clone().sub(from).normalize(), 0, from.distanceTo(anchor) + 0.02);
+      expect(ray.intersectObjects(root.children, true)[0]?.object.name, `phone visible from z=${z}`).toBe(phone.name);
+    }
+    expect(createBuildingDefinition('S9').hotspots).toEqual([]);
+    expect(definition.hotspots![0]).toEqual({
+      id: 'look-back-father', position: { x: 0, y: 1.5, z: 8.6 },
+      maxDistance: 45, maxAngleDeg: 12, requireLineOfSight: false,
+    });
+  });
+
+  it('真实交互系统限定九米、视线与持续两秒，移开重计且只发一次总线事件', () => {
+    const { definition, built } = build();
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    const hotspot = definition.hotspots!.find((item) => item.id === 'phone-behind')!;
+    const anchor = new THREE.Vector3(hotspot.position.x, hotspot.position.y, hotspot.position.z);
+    const camera = new THREE.PerspectiveCamera();
+    const bus = new EventBus();
+    const observed = vi.fn();
+    bus.on('scene:gazeHotspot', observed);
+    const interaction = new InteractionSystem({
+      scene: new THREE.Scene(), camera, domElement: {} as HTMLElement, bus,
+      hud: { setAimed: () => {}, setGazeProgress: () => {}, setTargets: () => {} },
+      getSceneId: () => 'S8', isInputEnabled: () => true,
+    });
+    try {
+      interaction.setup({ hotspots: definition.hotspots, occluders: built.occluders });
+      camera.position.set(0.2, 1.6, 1.2);
+      camera.lookAt(anchor);
+      interaction.update(0, 0);
+      interaction.update(0, 2100);
+      expect(observed).not.toHaveBeenCalled();
+      camera.position.set(0.2, 1.6, -10);
+      camera.lookAt(anchor);
+      interaction.update(0, 3000);
+      interaction.update(0, 4999);
+      expect(observed).not.toHaveBeenCalled();
+      camera.lookAt(0.2, 1.6, -30);
+      interaction.update(0, 5000);
+      camera.lookAt(anchor);
+      interaction.update(0, 5100);
+      interaction.update(0, 7099);
+      expect(observed).not.toHaveBeenCalled();
+      interaction.update(0, 7100);
+      interaction.update(0, 10000);
+      expect(observed).toHaveBeenCalledExactlyOnceWith({ sceneId: 'S8', hotspotId: 'phone-behind', dwellMs: 2000 });
+      // 新一轮面对树干背后的手机：距离合格也不能隔树触发。
+      interaction.setup({ hotspots: definition.hotspots, occluders: built.occluders });
+      camera.position.set(1.5, 1.6, -16.912);
+      camera.lookAt(anchor);
+      interaction.update(0, 11000);
+      interaction.update(0, 14000);
+      expect(observed).toHaveBeenCalledTimes(1);
+    } finally {
+      interaction.dispose();
+    }
+  });
+
+  it('上身慢扫自然掠过同行两人，原二十六秒路线不变，重进与离场停止旧实例', () => {
+    const { built } = build();
+    const actor = built.actors!.campusPhotographer;
+    const pose = actor.getObjectByName('building-phone-pose')!;
+    const context = { sceneId: 'S8' as const, bus: new EventBus(), actors: built.actors!, setInteractableVisible: () => {} };
+    buildingRuntime.enter(context);
+    const walk = gsap.globalTimeline.getChildren().find((animation) => animation.duration() === 26)!;
+    expect(walk).toBeDefined();
+    const foot = actor.getObjectByName('building-phone-shoe-left')!;
+    const startFoot = foot.getWorldPosition(new THREE.Vector3());
+    buildingRuntime.tick!(2.5);
+    expect(pose.rotation.y).toBeCloseTo(0.3);
+    buildingRuntime.tick!(5);
+    expect(pose.rotation.y).toBeCloseTo(-0.3);
+    buildingRuntime.tick!(2.5);
+    expect(pose.rotation.y).toBeCloseTo(0);
+    expect(foot.getWorldPosition(new THREE.Vector3()).distanceTo(startFoot)).toBe(0);
+    walk.progress(10 / 26);
+    const phone = actor.getObjectByName('building-phone-device')!;
+    const lensDirection = phone.getWorldDirection(new THREE.Vector3());
+    const phonePosition = phone.getWorldPosition(new THREE.Vector3());
+    for (const subject of [
+      new THREE.Vector3(built.actors!.linxia.position.x, 1.4, built.actors!.linxia.position.z),
+      new THREE.Vector3(0.2, 1.6, built.actors!.linxia.position.z + 1),
+    ]) expect(angleBetweenDeg(lensDirection, subject.sub(phonePosition))).toBeLessThan(25);
+    walk.progress(1);
+    expect(built.actors!.linxia.position.x).toBeCloseTo(-0.1);
+    expect(built.actors!.linxia.position.z).toBeCloseTo(-44);
+    buildingRuntime.enter({ ...context, sceneId: 'S9' });
+    buildingRuntime.tick!(2.5);
+    expect(pose.rotation.y).toBe(0);
+    const second = build();
+    buildingRuntime.enter({ ...context, actors: second.built.actors! });
+    buildingRuntime.tick!(2.5);
+    expect(pose.rotation.y).toBe(0);
+    const nextPose = second.built.actors!.campusPhotographer.getObjectByName('building-phone-pose')!;
+    expect(nextPose.rotation.y).toBeCloseTo(0.3);
+    buildingRuntime.exit();
+    buildingRuntime.tick!(2.5);
+    expect(nextPose.rotation.y).toBe(0);
+  });
+
+  it('路人资源为场景私有，随树释放且不影响下一实例', () => {
+    const first = build(), second = build();
+    const actor = first.built.actors!.campusPhotographer;
+    const next = second.built.actors!.campusPhotographer;
+    const watched = new Set<THREE.BufferGeometry | THREE.Material>();
+    actor.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      watched.add(object.geometry);
+      watched.add(object.material as THREE.Material);
+      const nextMesh = next.getObjectByName(object.name) as THREE.Mesh;
+      expect(nextMesh.geometry).not.toBe(object.geometry);
+      expect(nextMesh.material).not.toBe(object.material);
+    });
+    const disposals = Array.from(watched).map((resource) => {
+      const dispose = vi.fn();
+      resource.addEventListener('dispose', dispose);
+      return dispose;
+    });
+    const nextDispose = vi.fn();
+    (next.getObjectByName('building-phone-device') as THREE.Mesh).geometry.addEventListener('dispose', nextDispose);
+    disposeLocal(first.root);
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledTimes(1);
+    expect(nextDispose).not.toHaveBeenCalled();
   });
 });
 

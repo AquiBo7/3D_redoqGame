@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Condition, StoryEffect } from '../data/storySchema';
+import type { BooleanStateKey, Condition, NumericStateKey, StoryEffect, StoryVariables } from '../data/storySchema';
 import {
   applyStoryEffect,
   createInitialMetaProgress,
@@ -13,7 +13,7 @@ function apply(state: StoryState, effect: StoryEffect): ReturnType<typeof applyS
 }
 
 describe('createInitialStoryState', () => {
-  it('初始化 GDD 第 7 节的 13 个字段', () => {
+  it('初始化执行总纲 2.1 全部字段及楼梯间访问标记', () => {
     expect(createInitialStoryState()).toEqual({
       momReply: null,
       phoneIgnored: 0,
@@ -25,8 +25,41 @@ describe('createInitialStoryState', () => {
       seenCrossedOut: false,
       picked: false,
       seenFatherWatching: false,
+      noticedPhoneBehind: false,
+      noticedPhoto: false,
+      likedPhoto: false,
+      roommateReply: null,
+      pointedOut: false,
+      canteenSeen: 0,
+      postChoice: null,
+      addedHer: false,
+      listened: false,
+      evidence: false,
+      seat: null,
+      teacherTalked: false,
+      tellTeacher: null,
+      visitedStairwell: false,
+      askedAboutFather: false,
+      fatherKnows: false,
+      clues: [],
+      wrongAsks: 0,
+      foundAyuanWay: null,
+      yuanState: null,
+      yuanScore: 0,
+      yuanKeys: [],
+      route: null,
+      postDeleted: false,
+      joined: false,
+      phrase: null,
+      stage1Tries: 0,
+      crystalHits: 0,
+      kills: 0,
+      helpedByAyuan: false,
+      apologized: false,
+      soloRepair: false,
       trust: 0,
       harm: 20,
+      ending: null,
       log: [],
     });
   });
@@ -35,6 +68,26 @@ describe('createInitialStoryState', () => {
     expect(createInitialMetaProgress()).toEqual({
       unlockedRoles: ['bystander'],
       unlockedEndings: [],
+      achievements: [],
+    });
+  });
+});
+
+describe('变量数组隔离', () => {
+  it('每次创建状态与元数据都生成独立数组', () => {
+    const first = createInitialStoryState();
+    const second = createInitialStoryState();
+    first.clues.push('07:52 小票');
+    first.yuanKeys.push('fact');
+    first.log.push({ timestamp: 1, sceneId: 'C5', type: 'observe', summary: '记下一条线索。' });
+    expect(second).toEqual(createInitialStoryState());
+
+    const meta = createInitialMetaProgress();
+    meta.achievements.push('A1');
+    meta.unlockedRoles.push('victim');
+    meta.unlockedEndings.push('best');
+    expect(createInitialMetaProgress()).toEqual({
+      unlockedRoles: ['bystander'], unlockedEndings: [], achievements: [],
     });
   });
 });
@@ -100,6 +153,101 @@ describe('applyStoryEffect', () => {
     expect(result.changedKeys).toEqual([]);
   });
 
+  it('set 支持所有非 log 变量，包括数值初始化和数组赋值', () => {
+    const set: StoryVariables = {
+      momReply: '马上出门。', phoneIgnored: 1, seenBag: true, seenHandoff: true,
+      noticedTyper: true, handedPen: true, reasonText: '起晚了', seenCrossedOut: true,
+      picked: true, seenFatherWatching: true, noticedPhoneBehind: true, noticedPhoto: true,
+      likedPhoto: true, roommateReply: '先看完整。', pointedOut: true, canteenSeen: 2,
+      postChoice: 'wait', addedHer: true, listened: true, evidence: true, seat: 'beside',
+      teacherTalked: true, tellTeacher: 'ask_her', visitedStairwell: true,
+      askedAboutFather: true, fatherKnows: true, clues: ['小票'], wrongAsks: 1,
+      foundAyuanWay: 'relay', yuanState: 'hostile', yuanScore: -1, yuanKeys: ['fact'],
+      route: 'team', postDeleted: true, joined: true, phrase: '一起想办法。',
+      stage1Tries: 3, crystalHits: 4, kills: 20, helpedByAyuan: true,
+      apologized: true, soloRepair: true, trust: 7, harm: 10, ending: 'best',
+    };
+    const result = apply(createInitialStoryState(), { set, add: { yuanScore: 2 } });
+    expect(result.state).toEqual({ ...set, yuanScore: 1, log: [] });
+    expect(result.changedKeys.sort()).toEqual(Object.keys(set).sort());
+    expect(result.state.clues).not.toBe(set.clues);
+    expect(result.state.yuanKeys).not.toBe(set.yuanKeys);
+  });
+
+  it('所有数值均可通过 add 增减，先 set 再 add 且不截断剧情阈值', () => {
+    const increments: Record<NumericStateKey, number> = {
+      phoneIgnored: 2, canteenSeen: 5, wrongAsks: 9, yuanScore: -2,
+      stage1Tries: 6, crystalHits: 12, kills: 25, trust: 7, harm: -80,
+    };
+    const result = apply(createInitialStoryState(), { add: increments });
+    for (const key of Object.keys(increments) as NumericStateKey[]) {
+      expect(result.state[key]).toBe(createInitialStoryState()[key] + increments[key]);
+    }
+    expect(result.changedKeys.sort()).toEqual(Object.keys(increments).sort());
+    expect(result.state.evidence).toBe(false);
+    expect(result.state.route).toBeNull();
+    expect(result.state.ending).toBeNull();
+  });
+
+  it('支持将字符串、枚举与布尔变量重置为 null / false', () => {
+    const initial = apply(createInitialStoryState(), {
+      set: { postChoice: 'explain', roommateReply: '看看吧。', ending: 'best', visitedStairwell: true },
+    }).state;
+    expect(apply(initial, {
+      set: { postChoice: null, roommateReply: null, ending: null, visitedStairwell: false },
+    }).state).toEqual(createInitialStoryState());
+  });
+
+  it('pushClue 去重且保留首次顺序，重复线索不产生变更', () => {
+    const clues = ['小票', '橙色手机壳', '小票'];
+    const first = apply(createInitialStoryState(), { pushClue: clues });
+    const second = apply(first.state, { pushClue: '台阶背影' });
+    expect(second.state.clues).toEqual(['小票', '橙色手机壳', '台阶背影']);
+    expect(first.state.clues).toEqual(['小票', '橙色手机壳']);
+    expect(clues).toEqual(['小票', '橙色手机壳', '小票']);
+    expect(second.changedKeys).toEqual(['clues']);
+    const duplicate = apply(second.state, { pushClue: ['小票', '台阶背影'] });
+    expect(duplicate).toEqual({ state: second.state, changedKeys: [] });
+    expect(duplicate.state).toBe(second.state);
+  });
+
+  it('pushYuanKey 保留三轮顺序与重复类型，不自动判定路线', () => {
+    let state = createInitialStoryState();
+    for (const key of ['fact', 'fact', 'company', 'force']) {
+      const result = apply(state, { pushYuanKey: key });
+      expect(result.changedKeys).toEqual(['yuanKeys']);
+      state = result.state;
+    }
+    expect(state.yuanKeys).toEqual(['fact', 'fact', 'company', 'force']);
+    expect(state.route).toBeNull();
+    expect(state.ending).toBeNull();
+    expect(state.harm).toBe(20);
+  });
+
+  it('set 与 push 同时应用时不污染效果数组，并复制未修改的数组与日志条目', () => {
+    const initial = apply(createInitialStoryState(), {
+      pushClue: '原线索', pushYuanKey: 'empathy', log: { type: 'system', summary: '进入对峙。' },
+    }).state;
+    const clues = ['新线索'];
+    const yuanKeys = ['fact'];
+    const result = apply(initial, { set: { clues, yuanKeys }, pushClue: '小票', pushYuanKey: 'company' });
+    expect(result.state.clues).toEqual(['新线索', '小票']);
+    expect(result.state.yuanKeys).toEqual(['fact', 'company']);
+    expect(result.changedKeys).toEqual(['clues', 'yuanKeys']);
+    expect(clues).toEqual(['新线索']);
+    expect(yuanKeys).toEqual(['fact']);
+    expect(initial.clues).toEqual(['原线索']);
+    expect(initial.yuanKeys).toEqual(['empathy']);
+
+    const copied = apply(initial, { add: { trust: 1 } }).state;
+    copied.clues.push('其他线索');
+    copied.yuanKeys.push('noise');
+    copied.log[0].summary = '修改副本';
+    expect(initial.clues).toEqual(['原线索']);
+    expect(initial.yuanKeys).toEqual(['empathy']);
+    expect(initial.log[0].summary).toBe('进入对峙。');
+  });
+
   it('未提供效果时直接返回原状态', () => {
     const initial = createInitialStoryState();
     const result = applyStoryEffect(initial, undefined, 'S1', 1);
@@ -141,5 +289,59 @@ describe('evaluateCondition', () => {
 
   it.each(cases)('%s', (_name, condition, expected) => {
     expect(evaluateCondition(condition, state, 'bystander')).toBe(expected);
+  });
+
+  const newBooleans: BooleanStateKey[] = [
+    'noticedPhoneBehind', 'noticedPhoto', 'likedPhoto', 'pointedOut', 'addedHer', 'listened',
+    'evidence', 'teacherTalked', 'visitedStairwell', 'askedAboutFather', 'fatherKnows',
+    'postDeleted', 'joined', 'helpedByAyuan', 'apologized', 'soloRepair',
+  ];
+  it.each(newBooleans)('支持新增布尔条件 %s', (key) => {
+    expect(evaluateCondition({ key, equals: true }, { ...state, [key]: true }, 'bystander')).toBe(true);
+    expect(evaluateCondition({ key, equals: false }, { ...state, [key]: true }, 'bystander')).toBe(false);
+  });
+
+  const newStrings: Condition[] = [
+    { key: 'roommateReply', op: '==', value: '先看完整。' },
+    { key: 'postChoice', op: '==', value: 'wait' },
+    { key: 'seat', op: '==', value: 'far' },
+    { key: 'tellTeacher', op: '==', value: 'think' },
+    { key: 'foundAyuanWay', op: '==', value: 'recognize' },
+    { key: 'yuanState', op: '==', value: 'guarded' },
+    { key: 'route', op: '==', value: 'deleteOnly' },
+    { key: 'phrase', op: '==', value: '一起想办法。' },
+    { key: 'ending', op: '==', value: 'middle' },
+  ];
+  it.each(newStrings)('支持新增字符串 / 枚举条件 $key', (condition) => {
+    if (!('key' in condition) || !('value' in condition)) throw new Error('应为字符串条件');
+    expect(evaluateCondition(condition, { ...state, [condition.key]: condition.value }, 'bystander')).toBe(true);
+    expect(evaluateCondition(condition, state, 'bystander')).toBe(false);
+  });
+
+  const newNumbers: NumericStateKey[] = ['canteenSeen', 'wrongAsks', 'yuanScore', 'stage1Tries', 'crystalHits', 'kills'];
+  it.each(newNumbers)('支持新增数值条件 %s', (key) => {
+    expect(evaluateCondition({ key, op: '>=', value: 3 }, { ...state, [key]: 3 }, 'bystander')).toBe(true);
+    expect(evaluateCondition({ key, op: '<', value: 3 }, { ...state, [key]: 3 }, 'bystander')).toBe(false);
+  });
+
+  it('旁观线三条件可由数据组合，但求值不自动设置结局', () => {
+    const state = apply(createInitialStoryState(), { set: { seat: 'far', tellTeacher: 'think' } }).state;
+    const condition: Condition = { all: [
+      { key: 'seat', op: '==', value: 'far' },
+      { key: 'tellTeacher', op: '==', value: 'think' },
+      { key: 'visitedStairwell', equals: false },
+    ] };
+    expect(evaluateCondition(condition, state, 'bystander')).toBe(true);
+    expect(evaluateCondition(condition, { ...state, visitedStairwell: true }, 'bystander')).toBe(false);
+    expect(state.ending).toBeNull();
+  });
+
+  it.each([1, 3, 5, 7])('信任阈值 %i 只参与显式条件计算，不推导剧情', (threshold) => {
+    const initial = createInitialStoryState();
+    const state = apply(initial, { set: { picked: true }, add: { trust: threshold } }).state;
+    const condition: Condition = { key: 'trust', op: '>=', value: threshold };
+    expect(evaluateCondition(condition, state, 'bystander')).toBe(true);
+    expect(evaluateCondition(condition, { ...state, trust: threshold - 1 }, 'bystander')).toBe(false);
+    expect(state).toEqual({ ...initial, picked: true, trust: threshold });
   });
 });

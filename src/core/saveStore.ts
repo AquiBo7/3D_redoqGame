@@ -1,5 +1,5 @@
 // core/saveStore.ts —— 分层 localStorage 存档
-// 单局章节存档与全局多周目元数据使用两个独立 key，均带版本号。
+// 单局存档、全局元数据和三个章节检查点使用独立 key，兼容 v1 旧存档。
 // 本模块属于 core，严格禁止 import three.js。
 
 import { isRole, isSceneId } from '../data/storySchema';
@@ -8,12 +8,18 @@ import {
   createInitialMetaProgress,
   createInitialStoryState,
 } from './state';
-import type { MetaProgress, StoryState } from './state';
+import type { LogEntry, MetaProgress, StoryState } from './state';
 
 export const CHAPTER_SAVE_KEY = 'yitiaojietu.ch1.save.v1';
 export const META_SAVE_KEY = 'yitiaojietu.meta.v1';
 export const CHAPTER_SAVE_VERSION = 1 as const;
 export const META_SAVE_VERSION = 1 as const;
+export const CHECKPOINT_SAVE_KEYS = {
+  ch2_canteen: 'yitiaojietu.checkpoint.ch2_canteen.v1',
+  ch3_morning: 'yitiaojietu.checkpoint.ch3_morning.v1',
+  ch4_platform: 'yitiaojietu.checkpoint.ch4_platform.v1',
+} as const;
+export type CheckpointKey = keyof typeof CHECKPOINT_SAVE_KEYS;
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -32,10 +38,8 @@ export interface ChapterSave {
   completed: boolean;
 }
 
-interface MetaSaveV1 {
+interface MetaSaveV1 extends MetaProgress {
   version: 1;
-  unlockedRoles: Role[];
-  unlockedEndings: string[];
 }
 
 function getDefaultStorage(): StorageLike | null {
@@ -84,29 +88,24 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function isStoryState(value: unknown): value is StoryState {
-  if (!isRecord(value)) return false;
-  if (value.momReply !== null && typeof value.momReply !== 'string') return false;
-  if (value.reasonText !== null && typeof value.reasonText !== 'string') return false;
-  if (!isFiniteNumber(value.phoneIgnored)) return false;
-  if (!isFiniteNumber(value.trust)) return false;
-  if (!isFiniteNumber(value.harm)) return false;
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean';
+}
 
-  const booleanKeys = [
-    'seenBag',
-    'seenHandoff',
-    'noticedTyper',
-    'handedPen',
-    'seenCrossedOut',
-    'picked',
-    'seenFatherWatching',
-  ] as const;
-  for (const key of booleanKeys) {
-    if (typeof value[key] !== 'boolean') return false;
-  }
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
 
-  if (!Array.isArray(value.log)) return false;
-  return value.log.every((entry) => {
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function nullableChoice<T extends string>(...choices: T[]): (value: unknown) => value is T | null {
+  return (value): value is T | null => value === null || choices.some((choice) => choice === value);
+}
+
+function isLogArray(value: unknown): value is LogEntry[] {
+  return Array.isArray(value) && value.every((entry: unknown) => {
     if (!isRecord(entry)) return false;
     return (
       isFiniteNumber(entry.timestamp) &&
@@ -117,31 +116,112 @@ function isStoryState(value: unknown): value is StoryState {
   });
 }
 
-function isChapterSave(value: unknown): boolean {
+// 映射类型强制每个状态字段都有对应验证器，避免扩容后漏验新字段。
+const STATE_VALIDATORS: { [K in keyof StoryState]: (value: unknown) => value is StoryState[K] } = {
+  momReply: isNullableString,
+  phoneIgnored: isFiniteNumber,
+  seenBag: isBoolean,
+  seenHandoff: isBoolean,
+  noticedTyper: isBoolean,
+  handedPen: isBoolean,
+  reasonText: isNullableString,
+  seenCrossedOut: isBoolean,
+  picked: isBoolean,
+  seenFatherWatching: isBoolean,
+  noticedPhoneBehind: isBoolean,
+  noticedPhoto: isBoolean,
+  likedPhoto: isBoolean,
+  roommateReply: isNullableString,
+  pointedOut: isBoolean,
+  canteenSeen: isFiniteNumber,
+  postChoice: nullableChoice('explain', 'wait', 'joke'),
+  addedHer: isBoolean,
+  listened: isBoolean,
+  evidence: isBoolean,
+  seat: nullableChoice('beside', 'front', 'far'),
+  teacherTalked: isBoolean,
+  tellTeacher: nullableChoice('told', 'ask_her', 'think'),
+  visitedStairwell: isBoolean,
+  askedAboutFather: isBoolean,
+  fatherKnows: isBoolean,
+  clues: isStringArray,
+  wrongAsks: isFiniteNumber,
+  foundAyuanWay: nullableChoice('recognize', 'relay', 'shout'),
+  yuanState: nullableChoice('unprepared', 'guarded', 'hostile'),
+  yuanScore: isFiniteNumber,
+  yuanKeys: isStringArray,
+  route: nullableChoice('team', 'deleteOnly', 'breakdown'),
+  postDeleted: isBoolean,
+  joined: isBoolean,
+  phrase: isNullableString,
+  stage1Tries: isFiniteNumber,
+  crystalHits: isFiniteNumber,
+  kills: isFiniteNumber,
+  helpedByAyuan: isBoolean,
+  apologized: isBoolean,
+  soloRepair: isBoolean,
+  trust: isFiniteNumber,
+  harm: isFiniteNumber,
+  ending: nullableChoice('joined', 'bystander', 'worst', 'best', 'middle'),
+  log: isLogArray,
+};
+
+const LEGACY_STATE_KEYS = [
+  'momReply', 'phoneIgnored', 'seenBag', 'seenHandoff', 'noticedTyper', 'handedPen',
+  'reasonText', 'seenCrossedOut', 'picked', 'seenFatherWatching', 'trust', 'harm', 'log',
+] as const;
+
+function isStoryState(value: unknown): value is StoryState {
   if (!isRecord(value)) return false;
-  return (
-    value.version === CHAPTER_SAVE_VERSION &&
-    value.chapterId === 'ch1' &&
-    isFiniteNumber(value.savedAt) &&
-    isSceneId(value.sceneId) &&
-    isRole(value.role) &&
-    isStoryState(value.state) &&
-    (value.completed === undefined || typeof value.completed === 'boolean')
-  );
+  return (Object.keys(STATE_VALIDATORS) as (keyof StoryState)[])
+    .every((key) => STATE_VALIDATORS[key](value[key]));
 }
 
-export function loadChapterSave(storage?: StorageLike | null): ChapterSave | null {
-  const raw = readJson(CHAPTER_SAVE_KEY, resolveStorage(storage));
-  if (!isChapterSave(raw) || !isRecord(raw)) return null;
+function migrateStoryState(value: unknown): StoryState | null {
+  if (!isRecord(value)) return null;
+  // 旧字段缺失依然是损坏存档；仅为后续版本新增字段填默认值。
+  if (!LEGACY_STATE_KEYS.every((key) => Object.prototype.hasOwnProperty.call(value, key))) return null;
+  // 存在的非法值不能被默认值吞掉（包括 null、错误枚举和非有限数）。
+  const migrated: unknown = { ...createInitialStoryState(), ...value };
+  return isStoryState(migrated) ? migrated : null;
+}
+
+function parseChapterSave(raw: unknown): ChapterSave | null {
+  if (!isRecord(raw) ||
+    raw.version !== CHAPTER_SAVE_VERSION ||
+    raw.chapterId !== 'ch1' ||
+    !isFiniteNumber(raw.savedAt) ||
+    !isSceneId(raw.sceneId) ||
+    !isRole(raw.role) ||
+    (raw.completed !== undefined && typeof raw.completed !== 'boolean')) return null;
+
+  const state = migrateStoryState(raw.state);
+  if (!state) return null;
   return {
     version: CHAPTER_SAVE_VERSION,
     chapterId: 'ch1',
-    savedAt: raw.savedAt as number,
-    sceneId: raw.sceneId as SceneId,
-    role: raw.role as Role,
-    state: raw.state as StoryState,
+    savedAt: raw.savedAt,
+    sceneId: raw.sceneId,
+    role: raw.role,
+    state,
     completed: raw.completed === true,
   };
+}
+
+export function loadChapterSave(storage?: StorageLike | null): ChapterSave | null {
+  return parseChapterSave(readJson(CHAPTER_SAVE_KEY, resolveStorage(storage)));
+}
+
+export function saveCheckpoint(
+  key: CheckpointKey,
+  save: ChapterSave,
+  storage?: StorageLike | null,
+): boolean {
+  return writeJson(CHECKPOINT_SAVE_KEYS[key], save, resolveStorage(storage));
+}
+
+export function loadCheckpoint(key: CheckpointKey, storage?: StorageLike | null): ChapterSave | null {
+  return parseChapterSave(readJson(CHECKPOINT_SAVE_KEYS[key], resolveStorage(storage)));
 }
 
 export function hasChapterSave(storage?: StorageLike | null): boolean {
@@ -165,23 +245,22 @@ export function clearChapterSave(storage?: StorageLike | null): void {
 function normalizeMeta(meta: MetaProgress): MetaProgress {
   const roles = Array.from(new Set<Role>(['bystander', ...meta.unlockedRoles]));
   const endings = Array.from(new Set(meta.unlockedEndings.filter((id) => id.length > 0)));
-  return { unlockedRoles: roles, unlockedEndings: endings };
-}
-
-function isMetaSave(value: unknown): value is MetaSaveV1 {
-  if (!isRecord(value)) return false;
-  if (value.version !== META_SAVE_VERSION) return false;
-  if (!Array.isArray(value.unlockedRoles) || !value.unlockedRoles.every(isRole)) return false;
-  if (!Array.isArray(value.unlockedEndings)) return false;
-  return value.unlockedEndings.every((id) => typeof id === 'string');
+  const achievements = Array.from(new Set(meta.achievements.filter((id) => id.length > 0)));
+  return { unlockedRoles: roles, unlockedEndings: endings, achievements };
 }
 
 export function loadMetaProgress(storage?: StorageLike | null): MetaProgress {
   const raw = readJson(META_SAVE_KEY, resolveStorage(storage));
-  if (!isMetaSave(raw)) return createInitialMetaProgress();
+  if (!isRecord(raw) || raw.version !== META_SAVE_VERSION ||
+    !Array.isArray(raw.unlockedRoles) || !raw.unlockedRoles.every(isRole) ||
+    !isStringArray(raw.unlockedEndings)) return createInitialMetaProgress();
+
+  const achievements: unknown = 'achievements' in raw ? raw.achievements : [];
+  if (!isStringArray(achievements)) return createInitialMetaProgress();
   return normalizeMeta({
     unlockedRoles: raw.unlockedRoles,
     unlockedEndings: raw.unlockedEndings,
+    achievements,
   });
 }
 
@@ -191,6 +270,7 @@ export function saveMetaProgress(meta: MetaProgress, storage?: StorageLike | nul
     version: META_SAVE_VERSION,
     unlockedRoles: normalized.unlockedRoles,
     unlockedEndings: normalized.unlockedEndings,
+    achievements: normalized.achievements,
   };
   return writeJson(META_SAVE_KEY, payload, resolveStorage(storage));
 }
@@ -213,6 +293,15 @@ export function unlockEnding(endingId: string, storage?: StorageLike | null): Me
     ...meta,
     unlockedEndings: [...meta.unlockedEndings, endingId],
   };
+  saveMetaProgress(next, storage);
+  return normalizeMeta(next);
+}
+
+/** 只记录成就，不在存储层推导结局或自动解锁其他成就。 */
+export function unlockAchievement(id: string, storage?: StorageLike | null): MetaProgress {
+  const meta = loadMetaProgress(storage);
+  if (meta.achievements.includes(id)) return meta;
+  const next: MetaProgress = { ...meta, achievements: [...meta.achievements, id] };
   saveMetaProgress(next, storage);
   return normalizeMeta(next);
 }

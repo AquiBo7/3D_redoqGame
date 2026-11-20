@@ -3,8 +3,17 @@ import { chapter1 } from './story.ch1';
 import { SCENE_IDS } from './storySchema';
 import type { SceneId, StoryChoice, StoryStep } from './storySchema';
 
+const CHAPTER_ONE_SCENE_IDS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9'] as const;
+const configuredSceneIds = Object.keys(chapter1.scenes) as SceneId[];
+
+function sceneOf(sceneId: SceneId) {
+  const scene = chapter1.scenes[sceneId];
+  expect(scene, `缺少已配置场景 ${sceneId}`).toBeDefined();
+  return scene!;
+}
+
 function stepsOf(sceneId: SceneId): StoryStep[] {
-  return chapter1.scenes[sceneId].steps;
+  return sceneOf(sceneId).steps;
 }
 
 function stepById(sceneId: SceneId, stepId: string): StoryStep {
@@ -26,24 +35,28 @@ function optionOf(sceneId: SceneId, stepId: string, optionId: string): StoryChoi
 }
 
 describe('第一章剧本结构', () => {
-  it('包含 S1–S9 全部场景，且 id 与键一致', () => {
-    expect(Object.keys(chapter1.scenes).sort()).toEqual([...SCENE_IDS].sort());
-    for (const sceneId of SCENE_IDS) {
-      expect(chapter1.scenes[sceneId].id).toBe(sceneId);
+  it('Phase A 包含完整第一章 S1–S9 与 S10 字幕，不为扩展场景制造假节点', () => {
+    expect(SCENE_IDS).toHaveLength(27);
+    expect([...configuredSceneIds].sort()).toEqual([...CHAPTER_ONE_SCENE_IDS, 'S10'].sort());
+    for (const sceneId of configuredSceneIds) {
+      expect(SCENE_IDS).toContain(sceneId);
+      expect(sceneOf(sceneId).id).toBe(sceneId);
+      expect(stepsOf(sceneId).length).toBeGreaterThan(0);
     }
   });
 
-  it('场景按 S1→S9 线性推进，S9 无后续转场', () => {
-    for (let index = 0; index < SCENE_IDS.length - 1; index += 1) {
-      const current = SCENE_IDS[index];
-      const next = SCENE_IDS[index + 1];
-      expect(chapter1.scenes[current].transitions).toEqual([{ to: next }]);
+  it('第一章按 S1→S9 线性推进到 S10，Phase A 在 S10 字幕后结束', () => {
+    const phaseASceneIds = [...CHAPTER_ONE_SCENE_IDS, 'S10'] as const;
+    for (let index = 0; index < phaseASceneIds.length - 1; index += 1) {
+      const current = phaseASceneIds[index];
+      const next = phaseASceneIds[index + 1];
+      expect(sceneOf(current).transitions).toEqual([{ to: next }]);
     }
-    expect(chapter1.scenes.S9.transitions).toEqual([]);
+    expect(sceneOf('S10').transitions).toEqual([]);
   });
 
   it('所有条件跳转目标都存在', () => {
-    for (const sceneId of SCENE_IDS) {
+    for (const sceneId of configuredSceneIds) {
       const stepIds = new Set(stepsOf(sceneId).map((step) => step.id));
       for (const step of stepsOf(sceneId)) {
         if (step.kind !== 'choice') continue;
@@ -55,7 +68,7 @@ describe('第一章剧本结构', () => {
   });
 
   it('心声字幕不超过 3 处（当前为 2 处）', () => {
-    const captions = SCENE_IDS.flatMap((sceneId) =>
+    const captions = configuredSceneIds.flatMap((sceneId) =>
       stepsOf(sceneId).filter((step) => step.kind === 'caption'),
     );
     expect(captions).toHaveLength(2);
@@ -67,7 +80,7 @@ describe('第一章剧本结构', () => {
     const step = stepById('S2', 's2-phone');
     if (step.kind !== 'phone') throw new Error('s2-phone 不是 phone');
 
-    expect(step.panel.lockTime).toBe('8:47');
+    expect(step.panel.lockTime).toBe('8:40');
     const group = step.panel.sections.find((section) => section.id === 'group');
     const memo = step.panel.sections.find((section) => section.id === 'memo');
     const mom = step.panel.sections.find((section) => section.id === 'mom');
@@ -96,15 +109,15 @@ describe('第一章剧本结构', () => {
   });
 
   it('S1 / S3 预留文化衫与证件袋可选互动', () => {
-    const s1Targets = (chapter1.scenes.S1.triggers ?? []).map((trigger) => trigger.target);
-    const s3Targets = (chapter1.scenes.S3.triggers ?? []).map((trigger) => trigger.target);
+    const s1Targets = (sceneOf('S1').triggers ?? []).map((trigger) => trigger.target);
+    const s3Targets = (sceneOf('S3').triggers ?? []).map((trigger) => trigger.target);
     expect(s1Targets).toContain('culture-shirt');
     expect(s3Targets).toContain('culture-shirt');
     expect(s3Targets).toContain('document-bag');
   });
 
   it('S4 最多两次震动，忽略 +1、打开不增加污染值', () => {
-    const triggers = chapter1.scenes.S4.triggers ?? [];
+    const triggers = sceneOf('S4').triggers ?? [];
     const ignore = triggers.filter((trigger) => trigger.action === 'ignore');
     const open = triggers.filter((trigger) => trigger.action === 'open');
 
@@ -152,11 +165,11 @@ describe('第一章剧本结构', () => {
     const linxiaPicks = stepById('S7', 's7-linxia-picks');
     expect(thanks.when).toEqual({ key: 'picked', equals: true });
     expect(linxiaPicks.when).toEqual({ key: 'picked', equals: false });
-    expect(chapter1.scenes.S7.transitions).toEqual([{ to: 'S8' }]);
+    expect(sceneOf('S7').transitions).toEqual([{ to: 'S8' }]);
   });
 
   it('S7 药袋小票可触发“划掉原因”观察点', () => {
-    const trigger = (chapter1.scenes.S7.triggers ?? []).find(
+    const trigger = (sceneOf('S7').triggers ?? []).find(
       (item) => item.id === 's7-see-crossed-out',
     );
     expect(trigger?.event).toBe('scene:gazeHotspot');
@@ -169,14 +182,26 @@ describe('第一章剧本结构', () => {
     const walk = choiceOf('S8', 's8-walk');
     expect(walk.options).toHaveLength(3);
 
-    const trigger = (chapter1.scenes.S8.triggers ?? []).find(
+    const trigger = (sceneOf('S8').triggers ?? []).find(
       (item) => item.id === 's8-see-father',
     );
     expect(trigger?.effects?.set?.seenFatherWatching).toBe(true);
   });
 
-  it('S9 看 / 不看手机分别进入手机面板与结尾，且结尾记录日志', () => {
-    expect(chapter1.scenes.S9.steps.map((step) => step.id)).toEqual([
+  it('S8 路边举手机观察独立记录状态，客观字幕不占心声额度', () => {
+    const trigger = sceneOf('S8').triggers?.find((item) => item.target === 'phone-behind');
+    expect(trigger).toBeDefined();
+    expect(trigger).toMatchObject({
+      id: 's8-phone-behind', event: 'scene:gazeHotspot', target: 'phone-behind',
+      effects: { set: { noticedPhoneBehind: true }, log: { type: 'observe' } },
+      reveal: { text: '路边有同学正举着手机拍林荫道，镜头晃过你们这边。' },
+    });
+    expect(trigger!.once).not.toBe(false);
+    expect(trigger!.effects?.add?.harm).toBeUndefined();
+  });
+
+  it('S9 看 / 不看手机分别进入手机面板与系统收尾，日志保留并转场 S10', () => {
+    expect(stepsOf('S9').map((step) => step.id)).toEqual([
       's9-choice',
       's9-phone',
       's9-end',
@@ -189,7 +214,68 @@ describe('第一章剧本结构', () => {
     expect(ignore.effects?.add?.phoneIgnored).toBe(1);
 
     const end = stepById('S9', 's9-end');
-    expect(end.kind).toBe('end');
+    expect(end.kind).toBe('system');
     expect(end.effects?.log).toEqual({ type: 'system', summary: '第一章 到校段结束。' });
+    expect(sceneOf('S9').transitions).toEqual([{ to: 'S10' }]);
+  });
+
+  it('S9 群消息与合照资产、两个静默 reply 动作一一对应', () => {
+    const step = stepById('S9', 's9-phone');
+    if (step.kind !== 'phone') throw new Error('s9-phone 不是 phone');
+    expect(step.panel.id).toBe('s9-phone');
+    expect(step.panel.closeActionId).toBe('close');
+    const chat = step.panel.sections.find((section) => section.kind === 'chat');
+    const photo = step.panel.sections.find((section) => section.kind === 'photo');
+    expect(chat).toBeDefined();
+    expect(photo).toBeDefined();
+    expect(chat!.title).toBe('迎新群');
+    expect(chat!.unread).toBe(3);
+    expect(chat!.messages.map(({ from, text }) => ({ from, text }))).toEqual([
+      { from: '学姐', text: '开学第一天照片合集～' },
+      { from: '群友', text: '我在左边！' },
+      { from: '群友', text: '好多人啊。' },
+    ]);
+    expect(photo).toMatchObject({
+      kind: 'photo', assetId: 'cg_s6_gate_panorama',
+      noticeActionId: 's9-notice-photo', likeActionId: 's9-like-photo',
+    });
+    const triggers = sceneOf('S9').triggers;
+    expect(triggers).toHaveLength(2);
+    for (const [id, stateKey] of [
+      [photo!.noticeActionId, 'noticedPhoto'],
+      [photo!.likeActionId, 'likedPhoto'],
+    ] as const) {
+      const trigger = triggers!.find((item) => item.id === id);
+      expect(trigger).toBeDefined();
+      expect(trigger).toMatchObject({
+        event: 'ui:phoneAction', target: step.panel.id, action: 'reply',
+        effects: { set: { [stateKey]: true } },
+      });
+      expect(trigger!.once).not.toBe(false);
+      expect(trigger!.reveal).toBeUndefined();
+      expect(trigger!.effects?.add?.harm).toBeUndefined();
+      expect(trigger!.effects?.set?.harm).toBeUndefined();
+    }
+  });
+
+  it('S10 仅配置七行入学字幕，每行 2000ms、可跳过且不伪造 S11', () => {
+    const scene = sceneOf('S10');
+    expect(scene.sceneKey).toBe('stage2d');
+    expect(scene.steps).toHaveLength(1);
+    const step = stepById('S10', 's10-days');
+    if (step.kind !== 'intertitle') throw new Error('s10-days 不是 intertitle');
+    expect(step.lineDurationMs).toBe(2000);
+    expect(step.skippable).toBe(true);
+    expect(step.lines).toEqual([
+      '入学第三天，你记住了室友的名字。',
+      '第五天，班群里有了第一个表情包梗。',
+      '食堂的酸辣粉，比想象中好吃。',
+      '走廊里偶尔遇到她，点点头，她也点点头。',
+      '一切都很顺利。',
+      '顺利得你几乎忘了，那天台阶上的事。',
+      '直到……',
+    ]);
+    expect(scene.transitions).toEqual([]);
+    expect(chapter1.scenes.S11).toBeUndefined();
   });
 });

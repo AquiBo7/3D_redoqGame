@@ -60,6 +60,7 @@ export interface GameEvents {
     lines: DialogueLine[];
     speakerNames: Record<string, string>;
   };
+  'ui:showIntertitle': { stepId: string; lines: string[]; lineDurationMs: number; skippable: boolean };
   'ui:showPhone': { stepId: string; panel: PhonePanel };
   'ui:hidePhone': { phoneId: string };
   'ui:showCaption': {

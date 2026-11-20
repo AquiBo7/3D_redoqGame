@@ -11,7 +11,7 @@ import type {
   SceneSpawn,
   WorldSceneDefinition,
 } from '../world/worldSceneTypes';
-import { createActorAnimation, createCharacterActor, createTextSign, startIdleMotion } from './shared';
+import { createActorAnimation, createCharacterActor, createMatteMaterial, createTextSign, startIdleMotion } from './shared';
 import {
   getPavingMaterial,
   getPlasterMaterial,
@@ -72,6 +72,16 @@ const DOOR = { center: { x: 0, y: 1.4, z: -47.9 }, size: { w: 2.4, h: 2.8, d: 0.
 
 /** 校门方向站着的爸爸（回头观察热点目标） */
 const FATHER = { x: 0, z: 8.6 } as const;
+
+/** 右侧草坪边缘：鞋底贴 lawn 的 y=-0.055，整个人在可行走边界外，不挤占同行路线。 */
+const PHONE_PASSERBY = { x: 6.45, y: -0.055, z: -10, yaw: -2.58 } as const;
+const PHONE_LOCAL = { x: 0, y: 0.63, z: 0.42 } as const;
+const PHONE_PIVOT_Y = 0.9;
+const PHONE_HOTSPOT = {
+  x: PHONE_PASSERBY.x + Math.sin(PHONE_PASSERBY.yaw) * PHONE_LOCAL.z,
+  y: PHONE_PASSERBY.y + PHONE_PIVOT_Y + PHONE_LOCAL.y,
+  z: PHONE_PASSERBY.z + Math.cos(PHONE_PASSERBY.yaw) * PHONE_LOCAL.z,
+};
 
 const SPAWN: SceneSpawn = { x: 0.2, z: 1.2, yaw: 0, pitchDeg: -5 };
 
@@ -214,6 +224,82 @@ function campusMesh(
   mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
+}
+
+/** 独立程序化路人：双手横持手机拍校园，局部 +Z 为镜头方向，不加载任何角色模型。 */
+function createCampusPhotographer(): THREE.Group {
+  const actor = new THREE.Group();
+  actor.name = 'building-campus-photographer';
+  actor.position.set(PHONE_PASSERBY.x, PHONE_PASSERBY.y, PHONE_PASSERBY.z);
+  actor.rotation.y = PHONE_PASSERBY.yaw;
+  const shirt = createMatteMaterial(0x819496);
+  const trousers = createMatteMaterial(0x59615e);
+  const shoes = createMatteMaterial(0xb8b8aa);
+  const skin = createMatteMaterial(0xc9a98c);
+  const hair = createMatteMaterial(0x4c4943);
+  const casing = createMatteMaterial(0x58615e, 0.7);
+  const screen = createMatteMaterial(0x879c9c, 0.65);
+  const lens = createMatteMaterial(0x263534, 0.5);
+  const part = (parent: THREE.Object3D, name: string, geometry: THREE.BufferGeometry,
+    material: THREE.Material, position: CampusTuple): THREE.Mesh => {
+    // 路人仅接收既有天光与树荫，不新增实时灯光、发光屏或投影预算。
+    const mesh = campusMesh(parent, geometry, material, position, false);
+    mesh.name = `building-phone-${name}`;
+    return mesh;
+  };
+  for (const side of [-1, 1]) {
+    const suffix = side < 0 ? 'left' : 'right';
+    part(actor, `shoe-${suffix}`, new THREE.BoxGeometry(0.17, 0.09, 0.28), shoes, [side * 0.12, 0.045, 0.04]);
+    part(actor, `leg-${suffix}`, new THREE.CylinderGeometry(0.083, 0.072, 0.76, 6), trousers, [side * 0.12, 0.47, 0]);
+  }
+  part(actor, 'hips', new THREE.BoxGeometry(0.36, 0.18, 0.23), trousers, [0, 0.83, 0]);
+  const contact = part(actor, 'contact', new THREE.CircleGeometry(0.34, 12),
+    new THREE.MeshBasicMaterial({ color: 0x35453c, transparent: true, opacity: 0.13, depthWrite: false }), [0, 0.001, 0]);
+  contact.rotation.x = -Math.PI / 2;
+  contact.scale.y = 0.72;
+  contact.receiveShadow = false;
+  contact.raycast = () => {};
+
+  // 只转上身取景，鞋与腿不随摆动离地；手臂、手掌、手机始终在同一个姿态组内。
+  const pose = new THREE.Group();
+  pose.name = 'building-phone-pose';
+  pose.position.y = PHONE_PIVOT_Y;
+  actor.add(pose);
+  const torso = part(pose, 'shirt', new THREE.CylinderGeometry(0.23, 0.2, 0.49, 6), shirt, [0, 0.25, 0]);
+  torso.scale.z = 0.63;
+  part(pose, 'neck', new THREE.CylinderGeometry(0.065, 0.07, 0.12, 6), skin, [0, 0.52, 0]);
+  const head = part(pose, 'head', new THREE.IcosahedronGeometry(0.18, 1), skin, [0, 0.68, 0.015]);
+  head.scale.set(0.82, 1, 0.85);
+  const cap = part(pose, 'hair', new THREE.SphereGeometry(0.184, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), hair, [0, 0.7, 0.006]);
+  cap.scale.set(0.84, 0.85, 0.9);
+  part(pose, 'nose', new THREE.BoxGeometry(0.04, 0.05, 0.04), skin, [0, 0.67, 0.164]);
+
+  const limb = (name: string, a: CampusTuple, b: CampusTuple, radius: number, material: THREE.Material): void => {
+    const from = new THREE.Vector3(...a);
+    const to = new THREE.Vector3(...b);
+    const direction = to.clone().sub(from);
+    const middle = from.add(to).multiplyScalar(0.5);
+    const mesh = part(pose, name, new THREE.CylinderGeometry(radius, radius * 1.06, direction.length(), 6),
+      material, [middle.x, middle.y, middle.z]);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+  };
+  for (const side of [-1, 1]) {
+    const suffix = side < 0 ? 'left' : 'right';
+    const shoulder: CampusTuple = [side * 0.2, 0.43, 0];
+    const elbow: CampusTuple = [side * 0.32, 0.27, 0.2];
+    const hand: CampusTuple = [side * 0.125, 0.57, PHONE_LOCAL.z];
+    limb(`upper-arm-${suffix}`, shoulder, elbow, 0.073, shirt);
+    limb(`forearm-${suffix}`, elbow, hand, 0.046, skin);
+    part(pose, `hand-${suffix}`, new THREE.IcosahedronGeometry(0.043, 1), skin, hand);
+  }
+  const phone = part(pose, 'device', new THREE.BoxGeometry(0.22, 0.125, 0.026), casing,
+    [PHONE_LOCAL.x, PHONE_LOCAL.y, PHONE_LOCAL.z]);
+  part(phone, 'screen', new THREE.BoxGeometry(0.193, 0.099, 0.003), screen, [0, 0, -0.014]);
+  part(phone, 'camera-pad', new THREE.BoxGeometry(0.047, 0.042, 0.004), hair, [-0.071, 0.029, 0.015]);
+  part(phone, 'lens', new THREE.SphereGeometry(0.011, 6, 4), lens, [-0.071, 0.029, 0.019]);
+  actor.traverse((object) => { object.userData.campusDetail = true; });
+  // 几何与材质均为本场景私有，随 WorldApp 的场景树释放；没有贴图、定时器或异步装填。
+  return actor;
 }
 
 function campusCanvasMaterial(
@@ -1134,7 +1220,10 @@ function buildBuilding(parent: THREE.Object3D): {
     parent.add(actor);
   }
 
-  return { occluders, actors: { linxia, father, campusReader, campusObserver, bloomEnvironment } };
+  const campusPhotographer = createCampusPhotographer();
+  parent.add(campusPhotographer);
+
+  return { occluders, actors: { linxia, father, campusReader, campusObserver, campusPhotographer, bloomEnvironment } };
 }
 
 let campusIdleActors: THREE.Object3D[] = [];
@@ -1180,6 +1269,8 @@ function enterCampusIdle(actors: Record<string, THREE.Object3D>): void {
 
 let walkTween: gsap.core.Tween | null = null;
 let fatherIdleDispose: (() => void) | null = null;
+let phonePanPose: THREE.Object3D | null = null;
+let phonePanTime = 0;
 let walkingLinxia: THREE.Object3D | null = null;
 let linxiaAnimation: CharacterAnimationController | null = null;
 let bloomContext: SceneRuntimeContext | null = null;
@@ -1211,6 +1302,12 @@ export const buildingRuntime: SceneRuntime = {
     activeBloomUniforms = context.actors.bloomEnvironment?.userData.colorBloomUniforms ?? null;
     tickColorBloom(0);
     enterCampusIdle(context.actors);
+    if (phonePanPose) phonePanPose.rotation.y = 0;
+    phonePanTime = 0;
+    phonePanPose = context.sceneId === 'S8'
+      ? context.actors.campusPhotographer?.getObjectByName('building-phone-pose') ?? null
+      : null;
+    if (phonePanPose) phonePanPose.rotation.y = 0;
     const father = context.actors.father;
     if (fatherIdleDispose) {
       fatherIdleDispose();
@@ -1268,6 +1365,11 @@ export const buildingRuntime: SceneRuntime = {
     buildingWindTime.value += dtSeconds;
     tickColorBloom(dtSeconds);
     tickCampusIdle(dtSeconds);
+    if (phonePanPose) {
+      // 十秒小幅扫过林荫道与 A 栋；经过的两人自然入画，不追踪玩家、不抢占主镜头。
+      phonePanTime = (phonePanTime + dtSeconds) % 10;
+      phonePanPose.rotation.y = Math.sin(phonePanTime * Math.PI / 5) * 0.3;
+    }
     if (!linxiaAnimation && walkingLinxia) {
       linxiaAnimation = createActorAnimation(walkingLinxia);
       linxiaAnimation?.play(walkArrived ? 'afraid' : 'walk', { timeScale: walkArrived ? 0.3 : WALK_TIME_SCALE });
@@ -1279,6 +1381,9 @@ export const buildingRuntime: SceneRuntime = {
     bloomContext?.setAtmosphereProgress?.(0);
     bloomContext = null;
     activeBloomUniforms = null;
+    if (phonePanPose) phonePanPose.rotation.y = 0;
+    phonePanPose = null;
+    phonePanTime = 0;
     disposeCampusIdle();
     if (walkTween) {
       walkTween.kill();
@@ -1316,6 +1421,14 @@ export function createBuildingDefinition(sceneId: SceneId): WorldSceneDefinition
               maxDistance: 45,
               maxAngleDeg: 12,
               requireLineOfSight: false,
+            },
+            {
+              id: 'phone-behind',
+              position: { ...PHONE_HOTSPOT },
+              maxDistance: 9,
+              maxAngleDeg: 12,
+              dwellMs: 2000,
+              requireLineOfSight: true,
             },
           ]
         : [],

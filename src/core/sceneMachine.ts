@@ -35,7 +35,7 @@ export interface SceneMachineOptions {
 }
 
 function cloneState(state: StoryState): StoryState {
-  return { ...state, log: state.log.map((entry) => ({ ...entry })) };
+  return { ...state, clues: [...state.clues], yuanKeys: [...state.yuanKeys], log: state.log.map((entry) => ({ ...entry })) };
 }
 
 function findReplyOption(panel: PhonePanel, optionId: string): PhoneReplyOption | undefined {
@@ -59,6 +59,7 @@ export class SceneMachine {
   private role: Role = 'bystander';
   private stepIndex = 0;
   private firedTriggers = new Set<string>();
+  private repliedOptions = new Set<string>();
   private ended = false;
   private started = false;
   private hasEntered = false;
@@ -157,7 +158,7 @@ export class SceneMachine {
     const step = this.currentStep();
     if (!step || this.ended) return;
     const waiting =
-      step.kind === 'dialogue' || step.kind === 'caption' || step.kind === 'cutscene';
+      step.kind === 'dialogue' || step.kind === 'caption' || step.kind === 'cutscene' || step.kind === 'intertitle';
     if (!waiting || step.id !== stepId) return;
     this.advance();
   }
@@ -188,13 +189,18 @@ export class SceneMachine {
     action: 'close' | 'ignore' | 'open' | 'reply',
     optionId?: string,
   ): void {
-    if (this.ended) return;
+    if (!this.started || this.ended) return;
+    const activeStep = this.currentStep();
+    if (action === 'reply' && (activeStep?.kind !== 'phone' || activeStep.panel.id !== phoneId)) return;
+    const replyKey = `${phoneId}:${optionId ?? ''}`;
+    if (action === 'reply' && this.repliedOptions.has(replyKey)) return;
 
     const triggered = this.fireTriggers(
       (trigger) =>
         trigger.event === 'ui:phoneAction' &&
         (trigger.target === undefined || trigger.target === phoneId) &&
-        (trigger.action === undefined || trigger.action === action),
+        (trigger.action === undefined || trigger.action === action) &&
+        (action !== 'reply' || trigger.id === optionId),
     );
     this.emitStateChanged(triggered);
 
@@ -210,6 +216,7 @@ export class SceneMachine {
     if (action === 'reply' && optionId) {
       const option = findReplyOption(step.panel, optionId);
       if (!option) return;
+      this.repliedOptions.add(replyKey);
       const changed = new Set<keyof StoryState>();
       this.applyInto(changed, option.effects);
       this.emitStateChanged(changed);
@@ -255,11 +262,13 @@ export class SceneMachine {
   ): void {
     const fromSceneId = this.hasEntered ? this.sceneId : null;
     const scene = this.chapter.scenes[sceneId];
+    if (!scene) throw new Error(`未配置场景 ${sceneId}`);
 
     this.sceneId = sceneId;
     this.role = role;
     this.stepIndex = 0;
     this.firedTriggers = new Set();
+    this.repliedOptions.clear();
     this.ended = false;
     this.started = true;
     this.hasEntered = true;
@@ -305,13 +314,17 @@ export class SceneMachine {
       }
 
       const changed = new Set<keyof StoryState>();
-      this.applyInto(changed, step.effects);
+      if (step.kind !== 'wait') this.applyInto(changed, step.effects);
       this.emitStateChanged(changed);
 
       switch (step.kind) {
         case 'system':
           this.stepIndex += 1;
           continue;
+
+        case 'goto':
+          this.gotoStep(step.target);
+          return;
 
         case 'end':
           this.finishChapter();
@@ -331,6 +344,13 @@ export class SceneMachine {
             text: step.text,
             durationMs: step.durationMs ?? 2400,
             kind: 'inner',
+          });
+          return;
+
+        case 'intertitle':
+          this.bus.emit('ui:showIntertitle', {
+            stepId: step.id, lines: step.lines,
+            lineDurationMs: step.lineDurationMs ?? 2000, skippable: step.skippable !== false,
           });
           return;
 
@@ -458,7 +478,9 @@ export class SceneMachine {
   }
 
   private currentScene(): SceneDef {
-    return this.chapter.scenes[this.sceneId];
+    const scene = this.chapter.scenes[this.sceneId];
+    if (!scene) throw new Error(`未配置场景 ${this.sceneId}`);
+    return scene;
   }
 
   private currentStep(): StoryStep | null {

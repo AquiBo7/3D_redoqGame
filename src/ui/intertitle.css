@@ -1,0 +1,75 @@
+/* 黑幕始终完整遮住世界，字幕与操作区共同避开站点标识和设备安全区。 */
+.intertitle {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 16px;
+  box-sizing: border-box;
+  padding: calc(24px + env(safe-area-inset-top, 0px))
+    calc(24px + env(safe-area-inset-right, 0px))
+    calc(48px + env(safe-area-inset-bottom, 0px))
+    calc(24px + env(safe-area-inset-left, 0px));
+  background: #050608;
+  color: #e5e0d7;
+  pointer-events: auto;
+}
+
+.intertitle[hidden],
+.intertitle__skip[hidden] {
+  display: none;
+}
+
+.intertitle__content {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.intertitle__line {
+  max-width: 36em;
+  margin: 0;
+  font-family: var(--yt-font-serif);
+  font-size: clamp(18px, 2.6vw, 28px);
+  line-height: 2;
+  letter-spacing: 0.12em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: center;
+  animation: intertitle-line 2000ms ease-in-out both;
+}
+
+.intertitle__skip {
+  justify-self: end;
+  min-width: 88px;
+  min-height: 44px;
+  padding: 8px 20px;
+  border: 1px solid rgba(229, 224, 215, 0.24);
+  background: transparent;
+  color: rgba(229, 224, 215, 0.75);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.intertitle__skip:focus-visible {
+  outline: 2px solid #e5d2af;
+  outline-offset: 3px;
+}
+
+@keyframes intertitle-line {
+  0%, 100% { opacity: 0; }
+  18%, 80% { opacity: 1; }
+}
+
+@media (max-height: 500px) {
+  .intertitle { gap: 8px; padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
+  .intertitle__line { font-size: 18px; line-height: 1.8; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intertitle__line { animation: none; }
+}

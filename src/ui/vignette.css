@@ -1,0 +1,15 @@
+/* 同时覆盖 3D 与降级世界，但不压暗对话、手机和结尾 UI。 */
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  background: radial-gradient(ellipse at center, transparent 30%, rgba(5, 7, 13, 0.5) 65%, #05070d 100%);
+  opacity: 0;
+  transition: opacity 1200ms ease-in-out;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vignette { transition-duration: 200ms; }
+}

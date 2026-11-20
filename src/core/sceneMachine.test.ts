@@ -17,6 +17,8 @@ interface Harness {
   hiddenPhones: Array<GameEvents['ui:hidePhone']>;
   choices: Array<GameEvents['ui:showChoices']>;
   cutscenes: Array<GameEvents['scene:cutscene']>;
+  intertitles: Array<GameEvents['ui:showIntertitle']>;
+  stateChanges: Array<GameEvents['state:changed']>;
   chapterEnds: Array<GameEvents['game:chapterEnd']>;
   persists: Array<{ snapshot: MachineSnapshot; completed: boolean }>;
 }
@@ -30,6 +32,8 @@ function createHarness(chapter: ChapterStory = chapter1): Harness {
   const hiddenPhones: Harness['hiddenPhones'] = [];
   const choices: Harness['choices'] = [];
   const cutscenes: Harness['cutscenes'] = [];
+  const intertitles: Harness['intertitles'] = [];
+  const stateChanges: Harness['stateChanges'] = [];
   const chapterEnds: Harness['chapterEnds'] = [];
   const persists: Harness['persists'] = [];
 
@@ -40,6 +44,8 @@ function createHarness(chapter: ChapterStory = chapter1): Harness {
   bus.on('ui:hidePhone', (payload) => hiddenPhones.push(payload));
   bus.on('ui:showChoices', (payload) => choices.push(payload));
   bus.on('scene:cutscene', (payload) => cutscenes.push(payload));
+  bus.on('ui:showIntertitle', (payload) => intertitles.push(payload));
+  bus.on('state:changed', (payload) => stateChanges.push(payload));
   bus.on('game:chapterEnd', (payload) => chapterEnds.push(payload));
 
   const machine = new SceneMachine({
@@ -58,6 +64,8 @@ function createHarness(chapter: ChapterStory = chapter1): Harness {
     hiddenPhones,
     choices,
     cutscenes,
+    intertitles,
+    stateChanges,
     chapterEnds,
     persists,
   };
@@ -77,7 +85,7 @@ function enterS2(h: Harness): void {
 }
 
 describe('SceneMachine 主线推进', () => {
-  it('完整走通 S1→S9（看手机结局），状态、转场与结尾均正确', () => {
+  it('完整走通 S1→S9 看手机→S10 字幕，状态、转场与本阶段结尾均正确', () => {
     const h = createHarness();
 
     beginS1(h);
@@ -119,13 +127,28 @@ describe('SceneMachine 主线推进', () => {
     // S8 选择同行，并回头观察爸爸
     h.machine.onDialogueEnd('s8-volunteer');
     h.machine.onGazeHotspot('S8', 'look-back-father');
+    h.machine.onGazeHotspot('S8', 'phone-behind');
     h.machine.onChooseOption('s8-walk', 's8-walk-together');
     h.machine.onEnterZone('S8', 'building-entrance');
 
     // S9 看手机并关闭
     h.machine.onChooseOption('s9-choice', 's9-look');
     expect(h.machine.getSceneId()).toBe('S9');
+    h.machine.onPhoneAction('s9-phone', 'reply', 's9-notice-photo');
+    h.machine.onPhoneAction('s9-phone', 'reply', 's9-like-photo');
     h.machine.onPhoneAction('s9-phone', 'close');
+
+    // 第一章收尾不是本阶段结束：必须等待 S10 字幕回执
+    expect(h.machine.getSceneId()).toBe('S10');
+    expect(h.machine.isEnded()).toBe(false);
+    expect(h.chapterEnds).toHaveLength(0);
+    expect(h.intertitles).toHaveLength(1);
+    expect(h.intertitles[0]).toMatchObject({ stepId: 's10-days', lineDurationMs: 2000, skippable: true });
+    expect(h.intertitles[0].lines).toHaveLength(7);
+    expect(h.persists[h.persists.length - 1]).toMatchObject({
+      snapshot: { sceneId: 'S10', ended: false }, completed: false,
+    });
+    h.machine.onDialogueEnd('s10-days');
 
     const state = h.machine.getState();
     expect(h.machine.isEnded()).toBe(true);
@@ -140,6 +163,9 @@ describe('SceneMachine 主线推进', () => {
       seenCrossedOut: true,
       picked: true,
       seenFatherWatching: true,
+      noticedPhoneBehind: true,
+      noticedPhoto: true,
+      likedPhoto: true,
       trust: 2,
       harm: 20,
     });
@@ -154,6 +180,7 @@ describe('SceneMachine 主线推进', () => {
       'S7',
       'S8',
       'S9',
+      'S10',
     ]);
     expect(h.transitions[0].fromSceneId).toBeNull();
 
@@ -168,7 +195,7 @@ describe('SceneMachine 主线推进', () => {
     ]);
 
     expect(h.chapterEnds).toHaveLength(1);
-    expect(h.chapterEnds[0].sceneId).toBe('S9');
+    expect(h.chapterEnds[0].sceneId).toBe('S10');
     expect(h.chapterEnds[0].state.log.some((entry) => entry.summary === '第一章 到校段结束。')).toBe(
       true,
     );
@@ -204,6 +231,15 @@ describe('SceneMachine 主线推进', () => {
     h.machine.onEnterZone('S8', 'building-entrance');
 
     h.machine.onChooseOption('s9-choice', 's9-ignore');
+    expect(h.machine.getSceneId()).toBe('S10');
+    expect(h.machine.isEnded()).toBe(false);
+    expect(h.chapterEnds).toHaveLength(0);
+    expect(h.phones.map((item) => item.stepId)).toEqual(['s2-phone']);
+    expect(h.intertitles).toHaveLength(1);
+    expect(h.intertitles[0].stepId).toBe('s10-days');
+    h.machine.onDialogueEnd('s10-days');
+    expect(h.machine.isEnded()).toBe(true);
+    expect(h.chapterEnds[0].sceneId).toBe('S10');
 
     const state = h.machine.getState();
     expect(state).toMatchObject({
@@ -287,6 +323,150 @@ describe('SceneMachine 主线推进', () => {
     h.machine.onDialogueEnd('s1-wake');
     expect(h.captions).toHaveLength(1);
     expect(h.captions[0].stepId).toBe('s1-caption');
+  });
+});
+
+describe('SceneMachine Phase A 观察、照片与字幕', () => {
+  it('S8 新观察只接受当前场景的正确热点，重复注视不重复字幕与日志', () => {
+    const h = createHarness();
+    h.machine.startNew('S8', 'bystander');
+    h.machine.onDialogueEnd('s8-volunteer');
+    h.machine.onChooseOption('s8-walk', 's8-walk-together');
+    const before = h.machine.getSnapshot();
+    const changeCount = h.stateChanges.length;
+
+    h.machine.onGazeHotspot('S7', 'phone-behind');
+    h.machine.onGazeHotspot('S8', 'unknown-hotspot');
+    h.machine.onInteract('S8', 'phone-behind');
+    expect(h.machine.getSnapshot()).toEqual(before);
+    expect(h.captions).toHaveLength(0);
+    expect(h.stateChanges).toHaveLength(changeCount);
+
+    h.machine.onGazeHotspot('S8', 'phone-behind');
+    const observed = h.machine.getSnapshot();
+    expect(observed.state).toMatchObject({ noticedPhoneBehind: true, seenFatherWatching: false, harm: 20 });
+    expect(observed.stepIndex).toBe(before.stepIndex);
+    expect(observed.state.log).toHaveLength(before.state.log.length + 1);
+    expect(observed.state.log[observed.state.log.length - 1]).toMatchObject({ sceneId: 'S8', type: 'observe' });
+    expect(h.captions).toEqual([{
+      stepId: 's8-phone-behind', kind: 'observation', durationMs: 2600,
+      text: '路边有同学正举着手机拍林荫道，镜头晃过你们这边。',
+    }]);
+    expect(h.stateChanges).toHaveLength(changeCount + 1);
+
+    h.machine.onGazeHotspot('S8', 'phone-behind');
+    expect(h.machine.getSnapshot()).toEqual(observed);
+    expect(h.captions).toHaveLength(1);
+    expect(h.stateChanges).toHaveLength(changeCount + 1);
+    h.machine.onGazeHotspot('S8', 'look-back-father');
+    expect(h.machine.getState()).toMatchObject({ noticedPhoneBehind: true, seenFatherWatching: true });
+    h.machine.onEnterZone('S8', 'building-entrance');
+    expect(h.machine.getSceneId()).toBe('S9');
+  });
+
+  it.each([
+    ['s9-notice-photo', 'noticedPhoto', 's9-like-photo', 'likedPhoto'],
+    ['s9-like-photo', 'likedPhoto', 's9-notice-photo', 'noticedPhoto'],
+  ] as const)('S9 %s 只记录一次且与另一照片动作独立，不改 harm 或推进手机', (firstId, firstKey, secondId, secondKey) => {
+    const h = createHarness();
+    h.machine.startNew('S9', 'bystander');
+    h.machine.onChooseOption('s9-choice', 's9-look');
+    const before = h.machine.getSnapshot();
+    const changeCount = h.stateChanges.length;
+    h.machine.onPhoneAction('s9-phone', 'reply', firstId);
+    const first = h.machine.getSnapshot();
+    expect(first.state[firstKey]).toBe(true);
+    expect(first.state[secondKey]).toBe(false);
+    expect(first.state.harm).toBe(before.state.harm);
+    expect(first.state.log).toHaveLength(before.state.log.length + 1);
+    expect(first.firedTriggerIds).toEqual([firstId]);
+    expect(first.stepIndex).toBe(before.stepIndex);
+    expect(h.stateChanges).toHaveLength(changeCount + 1);
+
+    h.machine.onPhoneAction('s9-phone', 'reply', firstId);
+    expect(h.machine.getSnapshot()).toEqual(first);
+    expect(h.stateChanges).toHaveLength(changeCount + 1);
+    h.machine.onPhoneAction('s9-phone', 'reply', secondId);
+    const both = h.machine.getSnapshot();
+    expect(both.state).toMatchObject({ noticedPhoto: true, likedPhoto: true, harm: before.state.harm });
+    expect(both.state.log).toHaveLength(before.state.log.length + 2);
+    expect(both.firedTriggerIds).toEqual([firstId, secondId]);
+    expect(h.stateChanges).toHaveLength(changeCount + 2);
+    h.machine.onPhoneAction('s9-phone', 'reply', secondId);
+    expect(h.machine.getSnapshot()).toEqual(both);
+    expect(h.stateChanges).toHaveLength(changeCount + 2);
+    expect(h.machine.getSceneId()).toBe('S9');
+    expect(h.machine.isEnded()).toBe(false);
+    expect(h.hiddenPhones).toHaveLength(0);
+    expect(h.captions).toHaveLength(0);
+    expect(h.dialogues).toHaveLength(0);
+    expect(h.intertitles).toHaveLength(0);
+
+    h.machine.onPhoneAction('s9-phone', 'close');
+    expect(h.machine.getSceneId()).toBe('S10');
+    expect(h.machine.isEnded()).toBe(false);
+    expect(h.chapterEnds).toHaveLength(0);
+    expect(h.hiddenPhones).toEqual([{ phoneId: 's9-phone' }]);
+  });
+
+  it('S9 错误手机、动作或回复 ID 均不触发照片状态，关闭后的迟到回复无效', () => {
+    const h = createHarness();
+    h.machine.startNew('S9', 'bystander');
+    h.machine.onChooseOption('s9-choice', 's9-look');
+    const before = h.machine.getSnapshot();
+    const changeCount = h.stateChanges.length;
+    for (const optionId of ['s9-notice-photo', 's9-like-photo']) {
+      h.machine.onPhoneAction('s2-phone', 'reply', optionId);
+      h.machine.onPhoneAction('s9-phone', 'open', optionId);
+      h.machine.onPhoneAction('s9-phone', 'ignore', optionId);
+    }
+    h.machine.onPhoneAction('s9-phone', 'reply', 'unknown-option');
+    h.machine.onPhoneAction('s9-phone', 'reply', 'mom-reply-rise');
+    h.machine.onPhoneAction('s9-phone', 'reply');
+    expect(h.machine.getSnapshot()).toEqual(before);
+    expect(h.stateChanges).toHaveLength(changeCount);
+    expect(h.captions).toHaveLength(0);
+    expect(h.hiddenPhones).toHaveLength(0);
+
+    h.machine.onPhoneAction('s9-phone', 'close');
+    const afterClose = h.machine.getSnapshot();
+    expect(afterClose).toMatchObject({ sceneId: 'S10', ended: false, state: { noticedPhoto: false, likedPhoto: false, harm: 20 } });
+    h.machine.onPhoneAction('s9-phone', 'reply', 's9-notice-photo');
+    h.machine.onPhoneAction('s9-phone', 'reply', 's9-like-photo');
+    expect(h.machine.getSnapshot()).toEqual(afterClose);
+  });
+
+  it('S10 字幕只响应正确 ui:dialogueEnd，完成回执与章节结尾均幂等', () => {
+    const h = createHarness();
+    h.machine.startNew('S10', 'bystander');
+    expect(chapter1.scenes.S10).toBeDefined();
+    const step = chapter1.scenes.S10!.steps[0];
+    if (step.kind !== 'intertitle') throw new Error('S10 首步必须是 intertitle');
+    expect(h.intertitles).toEqual([{
+      stepId: 's10-days', lines: step.lines, lineDurationMs: 2000, skippable: true,
+    }]);
+    expect(h.intertitles[0].lines).toHaveLength(7);
+    const before = h.machine.getSnapshot();
+    h.machine.onDialogueEnd('s9-end');
+    h.machine.onInteract('S10', 'phone');
+    h.machine.onGazeHotspot('S10', 'phone-behind');
+    h.machine.onEnterZone('S10', 'building-entrance');
+    h.machine.onChooseOption('s10-days', 'skip');
+    h.machine.onPhoneAction('s10-days', 'close');
+    expect(h.machine.getSnapshot()).toEqual(before);
+    expect(h.chapterEnds).toHaveLength(0);
+    expect(h.persists.filter((item) => item.completed)).toHaveLength(0);
+
+    h.machine.onDialogueEnd('s10-days');
+    expect(h.machine.isEnded()).toBe(true);
+    expect(h.chapterEnds).toHaveLength(1);
+    expect(h.chapterEnds[0]).toMatchObject({ chapterId: 'ch1', sceneId: 'S10' });
+    expect(h.persists.filter((item) => item.completed)).toHaveLength(1);
+    const ended = h.machine.getSnapshot();
+    h.machine.onDialogueEnd('s10-days');
+    expect(h.machine.getSnapshot()).toEqual(ended);
+    expect(h.chapterEnds).toHaveLength(1);
+    expect(h.persists.filter((item) => item.completed)).toHaveLength(1);
   });
 });
 
@@ -395,11 +575,12 @@ describe('SceneMachine 继续游戏与条件转场', () => {
 
   it('按条件选择不同转场目标（全真跳 S2，否则跳 S3）', () => {
     const conditional = structuredClone(chapter1);
-    conditional.scenes.S1.transitions = [
+    expect(conditional.scenes.S1).toBeDefined();
+    conditional.scenes.S1!.transitions = [
       { when: { key: 'seenBag', equals: true }, to: 'S2' },
       { to: 'S3' },
     ];
-    conditional.scenes.S1.triggers = (conditional.scenes.S1.triggers ?? []).map((trigger) =>
+    conditional.scenes.S1!.triggers = (conditional.scenes.S1!.triggers ?? []).map((trigger) =>
       trigger.id === 's1-observe-window'
         ? { ...trigger, effects: { set: { seenBag: true } } }
         : trigger,

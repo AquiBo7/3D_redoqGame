@@ -1,7 +1,11 @@
 // data/storySchema.ts —— 剧本数据结构与字面量常量
 // 纯类型 / 常量，不包含剧情推进逻辑；core 与 data 共用。
 
-export const SCENE_IDS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9'] as const;
+export const SCENE_IDS = [
+  'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14',
+  'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
+  'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'E1',
+] as const;
 export type SceneId = (typeof SCENE_IDS)[number];
 
 export const ROLES = ['bystander', 'victim', 'perpetrator'] as const;
@@ -15,10 +19,10 @@ export function isRole(value: unknown): value is Role {
   return typeof value === 'string' && (ROLES as readonly string[]).includes(value);
 }
 
-/** 3D 场景 key，与 src/scenes3d 的独立场景文件对应 */
-export type SceneKey = 'room' | 'street' | 'gate' | 'desk' | 'building';
+/** 场景 key，包含独立 3D 场景与 2D 叙事舞台 */
+export type SceneKey = 'room' | 'street' | 'gate' | 'desk' | 'building' | 'canteen' | 'interior' | 'stage2d';
 
-export type SpeakerId = 'linxia' | 'father' | 'volunteer' | 'mom';
+export type SpeakerId = 'linxia' | 'father' | 'volunteer' | 'mom' | 'xiaochen' | 'ayuan' | 'teacher' | 'admin' | 'passerby';
 
 export type LogType = 'choice' | 'observe' | 'ignore' | 'system';
 
@@ -27,35 +31,73 @@ export interface LogSpec {
   summary: string;
 }
 
-export type BooleanStateKey =
-  | 'seenBag'
-  | 'seenHandoff'
-  | 'noticedTyper'
-  | 'handedPen'
-  | 'seenCrossedOut'
-  | 'picked'
-  | 'seenFatherWatching';
-
-export type StringStateKey = 'momReply' | 'reasonText';
-
-export type NumericStateKey = 'trust' | 'phoneIgnored' | 'harm';
-
-/** 可直接赋值的状态字段（数值字段只允许通过 add 增减） */
-export interface StateSet {
-  momReply?: string | null;
-  reasonText?: string | null;
-  seenBag?: boolean;
-  seenHandoff?: boolean;
-  noticedTyper?: boolean;
-  handedPen?: boolean;
-  seenCrossedOut?: boolean;
-  picked?: boolean;
-  seenFatherWatching?: boolean;
+/** 全五章共享变量；日志由 core 扩展，data 不反向依赖 core。 */
+export interface StoryVariables {
+  momReply: string | null;
+  phoneIgnored: number;
+  seenBag: boolean;
+  seenHandoff: boolean;
+  noticedTyper: boolean;
+  handedPen: boolean;
+  reasonText: string | null;
+  seenCrossedOut: boolean;
+  picked: boolean;
+  seenFatherWatching: boolean;
+  noticedPhoneBehind: boolean;
+  noticedPhoto: boolean;
+  likedPhoto: boolean;
+  roommateReply: string | null;
+  pointedOut: boolean;
+  canteenSeen: number;
+  postChoice: 'explain' | 'wait' | 'joke' | null;
+  addedHer: boolean;
+  listened: boolean;
+  evidence: boolean;
+  seat: 'beside' | 'front' | 'far' | null;
+  teacherTalked: boolean;
+  tellTeacher: 'told' | 'ask_her' | 'think' | null;
+  visitedStairwell: boolean;
+  askedAboutFather: boolean;
+  fatherKnows: boolean;
+  clues: string[];
+  wrongAsks: number;
+  foundAyuanWay: 'recognize' | 'relay' | 'shout' | null;
+  yuanState: 'unprepared' | 'guarded' | 'hostile' | null;
+  yuanScore: number;
+  yuanKeys: string[];
+  route: 'team' | 'deleteOnly' | 'breakdown' | null;
+  postDeleted: boolean;
+  joined: boolean;
+  phrase: string | null;
+  stage1Tries: number;
+  crystalHits: number;
+  kills: number;
+  helpedByAyuan: boolean;
+  apologized: boolean;
+  soloRepair: boolean;
+  trust: number;
+  harm: number;
+  ending: 'joined' | 'bystander' | 'worst' | 'best' | 'middle' | null;
 }
+
+type StateKeysOfType<T> = {
+  [K in keyof StoryVariables]: StoryVariables[K] extends T ? K : never;
+}[keyof StoryVariables];
+
+export type BooleanStateKey = StateKeysOfType<boolean>;
+export type StringStateKey = StateKeysOfType<string | null>;
+export type NumericStateKey = StateKeysOfType<number>;
+
+/** 所有非 log 变量均可初始化 / 重置；数值的增减统一使用 add。 */
+export type StateSet = Partial<StoryVariables>;
 
 export interface StoryEffect {
   set?: StateSet;
   add?: Partial<Record<NumericStateKey, number>>;
+  /** 去重记录线索，保留首次出现的顺序。 */
+  pushClue?: string | string[];
+  /** 按选择顺序追加，允许重复类型。 */
+  pushYuanKey?: string;
   log?: LogSpec | LogSpec[];
 }
 
@@ -68,7 +110,7 @@ export type Condition =
   | { role: Role | Role[] }
   | { key: BooleanStateKey; equals: boolean }
   | { key: NumericStateKey; op: ComparisonOp; value: number }
-  | { key: StringStateKey; op: '==' | '!='; value: string | null };
+  | { [K in StringStateKey]: { key: K; op: '==' | '!='; value: StoryVariables[K] } }[StringStateKey];
 
 export interface DialogueLine {
   /** null 表示旁白 / 舞台指示 */
@@ -101,6 +143,15 @@ export type PhoneSection =
       replyOptions?: PhoneReplyOption[];
     }
   | { kind: 'memo'; id: string; title: string; updatedAt: string; items: string[] }
+  | {
+      kind: 'photo';
+      id: string;
+      title: string;
+      assetId: string;
+      hotspot?: { x: number; y: number; width: number; height: number };
+      likeActionId?: string;
+      noticeActionId?: string;
+    }
   | { kind: 'notice'; id: string; text: string };
 
 export interface PhonePanel {
@@ -170,6 +221,24 @@ export type StoryStep =
       waitFor: WaitTarget;
       effects?: StoryEffect;
     }
+  | {
+      kind: 'intertitle';
+      id: string;
+      when?: Condition;
+      lines: string[];
+      lineDurationMs?: number;
+      skippable?: boolean;
+      effects?: StoryEffect;
+    }
+  | {
+      kind: 'minigame';
+      id: string;
+      when?: Condition;
+      game: 'bubble' | 'crystal';
+      effects?: StoryEffect;
+    }
+  | { kind: 'art'; id: string; when?: Condition; assetId: string; effects?: StoryEffect }
+  | { kind: 'goto'; id: string; when?: Condition; target: string; effects?: StoryEffect }
   | { kind: 'system'; id: string; when?: Condition; effects: StoryEffect }
   | { kind: 'end'; id: string; when?: Condition; effects?: StoryEffect };
 
@@ -216,5 +285,6 @@ export interface ChapterStory {
   title: string;
   startScene: SceneId;
   characters: Record<SpeakerId, { name: string }>;
-  scenes: Record<SceneId, SceneDef>;
+  /** 分阶段提供节点；状态机负责检查实际进入的场景是否存在。 */
+  scenes: Partial<Record<SceneId, SceneDef>>;
 }

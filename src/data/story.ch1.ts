@@ -2,10 +2,11 @@
 // 纯数据：台词、选项、观察点、手机界面、跳转全部在此维护；状态推进由 core/sceneMachine 负责。
 
 import type { ChapterStory, PhonePanel } from './storySchema';
+import { PHOTO_HOTSPOT } from './assetManifest';
 
 const phonePanel: PhonePanel = {
   id: 's2-phone',
-  lockTime: '8:47',
+  lockTime: '8:40',
   closeActionId: 'close',
   sections: [
     {
@@ -100,6 +101,11 @@ export const chapter1: ChapterStory = {
     father: { name: '林夏的爸爸' },
     volunteer: { name: '志愿者' },
     mom: { name: '妈妈' },
+    xiaochen: { name: '小陈' },
+    ayuan: { name: '阿远' },
+    teacher: { name: '周老师' },
+    admin: { name: '校园墙管理员' },
+    passerby: { name: '同学' },
   },
   scenes: {
     S1: {
@@ -158,7 +164,7 @@ export const chapter1: ChapterStory = {
       id: 'S2',
       sceneKey: 'room',
       title: '手机教学',
-      stageNotes: ['点击枕边手机的光点后，2D 手机面板覆盖在画面上。', '锁屏时间 8:47。'],
+      stageNotes: ['点击枕边手机的光点后，2D 手机面板覆盖在画面上。', '锁屏时间 8:40。'],
       steps: [
         {
           kind: 'phone',
@@ -587,6 +593,11 @@ export const chapter1: ChapterStory = {
           },
           reveal: { text: '爸爸还站在校门口，提着袋子，看着这边。' },
         },
+        {
+          id: 's8-phone-behind', event: 'scene:gazeHotspot', target: 'phone-behind',
+          effects: { set: { noticedPhoneBehind: true }, log: { type: 'observe', summary: '留意到路边举手机拍林荫道的同学。' } },
+          reveal: { text: '路边有同学正举着手机拍林荫道，镜头晃过你们这边。' },
+        },
       ],
       transitions: [{ to: 'S9' }],
     },
@@ -594,8 +605,8 @@ export const chapter1: ChapterStory = {
     S9: {
       id: 'S9',
       sceneKey: 'building',
-      title: '结尾钩子',
-      stageNotes: ['到达教学楼门口，手机震动。', '看完或忽略后显示“第二章 敬请期待”占位。'],
+      title: '群里的合照',
+      stageNotes: ['到达教学楼门口，迎新群发来了开学第一天的照片合集。'],
       steps: [
         {
           kind: 'choice',
@@ -625,15 +636,39 @@ export const chapter1: ChapterStory = {
           panel: {
             id: 's9-phone',
             closeActionId: 'close',
-            sections: [{ kind: 'notice', id: 's9-unread', text: '一条未读消息。' }],
+            sections: [
+              { kind: 'chat', id: 's9-group', title: '迎新群', unread: 3, messages: [
+                { id: 's9-collection', from: '学姐', time: '8:50', text: '开学第一天照片合集～' },
+                { id: 's9-left', from: '群友', text: '我在左边！' },
+                { id: 's9-crowd', from: '群友', text: '好多人啊。' },
+              ] },
+              { kind: 'photo', id: 's9-photo', title: '开学第一天照片合集～', assetId: 'cg_s6_gate_panorama',
+                hotspot: PHOTO_HOTSPOT, noticeActionId: 's9-notice-photo', likeActionId: 's9-like-photo' },
+            ],
           },
         },
         {
-          kind: 'end',
+          kind: 'system',
           id: 's9-end',
           effects: { log: { type: 'system', summary: '第一章 到校段结束。' } },
         },
       ],
+      triggers: [
+        { id: 's9-notice-photo', event: 'ui:phoneAction', target: 's9-phone', action: 'reply',
+          effects: { set: { noticedPhoto: true }, log: { type: 'observe', summary: '在群合照的台阶上找到了浅黄色的小背影。' } } },
+        { id: 's9-like-photo', event: 'ui:phoneAction', target: 's9-phone', action: 'reply',
+          effects: { set: { likedPhoto: true }, log: { type: 'choice', summary: '给迎新群的合照点了赞。' } } },
+      ],
+      transitions: [{ to: 'S10' }],
+    },
+    S10: {
+      id: 'S10', sceneKey: 'stage2d', title: '入学几天',
+      stageNotes: ['入学后的日子逐渐熟悉，台阶上的事也慢慢淡出了记忆。'],
+      steps: [{ kind: 'intertitle', id: 's10-days', skippable: true, lineDurationMs: 2000, lines: [
+        '入学第三天，你记住了室友的名字。', '第五天，班群里有了第一个表情包梗。',
+        '食堂的酸辣粉，比想象中好吃。', '走廊里偶尔遇到她，点点头，她也点点头。',
+        '一切都很顺利。', '顺利得你几乎忘了，那天台阶上的事。', '直到……',
+      ] }],
       transitions: [],
     },
   },

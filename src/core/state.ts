@@ -5,9 +5,11 @@ import type {
   Condition,
   LogSpec,
   LogType,
+  NumericStateKey,
   Role,
   SceneId,
   StoryEffect,
+  StoryVariables,
 } from '../data/storySchema';
 
 export interface LogEntry {
@@ -18,25 +20,14 @@ export interface LogEntry {
   summary: string;
 }
 
-export interface StoryState {
-  momReply: string | null;
-  phoneIgnored: number;
-  seenBag: boolean;
-  seenHandoff: boolean;
-  noticedTyper: boolean;
-  handedPen: boolean;
-  reasonText: string | null;
-  seenCrossedOut: boolean;
-  picked: boolean;
-  seenFatherWatching: boolean;
-  trust: number;
-  harm: number;
+export interface StoryState extends StoryVariables {
   log: LogEntry[];
 }
 
 export interface MetaProgress {
   unlockedRoles: Role[];
   unlockedEndings: string[];
+  achievements: string[];
 }
 
 export function createInitialStoryState(): StoryState {
@@ -51,8 +42,41 @@ export function createInitialStoryState(): StoryState {
     seenCrossedOut: false,
     picked: false,
     seenFatherWatching: false,
+    noticedPhoneBehind: false,
+    noticedPhoto: false,
+    likedPhoto: false,
+    roommateReply: null,
+    pointedOut: false,
+    canteenSeen: 0,
+    postChoice: null,
+    addedHer: false,
+    listened: false,
+    evidence: false,
+    seat: null,
+    teacherTalked: false,
+    tellTeacher: null,
+    visitedStairwell: false,
+    askedAboutFather: false,
+    fatherKnows: false,
+    clues: [],
+    wrongAsks: 0,
+    foundAyuanWay: null,
+    yuanState: null,
+    yuanScore: 0,
+    yuanKeys: [],
+    route: null,
+    postDeleted: false,
+    joined: false,
+    phrase: null,
+    stage1Tries: 0,
+    crystalHits: 0,
+    kills: 0,
+    helpedByAyuan: false,
+    apologized: false,
+    soloRepair: false,
     trust: 0,
     harm: 20,
+    ending: null,
     log: [],
   };
 }
@@ -61,6 +85,7 @@ export function createInitialMetaProgress(): MetaProgress {
   return {
     unlockedRoles: ['bystander'],
     unlockedEndings: [],
+    achievements: [],
   };
 }
 
@@ -78,63 +103,48 @@ export function applyStoryEffect(
 ): EffectApplication {
   if (!effect) return { state, changedKeys: [] };
 
-  const next: StoryState = { ...state, log: [...state.log] };
+  const next: StoryState = { ...state, log: state.log.map((entry) => ({ ...entry })) };
   const changed = new Set<keyof StoryState>();
   const set = effect.set;
 
   if (set) {
-    if (set.momReply !== undefined && next.momReply !== set.momReply) {
-      next.momReply = set.momReply;
-      changed.add('momReply');
-    }
-    if (set.reasonText !== undefined && next.reasonText !== set.reasonText) {
-      next.reasonText = set.reasonText;
-      changed.add('reasonText');
-    }
-    if (set.seenBag !== undefined && next.seenBag !== set.seenBag) {
-      next.seenBag = set.seenBag;
-      changed.add('seenBag');
-    }
-    if (set.seenHandoff !== undefined && next.seenHandoff !== set.seenHandoff) {
-      next.seenHandoff = set.seenHandoff;
-      changed.add('seenHandoff');
-    }
-    if (set.noticedTyper !== undefined && next.noticedTyper !== set.noticedTyper) {
-      next.noticedTyper = set.noticedTyper;
-      changed.add('noticedTyper');
-    }
-    if (set.handedPen !== undefined && next.handedPen !== set.handedPen) {
-      next.handedPen = set.handedPen;
-      changed.add('handedPen');
-    }
-    if (set.seenCrossedOut !== undefined && next.seenCrossedOut !== set.seenCrossedOut) {
-      next.seenCrossedOut = set.seenCrossedOut;
-      changed.add('seenCrossedOut');
-    }
-    if (set.picked !== undefined && next.picked !== set.picked) {
-      next.picked = set.picked;
-      changed.add('picked');
-    }
-    if (set.seenFatherWatching !== undefined && next.seenFatherWatching !== set.seenFatherWatching) {
-      next.seenFatherWatching = set.seenFatherWatching;
-      changed.add('seenFatherWatching');
-    }
+    const variables: StoryVariables = next;
+    const assign = <K extends keyof StoryVariables>(key: K): void => {
+      const value = set[key];
+      if (value !== undefined && next[key] !== value) {
+        variables[key] = value;
+        changed.add(key);
+      }
+    };
+    for (const key of Object.keys(set) as (keyof StoryVariables)[]) assign(key);
   }
+
+  // set 也允许赋数组；必须在追加前复制，不能共享输入状态或效果数据的数组。
+  next.clues = [...next.clues];
+  next.yuanKeys = [...next.yuanKeys];
 
   const add = effect.add;
   if (add) {
-    if (add.trust !== undefined && add.trust !== 0) {
-      next.trust += add.trust;
-      changed.add('trust');
+    for (const key of Object.keys(add) as NumericStateKey[]) {
+      const amount = add[key];
+      if (amount !== undefined && amount !== 0) {
+        next[key] += amount;
+        changed.add(key);
+      }
     }
-    if (add.phoneIgnored !== undefined && add.phoneIgnored !== 0) {
-      next.phoneIgnored += add.phoneIgnored;
-      changed.add('phoneIgnored');
+  }
+
+  if (effect.pushClue !== undefined) {
+    const clues = typeof effect.pushClue === 'string' ? [effect.pushClue] : effect.pushClue;
+    for (const clue of clues) {
+      if (next.clues.includes(clue)) continue;
+      next.clues.push(clue);
+      changed.add('clues');
     }
-    if (add.harm !== undefined && add.harm !== 0) {
-      next.harm += add.harm;
-      changed.add('harm');
-    }
+  }
+  if (effect.pushYuanKey !== undefined) {
+    next.yuanKeys.push(effect.pushYuanKey);
+    changed.add('yuanKeys');
   }
 
   if (effect.log) {
@@ -198,32 +208,12 @@ export function evaluateCondition(
       : condition.role.includes(role);
   }
 
-  switch (condition.key) {
-    case 'seenBag':
-      return state.seenBag === condition.equals;
-    case 'seenHandoff':
-      return state.seenHandoff === condition.equals;
-    case 'noticedTyper':
-      return state.noticedTyper === condition.equals;
-    case 'handedPen':
-      return state.handedPen === condition.equals;
-    case 'seenCrossedOut':
-      return state.seenCrossedOut === condition.equals;
-    case 'picked':
-      return state.picked === condition.equals;
-    case 'seenFatherWatching':
-      return state.seenFatherWatching === condition.equals;
-    case 'trust':
-      return compareNumber(state.trust, condition.op, condition.value);
-    case 'phoneIgnored':
-      return compareNumber(state.phoneIgnored, condition.op, condition.value);
-    case 'harm':
-      return compareNumber(state.harm, condition.op, condition.value);
-    case 'momReply':
-      return compareString(state.momReply, condition.op, condition.value);
-    case 'reasonText':
-      return compareString(state.reasonText, condition.op, condition.value);
-    default:
-      return false;
+  if ('equals' in condition) return state[condition.key] === condition.equals;
+
+  const actual = state[condition.key];
+  if (typeof condition.value === 'number') {
+    return typeof actual === 'number' && compareNumber(actual, condition.op, condition.value);
   }
+  return (actual === null || typeof actual === 'string') &&
+    compareString(actual, condition.op, condition.value);
 }

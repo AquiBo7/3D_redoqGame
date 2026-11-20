@@ -10,12 +10,18 @@ import type { SceneId, SceneKey, StoryStep } from '../data/storySchema';
 import { getSceneDefinition, getSceneRuntime } from './index';
 import { CHARACTER_MODELS } from './modelManifest';
 
-const SCENE_IDS: SceneId[] = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9'];
+const configuredSceneIds = Object.keys(chapter1.scenes) as SceneId[];
+
+function sceneOf(sceneId: SceneId) {
+  const scene = chapter1.scenes[sceneId];
+  expect(scene, `缺少已配置场景 ${sceneId}`).toBeDefined();
+  return scene!;
+}
 
 /** 过场播放器支持的 key（与 CutscenePlayer 的 switch 分支保持一致） */
 const SUPPORTED_CUTSCENE_KEYS = new Set(['s1-wake', 's3-run', 'school-gate-panorama']);
 
-const EXPECTED_SCENE_KEYS: Record<SceneId, SceneKey> = {
+const EXPECTED_SCENE_KEYS: Partial<Record<SceneId, SceneKey>> = {
   S1: 'room',
   S2: 'room',
   S3: 'room',
@@ -25,6 +31,7 @@ const EXPECTED_SCENE_KEYS: Record<SceneId, SceneKey> = {
   S7: 'desk',
   S8: 'building',
   S9: 'building',
+  S10: 'stage2d',
 };
 
 describe('背负姿态', () => {
@@ -80,8 +87,8 @@ describe('背负姿态', () => {
 
 describe('剧情数据 ↔ 3D 场景注册表契约', () => {
   it('每个 sceneId 的 sceneKey 与故事数据一致', () => {
-    for (const sceneId of SCENE_IDS) {
-      expect(getSceneDefinition(sceneId).sceneKey).toBe(chapter1.scenes[sceneId].sceneKey);
+    for (const sceneId of configuredSceneIds) {
+      expect(getSceneDefinition(sceneId).sceneKey).toBe(sceneOf(sceneId).sceneKey);
       expect(getSceneDefinition(sceneId).sceneKey).toBe(EXPECTED_SCENE_KEYS[sceneId]);
     }
   });
@@ -94,8 +101,8 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
   });
 
   it('wait 步骤的 interactId 存在于对应场景的 interactables 中', () => {
-    for (const sceneId of SCENE_IDS) {
-      const scene = chapter1.scenes[sceneId];
+    for (const sceneId of configuredSceneIds) {
+      const scene = sceneOf(sceneId);
       const definition = getSceneDefinition(sceneId);
       const interactableIds = new Set((definition.interactables ?? []).map((item) => item.id));
 
@@ -107,8 +114,8 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
   });
 
   it('wait 步骤的 zoneId 存在于对应场景的 zones 中', () => {
-    for (const sceneId of SCENE_IDS) {
-      const scene = chapter1.scenes[sceneId];
+    for (const sceneId of configuredSceneIds) {
+      const scene = sceneOf(sceneId);
       const definition = getSceneDefinition(sceneId);
       const zoneIds = new Set((definition.zones ?? []).map((item) => item.id));
 
@@ -120,8 +127,8 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
   });
 
   it('gazeHotspot / interact 触发器的 target 存在于对应场景定义中', () => {
-    for (const sceneId of SCENE_IDS) {
-      const scene = chapter1.scenes[sceneId];
+    for (const sceneId of configuredSceneIds) {
+      const scene = sceneOf(sceneId);
       const definition = getSceneDefinition(sceneId);
       const hotspotIds = new Set((definition.hotspots ?? []).map((item) => item.id));
       const interactableIds = new Set((definition.interactables ?? []).map((item) => item.id));
@@ -142,8 +149,8 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
   });
 
   it('所有 cutscene 步骤的 key 均在过场播放器支持列表内', () => {
-    for (const sceneId of SCENE_IDS) {
-      for (const step of chapter1.scenes[sceneId].steps) {
+    for (const sceneId of configuredSceneIds) {
+      for (const step of sceneOf(sceneId).steps) {
         if (step.kind !== 'cutscene') continue;
         expect(SUPPORTED_CUTSCENE_KEYS.has(step.key), `不支持的过场 key：${step.key}`).toBe(true);
       }
@@ -151,7 +158,7 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
   });
 
   it('S6 开场 CG 具备全景锚点且可跳过', () => {
-    const s6 = chapter1.scenes.S6;
+    const s6 = sceneOf('S6');
     const cgStep = s6.steps.find(
       (step): step is Extract<StoryStep, { kind: 'cutscene' }> =>
         step.kind === 'cutscene' && step.key === 'school-gate-panorama',
@@ -164,7 +171,7 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
     const definition = getSceneDefinition('S7');
     expect((definition.interactables ?? []).some((item) => item.id === 'medicine-bag')).toBe(true);
 
-    const s7 = chapter1.scenes.S7;
+    const s7 = sceneOf('S7');
     const trigger = s7.triggers?.find((item) => item.id === 's7-medicine-bag');
     expect(trigger?.event).toBe('scene:interact');
     expect(trigger?.target).toBe('medicine-bag');
@@ -196,10 +203,19 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
       position: { x: 0, y: 3.6, z: 5.6 }, lookAt: { x: 0, y: 1.7, z: 1.4 },
     });
     expect(building.nav.bounds).toEqual({ minX: -5.8, maxX: 5.8, minZ: -49.2, maxZ: 9 });
-    expect(building.hotspots).toEqual([{
+    expect(building.hotspots?.map((hotspot) => hotspot.id)).toEqual(['look-back-father', 'phone-behind']);
+    expect(building.hotspots?.find((hotspot) => hotspot.id === 'look-back-father')).toEqual({
       id: 'look-back-father', position: { x: 0, y: 1.5, z: 8.6 },
       maxDistance: 45, maxAngleDeg: 12, requireLineOfSight: false,
-    }]);
+    });
+    expect(building.hotspots?.find((hotspot) => hotspot.id === 'phone-behind')).toEqual({
+      id: 'phone-behind', position: {
+        x: 6.45 + Math.sin(-2.58) * 0.42,
+        y: -0.055 + 0.9 + 0.63,
+        z: -10 + Math.cos(-2.58) * 0.42,
+      },
+      maxDistance: 9, maxAngleDeg: 12, dwellMs: 2000, requireLineOfSight: true,
+    });
     expect(building.zones).toEqual([{
       id: 'building-entrance', kind: 'box', center: { x: 0, y: 0.9, z: -46 },
       size: { x: 7, y: 3.6, z: 5 },
@@ -223,7 +239,7 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
 
   it('requiredModels 只引用角色清单内的模型 id', () => {
     const known = new Set(CHARACTER_MODELS.map((entry) => entry.id));
-    for (const sceneId of SCENE_IDS) {
+    for (const sceneId of configuredSceneIds) {
       for (const id of getSceneDefinition(sceneId).requiredModels ?? []) {
         expect(known.has(id), `场景 ${sceneId} 引用了未知角色模型 ${id}`).toBe(true);
       }

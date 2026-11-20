@@ -145,6 +145,75 @@ describe('GameEngine URL 直达与隔离调试', () => {
     expect(loadChapterSave(storage)?.completed).toBe(true);
   });
 
+  it.each(['s9-look', 's9-ignore'])('S9 %s 经总线进入未完成的 S10，字幕回执后才持久化结尾', (choiceId) => {
+    const bus = new EventBus();
+    const chapterEnds: string[] = [];
+    const intertitles: string[] = [];
+    bus.on('game:chapterEnd', (payload) => chapterEnds.push(payload.sceneId));
+    bus.on('ui:showIntertitle', (payload) => intertitles.push(payload.stepId));
+    const engine = new GameEngine({ bus, storage, params: makeParams(), now: () => 1000 });
+    engine.attach();
+    engine.startNewGame('S9');
+    bus.emit('ui:chooseOption', { stepId: 's9-choice', choiceId });
+    if (choiceId === 's9-look') {
+      const before = engine.getDebugSnapshot().state;
+      bus.emit('ui:phoneAction', { phoneId: 's9-phone', action: 'reply', optionId: 'unknown-option' });
+      expect(engine.getDebugSnapshot().state).toEqual(before);
+      for (const optionId of ['s9-notice-photo', 's9-like-photo']) {
+        bus.emit('ui:phoneAction', { phoneId: 's9-phone', action: 'reply', optionId });
+        const once = engine.getDebugSnapshot().state;
+        bus.emit('ui:phoneAction', { phoneId: 's9-phone', action: 'reply', optionId });
+        expect(engine.getDebugSnapshot().state).toEqual(once);
+      }
+      expect(engine.getDebugSnapshot()).toMatchObject({ sceneId: 'S9', ended: false });
+      bus.emit('ui:phoneAction', { phoneId: 's9-phone', action: 'close' });
+    }
+
+    expect(engine.getDebugSnapshot()).toMatchObject({ sceneId: 'S10', ended: false, debugSession: false });
+    expect(chapterEnds).toEqual([]);
+    expect(intertitles).toEqual(['s10-days']);
+    expect(loadChapterSave(storage)).toMatchObject({
+      sceneId: 'S10', completed: false,
+      state: { noticedPhoto: choiceId === 's9-look', likedPhoto: choiceId === 's9-look', harm: 20 },
+    });
+    const pendingSave = storage.getItem(CHAPTER_SAVE_KEY);
+    bus.emit('ui:dialogueEnd', { stepId: 's9-end' });
+    expect(storage.getItem(CHAPTER_SAVE_KEY)).toBe(pendingSave);
+    expect(chapterEnds).toEqual([]);
+
+    bus.emit('ui:dialogueEnd', { stepId: 's10-days' });
+    expect(engine.getDebugSnapshot().ended).toBe(true);
+    expect(chapterEnds).toEqual(['S10']);
+    expect(loadChapterSave(storage)).toMatchObject({ sceneId: 'S10', completed: true });
+    const completedSave = storage.getItem(CHAPTER_SAVE_KEY);
+    bus.emit('ui:dialogueEnd', { stepId: 's10-days' });
+    expect(chapterEnds).toEqual(['S10']);
+    expect(storage.getItem(CHAPTER_SAVE_KEY)).toBe(completedSave);
+    engine.dispose();
+  });
+
+  it('未完成 S10 存档继续时重放字幕，照片状态保留且不会提前触发结尾', () => {
+    const state = { ...createEmptyChapterSave().state, noticedPhoto: true, likedPhoto: true };
+    saveChapterSave(createEmptyChapterSave({ sceneId: 'S10', state, completed: false }), storage);
+    const bus = new EventBus();
+    const intertitles: string[] = [];
+    const chapterEnds: string[] = [];
+    bus.on('ui:showIntertitle', (payload) => intertitles.push(payload.stepId));
+    bus.on('game:chapterEnd', (payload) => chapterEnds.push(payload.sceneId));
+    const engine = new GameEngine({ bus, storage, params: makeParams() });
+    engine.attach();
+    bus.emit('ui:continueGame');
+    expect(engine.getDebugSnapshot()).toMatchObject({ sceneId: 'S10', ended: false });
+    expect(engine.getDebugSnapshot().state).toEqual(state);
+    expect(intertitles).toEqual(['s10-days']);
+    expect(chapterEnds).toEqual([]);
+    expect(loadChapterSave(storage)?.completed).toBe(false);
+    bus.emit('ui:dialogueEnd', { stepId: 's10-days' });
+    expect(chapterEnds).toEqual(['S10']);
+    expect(loadChapterSave(storage)).toMatchObject({ sceneId: 'S10', state, completed: true });
+    engine.dispose();
+  });
+
   it('调试跳关保留状态但不覆盖正式存档', () => {
     const engine = new GameEngine({ bus: new EventBus(), storage, params: makeParams() });
     engine.startNewGame();
@@ -178,7 +247,7 @@ describe('GameEngine URL 直达与隔离调试', () => {
 
     const meta = engine.resetMetaProgress();
 
-    expect(meta).toEqual({ unlockedRoles: ['bystander'], unlockedEndings: [] });
+    expect(meta).toEqual({ unlockedRoles: ['bystander'], unlockedEndings: [], achievements: [] });
     expect(loadMetaProgress(storage).unlockedRoles).toEqual(['bystander']);
     expect(storage.getItem(META_SAVE_KEY)).not.toBeNull();
     expect(loadChapterSave(storage)?.sceneId).toBe('S1');

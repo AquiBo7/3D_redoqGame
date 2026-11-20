@@ -21,7 +21,7 @@ export interface LiteSceneModel {
 }
 
 /** 场景舞台描写：低饱和清晨氛围，全部虚构，不含真实主体 */
-const SCENE_STAGE: Record<SceneId, string> = {
+const SCENE_STAGE: Partial<Record<SceneId, string>> = {
   S1: '清晨的光从窗帘缝里挤进来，房间还留着昨夜收拾行李的痕迹。',
   S2: '枕头边的手机亮了一下，锁屏上排着一串未读。',
   S3: '你抓起外套跑过走廊和楼梯，脚步声在清晨的楼道里回响。',
@@ -55,6 +55,7 @@ const HOTSPOT_LABELS: Record<string, { label: string; hint: string }> = {
   typer: { label: '看看台阶旁低头打字的男生', hint: '手机屏幕的光映在脸上' },
   'reason-form': { label: '看看登记表的原因栏', hint: '有一行字被划掉了' },
   'look-back-father': { label: '回头看爸爸', hint: '校门口那个提袋子的身影' },
+  'phone-behind': { label: '看看路边拍风景的同学', hint: '举起的手机晃过林荫道' },
 };
 
 const CUTSCENE_TEXT: Record<string, { title: string; text: string }> = {
@@ -83,6 +84,7 @@ function pickLabel(
 /** 根据剧本数据推导当前场景的降级卡片内容（等待目标 / 交互点 / 观察点） */
 export function buildLiteSceneModel(sceneId: SceneId): LiteSceneModel {
   const scene = chapter1.scenes[sceneId];
+  if (!scene) throw new Error(`未配置降级场景 ${sceneId}`);
   const actions: LiteAction[] = [];
   const seen = new Set<string>();
   let onward: LiteAction | null = null;
@@ -122,7 +124,7 @@ export function buildLiteSceneModel(sceneId: SceneId): LiteSceneModel {
   return {
     id: sceneId,
     title: scene.title,
-    stage: SCENE_STAGE[sceneId],
+    stage: SCENE_STAGE[sceneId] ?? scene.stageNotes?.join(' ') ?? scene.title,
     actions,
     onward,
   };

@@ -587,6 +587,146 @@ button.phone__row:active {
   text-align: center;
 }
 
+/* 合照卡片与独立图片模态：不改变手机主页的滚动位置。 */
+.phone__photo-card {
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 2px solid rgba(227, 206, 162, 0.3);
+}
+
+.phone__photo-title {
+  min-width: 0;
+  margin: 0 0 10px;
+  color: #e8e3d9;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.phone__photo-thumbnail {
+  display: block;
+  width: 100%;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: #202b30;
+  cursor: zoom-in;
+}
+
+.phone__photo-thumbnail img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.phone__photo-hint {
+  margin: 8px 0;
+  color: rgba(232, 227, 217, 0.6);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.phone__photo-like,
+.phone__photo-back {
+  flex: 0 0 auto;
+  min-width: 72px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid rgba(232, 227, 217, 0.22);
+  background: transparent;
+  color: #e8e3d9;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.phone__photo-like[aria-pressed='true'] {
+  color: #dfd0a6;
+  border-color: rgba(223, 208, 166, 0.4);
+}
+
+.phone__photo-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: calc(12px + env(safe-area-inset-top, 0px))
+    calc(16px + env(safe-area-inset-right, 0px))
+    calc(48px + env(safe-area-inset-bottom, 0px))
+    calc(16px + env(safe-area-inset-left, 0px));
+  background: rgba(5, 9, 13, 0.98);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.phone__photo-modal[hidden] { display: none; }
+
+.phone__photo-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 16px;
+  width: min(1200px, 100%);
+  margin: 0 auto;
+}
+
+.phone__photo-toolbar .phone__photo-title { margin: 0; }
+
+@media (max-width: 600px) {
+  .phone__photo-toolbar:not(.phone__photo-toolbar--footer) {
+    padding-right: 56px;
+  }
+}
+.phone__photo-toolbar--footer { justify-content: space-between; }
+
+.phone__photo-viewport {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.phone__photo-stage {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.phone__photo-stage img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 204px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 204px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+}
+
+.phone__photo-hotspot {
+  position: absolute;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.phone__photo-thumbnail:focus-visible,
+.phone__photo-back:focus-visible,
+.phone__photo-like:focus-visible,
+.phone__photo-hotspot:focus-visible {
+  outline: 2px solid #dfd0a6;
+  outline-offset: 2px;
+}
+
 /* 竖屏：尽量铺满，但上下留足 48px 安全区 */
 @media (orientation: portrait) {
   .phone-overlay {

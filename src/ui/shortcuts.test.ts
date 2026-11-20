@@ -1,9 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PhonePanel } from '../data/storySchema';
+import { chapter1 } from '../data/story.ch1';
+import { SceneMachine } from '../core/sceneMachine';
 import { PhonePanelView } from './phonePanel';
 import { PhoneVibrationView } from './phoneVibrate';
 import { initMuteButton } from './muteButton';
 import { isShortcutKey } from './uiDom';
+import { EventBus } from '../core/eventBus';
+import { createInitialStoryState } from '../core/state';
+import { IntertitleView } from './intertitle';
+import { initVignette, vignetteOpacity } from './vignette';
+import { initGameUi } from './gameUi';
+
+vi.mock('./assetImage', () => ({
+  renderAssetImage: (_assetId: string, container: HTMLElement) => {
+    const image = document.createElement('img');
+    image.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>';
+    container.append(image);
+    return image;
+  },
+}));
 
 const audio = vi.hoisted(() => ({
   muted: false,
@@ -16,6 +32,7 @@ vi.mock('../audio/audioManager', () => ({
   setMuted: (muted: boolean) => { audio.muted = muted; audio.setMuted(muted); },
   unlockAudio: audio.unlockAudio,
   playUiClick: audio.playUiClick,
+  playPhoneChime: vi.fn(),
 }));
 
 // 无 DOM 依赖的轻量替身：保留节点树、查询、hidden 与捕获/冒泡调度，不调用私有方法。
@@ -98,6 +115,9 @@ class FakeElement extends FakeNode {
   scrollTop = 0;
   scrollHeight = 0;
   readonly children: FakeElement[] = [];
+  readonly style: Record<string, string> = {};
+  disabled = false;
+  inert = false;
   private text = '';
   private readonly attributes = new Map<string, string>();
 
@@ -109,8 +129,15 @@ class FakeElement extends FakeNode {
   }
   get textContent(): string { return this.text + this.children.map((child) => child.textContent).join(''); }
   set textContent(value: string) { this.replaceChildren(); this.text = value; }
-  get classList(): { contains: (name: string) => boolean; toggle: (name: string, force: boolean) => void } {
+  get classList(): {
+    contains: (name: string) => boolean;
+    toggle: (name: string, force: boolean) => void;
+    add: (...names: string[]) => void;
+    remove: (...names: string[]) => void;
+  } {
     return {
+      add: (...names) => { for (const name of names) this.classList.toggle(name, true); },
+      remove: (...names) => { for (const name of names) this.classList.toggle(name, false); },
       contains: (name) => this.className.split(/\s+/).includes(name),
       toggle: (name, force) => {
         const classes = new Set(this.className.split(/\s+/).filter(Boolean));
@@ -165,6 +192,9 @@ class FakeElement extends FakeNode {
     return found;
   }
   querySelector(selector: string): FakeElement | null { return this.querySelectorAll(selector)[0] ?? null; }
+  contains(node: FakeElement | null): boolean {
+    return node === this || this.children.some((child) => child.contains(node));
+  }
   click(): void { this.dispatchEvent(new FakeEvent('click')); }
   focus(): void { fakeDocument.activeElement = this; }
 }
@@ -175,12 +205,15 @@ class FakeDocument extends FakeNode {
   constructor() { super(); this.body.parentNode = this; }
   createElement(tag: string): FakeElement { return new FakeElement(tag); }
   querySelectorAll(selector: string): FakeElement[] { return this.body.querySelectorAll(selector); }
+  querySelector(selector: string): FakeElement | null { return this.body.querySelector(selector); }
 }
 
 let fakeWindow: FakeEventTarget & {
   matchMedia: (query: string) => { matches: boolean };
   setTimeout: (callback: () => void, delay: number) => number;
   clearTimeout: (id: number) => void;
+  setInterval: (callback: () => void, delay: number) => number;
+  clearInterval: (id: number) => void;
 };
 let fakeDocument: FakeDocument;
 let coarse = false;
@@ -216,7 +249,7 @@ function createVibration(): { view: PhoneVibrationView; onView: ReturnType<typeo
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance'] });
   vi.clearAllMocks();
   audio.muted = false;
   coarse = false;
@@ -226,6 +259,8 @@ beforeEach(() => {
     matchMedia: () => ({ matches: coarse }),
     setTimeout: (callback: () => void, delay: number) => globalThis.setTimeout(callback, delay) as unknown as number,
     clearTimeout: (id: number) => globalThis.clearTimeout(id),
+    setInterval: (callback: () => void, delay: number) => globalThis.setInterval(callback, delay) as unknown as number,
+    clearInterval: (id: number) => globalThis.clearInterval(id),
   });
   vi.stubGlobal('window', fakeWindow);
   vi.stubGlobal('document', fakeDocument);
@@ -379,6 +414,274 @@ describe('PhonePanelView E', () => {
     vi.advanceTimersByTime(180);
     expect(press().defaultPrevented).toBe(false);
     expect(onAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Phase A 手机合照', () => {
+  const photoPanel: PhonePanel = {
+    id: 'photo-phone', closeActionId: 'photo-close',
+    sections: [{
+      kind: 'photo', id: 'group-photo', title: '开学第一天照片合集',
+      assetId: 'cg_s6_gate_panorama',
+      hotspot: { x: 60, y: 50, width: 10, height: 20 },
+      likeActionId: 'like-photo', noticeActionId: 'notice-photo',
+    }],
+  };
+
+  it('默认时钟为 8:40，小图展开、百分比热区静默记录且点赞幂等', () => {
+    const { phone, onAction } = createPhone();
+    phone.open(photoPanel);
+    expect(query('.phone__clock').textContent).toBe('8:40');
+    query('.phone__photo-thumbnail').click();
+    expect(query('.phone__photo-modal').hidden).toBe(false);
+    expect(query('.phone-frame').inert).toBe(true);
+    const hotspot = query('.phone__photo-hotspot');
+    expect(Number.parseFloat(hotspot.style.left)).toBeCloseTo(65);
+    expect(hotspot.style.top).toBe('60%');
+    expect(hotspot.style.width).toBe('10%');
+    expect(hotspot.style.height).toBe('20%');
+    hotspot.click();
+    hotspot.click();
+    expect(onAction).toHaveBeenCalledExactlyOnceWith('photo-phone', 'reply', 'notice-photo');
+    expect(phone.isOpen()).toBe(true);
+    expect(query('.phone__photo-modal').hidden).toBe(false);
+    const likes = fakeDocument.body.querySelectorAll('.phone__photo-like');
+    likes[1].click();
+    likes[0].click();
+    expect(onAction).toHaveBeenCalledTimes(2);
+    expect(onAction).toHaveBeenLastCalledWith('photo-phone', 'reply', 'like-photo');
+    expect(likes.every((button) => button.textContent === '已赞')).toBe(true);
+    expect(likes.every((button) => button.getAttribute('aria-pressed') === 'true')).toBe(true);
+    query('.phone__photo-back').click();
+    query('.phone__photo-thumbnail').click();
+    query('.phone__photo-hotspot').click();
+    query('.phone__photo-like').click();
+    expect(onAction).toHaveBeenCalledTimes(2);
+  });
+
+  it('真实 S9 合照通过 UI 回传独立观察和点赞，关闭后进入 S10', () => {
+    const bus = new EventBus();
+    const machine = new SceneMachine({ chapter: chapter1, bus });
+    bus.on('ui:phoneAction', ({ phoneId, action, optionId }) => machine.onPhoneAction(phoneId, action, optionId));
+    const ui = initGameUi({ bus, getControls: () => null });
+    cleanups.push(() => ui.dispose());
+    machine.startNew('S9', 'bystander');
+    machine.onChooseOption('s9-choice', 's9-look');
+    const logBefore = machine.getState().log.length;
+    query('.phone__photo-thumbnail').click();
+    const hotspot = query('.phone__photo-hotspot');
+    expect(hotspot.style.left).toBe('37.75%');
+    expect(hotspot.style.top).toBe('53.5%');
+    hotspot.click();
+    hotspot.click();
+    expect(machine.getState().noticedPhoto).toBe(true);
+    expect(machine.getState().likedPhoto).toBe(false);
+    query('.phone__photo-like').click();
+    query('.phone__photo-like').click();
+    expect(machine.getState().likedPhoto).toBe(true);
+    expect(machine.getState().log.slice(logBefore).map((entry) => entry.summary)).toEqual([
+      '在群合照的台阶上找到了浅黄色的小背影。', '给迎新群的合照点了赞。',
+    ]);
+    query('.phone__photo-back').click();
+    query('.phone__close').click();
+    expect(machine.getSceneId()).toBe('S10');
+    expect(query('.intertitle__line').textContent).toBe('入学第三天，你记住了室友的名字。');
+  });
+
+  it('关闭放大、Esc 与 E 都只返回图片，恢复焦点且不触发手机关闭', () => {
+    const { phone, onAction } = createPhone();
+    phone.open(photoPanel);
+    const thumbnail = query('.phone__photo-thumbnail');
+    for (const close of [() => query('.phone__photo-back').click(), () => press('Escape'), () => press('KeyE')]) {
+      thumbnail.click();
+      vi.advanceTimersByTime(180);
+      close();
+      expect(phone.isOpen()).toBe(true);
+      expect(query('.phone__photo-modal').hidden).toBe(true);
+      expect(query('.phone-frame').inert).toBe(false);
+      expect(fakeDocument.activeElement).toBe(thumbnail);
+      expect(onAction).not.toHaveBeenCalled();
+    }
+    query('.phone__close').click();
+    expect(onAction).toHaveBeenCalledExactlyOnceWith('photo-phone', 'close');
+  });
+
+  it('hide/dispose 关闭图片且取消交互；新面板不会残留旧图片', () => {
+    const { phone, onAction } = createPhone();
+    phone.open(photoPanel);
+    query('.phone__photo-thumbnail').click();
+    const oldHotspot = query('.phone__photo-hotspot');
+    phone.hide();
+    expect(query('.phone__photo-modal').hidden).toBe(true);
+    oldHotspot.click();
+    phone.open(panelData);
+    expect(query('.phone__photo-modal').hidden).toBe(true);
+    expect(fakeDocument.body.querySelector('.phone__photo-hotspot')).toBeNull();
+    oldHotspot.click();
+    phone.dispose();
+    expect(fakeWindow.listenerCount('keydown')).toBe(0);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+});
+
+function createIntertitle(): { view: IntertitleView; onEnd: ReturnType<typeof vi.fn> } {
+  const onEnd = vi.fn();
+  const view = new IntertitleView(fakeDocument.body as unknown as HTMLElement, onEnd);
+  cleanups.push(() => view.dispose());
+  return { view, onEnd };
+}
+
+describe('Phase A 黑幕字幕', () => {
+  it('七行按默认每行 2000ms 播放，结束仅回调一次', () => {
+    const { view, onEnd } = createIntertitle();
+    const lines = ['第一行', '第二行', '第三行', '第四行', '第五行', '第六行', '第七行'];
+    view.show({ stepId: 's10', lines });
+    for (const line of lines) {
+      expect(query('.intertitle__line').textContent).toBe(line);
+      expect(query('.intertitle__line').style.animationDuration).toBe('2000ms');
+      vi.advanceTimersByTime(1999);
+      expect(onEnd).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+    }
+    expect(query('.intertitle').hidden).toBe(true);
+    expect(onEnd).toHaveBeenCalledExactlyOnceWith('s10');
+    query('.intertitle__skip').click();
+    vi.runAllTimers();
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('按钮和 Escape 跳过取消计时器，不可跳过时屏蔽继续键', () => {
+    const { view, onEnd } = createIntertitle();
+    view.show({ stepId: 'skip-button', lines: ['字幕'] });
+    query('.intertitle__skip').click();
+    expect(onEnd).toHaveBeenCalledExactlyOnceWith('skip-button');
+    expect(vi.getTimerCount()).toBe(0);
+    view.show({ stepId: 'skip-key', lines: ['字幕'] });
+    expect(press('Escape').immediateStopped).toBe(true);
+    expect(onEnd).toHaveBeenLastCalledWith('skip-key');
+    view.show({ stepId: 'required', lines: ['字幕'], skippable: false, lineDurationMs: 300 });
+    expect(query('.intertitle__skip').hidden).toBe(true);
+    query('.intertitle__skip').click();
+    for (const code of ['Escape', 'Space', 'Enter']) expect(press(code).defaultPrevented).toBe(true);
+    expect(onEnd).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(300);
+    expect(onEnd).toHaveBeenLastCalledWith('required');
+  });
+
+  it('重入、hide 和 dispose 取消旧 timer；空段同步完成', () => {
+    const { view, onEnd } = createIntertitle();
+    view.show({ stepId: 'old', lines: ['旧字幕'] });
+    vi.advanceTimersByTime(1000);
+    view.show({ stepId: 'replacement', lines: ['新字幕'], lineDurationMs: 500 });
+    vi.advanceTimersByTime(500);
+    expect(onEnd).toHaveBeenCalledExactlyOnceWith('replacement');
+    view.show({ stepId: 'empty', lines: [] });
+    expect(onEnd).toHaveBeenLastCalledWith('empty');
+    view.show({ stepId: 'hidden', lines: ['字幕'] });
+    view.hide();
+    vi.runAllTimers();
+    view.show({ stepId: 'disposed', lines: ['字幕'] });
+    view.dispose();
+    view.show({ stepId: 'after-dispose', lines: [] });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fakeWindow.listenerCount('keydown')).toBe(0);
+    expect(fakeDocument.body.querySelector('.intertitle')).toBeNull();
+    expect(onEnd).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('无效时长 %s 使用默认值', (lineDurationMs) => {
+    const { view, onEnd } = createIntertitle();
+    view.show({ stepId: 'duration', lines: ['字幕'], lineDurationMs });
+    vi.advanceTimersByTime(1999);
+    expect(onEnd).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onEnd).toHaveBeenCalledExactlyOnceWith('duration');
+  });
+});
+
+describe('Phase A 暗角', () => {
+  it.each([[0, 0], [20, 0], [29.99, 0], [30, 0.28], [49.99, 0.28], [50, 0.52], [69.99, 0.52], [70, 0.78], [100, 0.78]])('harm %s 映射到 %s', (harm, opacity) => {
+    expect(vignetteOpacity(harm)).toBe(opacity);
+  });
+
+  it('复用同一层，状态下降可恢复，销毁取消订阅且没有数值 UI', () => {
+    const bus = new EventBus();
+    const dispose = initVignette(fakeDocument.body as unknown as HTMLElement, bus);
+    cleanups.push(dispose);
+    const layer = query('.vignette');
+    const emitHarm = (harm: number): void => bus.emit('state:changed', {
+      sceneId: 'S9', role: 'bystander', state: { ...createInitialStoryState(), harm }, changedKeys: ['harm'],
+    });
+    emitHarm(70);
+    expect(layer.style.opacity).toBe('0.78');
+    emitHarm(71);
+    expect(query('.vignette')).toBe(layer);
+    emitHarm(20);
+    expect(layer.style.opacity).toBe('0');
+    expect(layer.textContent).toBe('');
+    expect(layer.getAttribute('aria-hidden')).toBe('true');
+    dispose();
+    emitHarm(80);
+    expect(layer.style.opacity).toBe('0');
+    expect(fakeDocument.body.querySelector('.vignette')).toBeNull();
+  });
+});
+
+describe('Phase A gameUi 接线', () => {
+  it('字幕统一锁定、结束通知与下一段无闪动交接，dispose 取消计时器', async () => {
+    const bus = new EventBus();
+    const port = { lockControls: vi.fn(), unlockControls: vi.fn() };
+    const ui = initGameUi({ bus, getControls: () => port });
+    cleanups.push(() => ui.dispose());
+    const ended = vi.fn();
+    bus.on('ui:dialogueEnd', ended);
+    bus.on('ui:dialogueEnd', ({ stepId }) => {
+      if (stepId === 'first') bus.emit('ui:showIntertitle', { lineDurationMs: 2000, skippable: true, stepId: 'second', lines: ['下一段'] });
+    });
+    bus.emit('ui:showIntertitle', { lineDurationMs: 100, skippable: true, stepId: 'first', lines: ['第一段'] });
+    await Promise.resolve();
+    expect(port.lockControls).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(100);
+    await Promise.resolve();
+    expect(ended).toHaveBeenCalledExactlyOnceWith({ stepId: 'first' });
+    expect(query('.intertitle__line').textContent).toBe('下一段');
+    expect(port.unlockControls).not.toHaveBeenCalled();
+    press('Escape');
+    await Promise.resolve();
+    expect(ended).toHaveBeenLastCalledWith({ stepId: 'second' });
+    expect(port.unlockControls).toHaveBeenCalledTimes(1);
+    bus.emit('ui:showIntertitle', { lineDurationMs: 2000, skippable: true, stepId: 'empty', lines: [] });
+    await Promise.resolve();
+    expect(port.lockControls).toHaveBeenCalledTimes(1);
+    bus.emit('ui:showIntertitle', { lineDurationMs: 2000, skippable: true, stepId: 'disposed', lines: ['不能再完成'] });
+    await Promise.resolve();
+    ui.dispose();
+    vi.runAllTimers();
+    expect(ended).toHaveBeenCalledTimes(3);
+    expect(port.unlockControls).toHaveBeenCalledTimes(2);
+    expect(fakeWindow.listenerCount('keydown')).toBe(0);
+    expect(fakeDocument.body.querySelector('.vignette')).toBeNull();
+  });
+
+  it('手机替换及场景切换会取消字幕，不发出失效步骤结束', async () => {
+    const bus = new EventBus();
+    const port = { lockControls: vi.fn(), unlockControls: vi.fn() };
+    const ui = initGameUi({ bus, getControls: () => port });
+    cleanups.push(() => ui.dispose());
+    const ended = vi.fn();
+    bus.on('ui:dialogueEnd', ended);
+    bus.emit('ui:showIntertitle', { lineDurationMs: 2000, skippable: true, stepId: 'old', lines: ['旧字幕'] });
+    await Promise.resolve();
+    bus.emit('ui:showPhone', { stepId: 'phone', panel: panelData });
+    await Promise.resolve();
+    expect(query('.intertitle').hidden).toBe(true);
+    expect(port.unlockControls).not.toHaveBeenCalled();
+    bus.emit('ui:showIntertitle', { lineDurationMs: 2000, skippable: true, stepId: 'next', lines: ['新字幕'] });
+    bus.emit('scene:transition', { fromSceneId: 'S9', toSceneId: 'S10', sceneKey: 'building', role: 'bystander', title: '' });
+    await Promise.resolve();
+    vi.runAllTimers();
+    expect(ended).not.toHaveBeenCalled();
+    expect(port.unlockControls).toHaveBeenCalledTimes(1);
   });
 });
 

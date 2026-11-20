@@ -258,6 +258,7 @@ export function initLiteWorld(options: LiteWorldOptions = {}): LiteWorldHandle {
       updateMemory(state);
     }),
 
+    bus.on('ui:showIntertitle', () => setBlocked(true)),
     bus.on('ui:showDialogue', () => setBlocked(true)),
     bus.on('ui:showPhone', () => setBlocked(true)),
     bus.on('ui:showChoices', () => setBlocked(true)),

@@ -13,7 +13,7 @@ import { createButton, createElement } from './uiDom';
 import './phonePreview.css';
 
 function findPhonePanel(sceneId: SceneId, stepId: string): PhonePanel {
-  for (const step of chapter1.scenes[sceneId].steps) {
+  for (const step of chapter1.scenes[sceneId]?.steps ?? []) {
     if (step.kind === 'phone' && step.id === stepId) return step.panel;
   }
   throw new Error(`缺少手机面板数据：${sceneId}/${stepId}`);

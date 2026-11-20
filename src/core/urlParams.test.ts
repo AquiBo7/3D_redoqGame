@@ -46,7 +46,11 @@ describe('parseUrlParams', () => {
   it('场景编号大小写归一，非法场景为 null', () => {
     expect(parseUrlParams('?scene=s7').scene).toBe('S7');
     expect(parseUrlParams('?scene=S9').scene).toBe('S9');
-    expect(parseUrlParams('?scene=S10').scene).toBeNull();
+    expect(parseUrlParams('?scene=S10').scene).toBe('S10');
+    expect(parseUrlParams('?scene=c6').scene).toBe('C6');
+    expect(parseUrlParams('?scene=D6').scene).toBe('D6');
+    expect(parseUrlParams('?scene=E1').scene).toBe('E1');
+    expect(parseUrlParams('?scene=S15').scene).toBeNull();
     expect(parseUrlParams('?scene=foo').scene).toBeNull();
   });
 

@@ -2,11 +2,14 @@
 // 纯展示：所有内容来自 PhonePanel 数据；交互只通过回调交给 gameUi 转发事件总线。
 
 import type { PhonePanel, PhoneReplyOption, PhoneSection } from '../data/storySchema';
+import type { AssetId } from '../data/assetManifest';
+import { renderAssetImage } from './assetImage';
 import { createButton, createElement, isShortcutKey } from './uiDom';
 import './phonePanel.css';
 
 type ChatSection = Extract<PhoneSection, { kind: 'chat' }>;
 type AlarmSection = Extract<PhoneSection, { kind: 'alarm' }>;
+type PhotoSection = Extract<PhoneSection, { kind: 'photo' }>;
 
 export interface PhonePanelCallbacks {
   onAction: (panelId: string, action: 'close' | 'reply', optionId?: string) => void;
@@ -26,6 +29,11 @@ function firstCharacter(text: string, fallback: string): string {
 
 export class PhonePanelView {
   private readonly root: HTMLDivElement;
+  private readonly frame: HTMLDivElement;
+  private readonly photoModal: HTMLDivElement;
+  private photo: PhotoSection | null = null;
+  private photoOpener: HTMLButtonElement | null = null;
+  private readonly photoActions = new Set<string>();
   private readonly body: HTMLDivElement;
   private readonly clock: HTMLSpanElement;
   private readonly callbacks: PhonePanelCallbacks;
@@ -39,7 +47,25 @@ export class PhonePanelView {
   private shortcutCooldownUntil = 0;
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
-    if (!this.isOpen() || !isShortcutKey(event, 'KeyE')) return;
+    if (!this.isOpen()) return;
+    if (this.photo && event.code === 'Tab') {
+      const buttons = Array.from(this.photoModal.querySelectorAll<HTMLButtonElement>('button'))
+        .filter((button) => !button.disabled);
+      const edge = event.shiftKey ? buttons[0] : buttons[buttons.length - 1];
+      if (document.activeElement === edge || !this.photoModal.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? buttons[buttons.length - 1] : buttons[0])?.focus();
+      }
+      event.stopImmediatePropagation();
+      return;
+    }
+    if (this.photo && isShortcutKey(event, 'Escape')) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.closePhoto();
+      return;
+    }
+    if (!isShortcutKey(event, 'KeyE')) return;
 
     // 冷却中的 E 也要消费，不能穿透到 World 交互或其他手机视图。
     event.preventDefault();
@@ -71,10 +97,17 @@ export class PhonePanelView {
     this.root.setAttribute('aria-modal', 'true');
     this.root.setAttribute('aria-label', '手机');
 
-    const frame = createElement('div', 'phone-frame');
+    this.frame = createElement('div', 'phone-frame');
+    this.photoModal = createElement('div', 'phone__photo-modal');
+    this.photoModal.hidden = true;
+    this.photoModal.setAttribute('role', 'dialog');
+    this.photoModal.setAttribute('aria-modal', 'true');
+    this.photoModal.addEventListener('click', (event) => {
+      if (event.target === this.photoModal) this.closePhoto();
+    });
 
     const status = createElement('div', 'phone__status');
-    this.clock = createElement('span', 'phone__clock', '8:47');
+    this.clock = createElement('span', 'phone__clock', '8:40');
     const statusMark = createElement('span', 'phone__status-mark', '● ● ●');
     statusMark.setAttribute('aria-hidden', 'true');
     status.append(this.clock, statusMark);
@@ -86,14 +119,16 @@ export class PhonePanelView {
     closeButton.addEventListener('click', () => this.requestClose());
     footer.append(closeButton);
 
-    frame.append(status, this.body, footer);
-    this.root.append(frame);
+    this.frame.append(status, this.body, footer);
+    this.root.append(this.frame, this.photoModal);
     container.append(this.root);
     window.addEventListener('keydown', this.handleKeyDown, true);
   }
 
   open(panel: PhonePanel): void {
+    this.closePhoto(false);
     this.refreshShortcutCooldown();
+    this.photoActions.clear();
     this.panel = panel;
     this.view = panel.lockTime ? 'lock' : 'home';
     this.openSectionId = null;
@@ -105,6 +140,7 @@ export class PhonePanelView {
   }
 
   hide(): void {
+    this.closePhoto(false);
     this.refreshShortcutCooldown();
     this.root.hidden = true;
     this.panel = null;
@@ -123,6 +159,10 @@ export class PhonePanelView {
   }
 
   private requestClose(): void {
+    if (this.photo) {
+      this.closePhoto();
+      return;
+    }
     const panel = this.panel;
     if (!panel) return;
     this.hide();
@@ -133,7 +173,7 @@ export class PhonePanelView {
     const panel = this.panel;
     if (!panel) return;
 
-    this.clock.textContent = panel.lockTime ?? '手机';
+    this.clock.textContent = panel.lockTime ?? '8:40';
     this.body.replaceChildren();
 
     if (this.view === 'lock') this.renderLockScreen(panel);
@@ -150,7 +190,7 @@ export class PhonePanelView {
 
     lockScreen.append(
       createElement('span', 'phone__lock-day', '今天'),
-      createElement('span', 'phone__lock-time', panel.lockTime ?? '手机'),
+      createElement('span', 'phone__lock-time', panel.lockTime ?? '8:40'),
     );
 
     const alarm = findAlarm(panel);
@@ -184,6 +224,10 @@ export class PhonePanelView {
       }
       if (section.kind === 'notice') {
         list.append(this.createNoticeCard(section.text));
+        continue;
+      }
+      if (section.kind === 'photo') {
+        list.append(this.createPhotoCard(section));
         continue;
       }
       list.append(this.createSectionRow(section));
@@ -220,7 +264,7 @@ export class PhonePanelView {
     return card;
   }
 
-  private createSectionRow(section: Exclude<PhoneSection, { kind: 'alarm' | 'notice' }>): HTMLButtonElement {
+  private createSectionRow(section: Exclude<PhoneSection, { kind: 'alarm' | 'notice' | 'photo' }>): HTMLButtonElement {
     const row = createButton('phone__row', '');
     const isChat = section.kind === 'chat';
     const icon = createElement(
@@ -314,6 +358,9 @@ export class PhonePanelView {
       case 'chat':
         this.renderChat(section);
         break;
+      case 'photo':
+        this.body.append(this.createPhotoCard(section));
+        break;
     }
   }
 
@@ -321,6 +368,105 @@ export class PhonePanelView {
     if (section.kind === 'notice') return '通知';
     if (section.kind === 'alarm') return '闹钟';
     return section.title;
+  }
+
+  private createPhotoCard(section: PhotoSection): HTMLElement {
+    const card = createElement('section', 'phone__photo-card');
+    card.append(createElement('h3', 'phone__photo-title', section.title));
+    const thumbnail = createButton('phone__photo-thumbnail', '');
+    thumbnail.setAttribute('aria-label', `放大查看：${section.title}`);
+    this.renderPhotoImage(section, thumbnail);
+    thumbnail.addEventListener('click', () => this.openPhoto(section, thumbnail));
+    card.append(thumbnail, createElement('p', 'phone__photo-hint', '轻点照片，放大查看'));
+    if (section.likeActionId) card.append(this.createLikeButton(section));
+    return card;
+  }
+
+  private renderPhotoImage(section: PhotoSection, container: HTMLElement): void {
+    // 资源与兜底都由统一美术渲染入口提供，不直接请求固定文件路径。
+    const image = renderAssetImage(section.assetId as AssetId, container);
+    image.draggable = false;
+  }
+
+  private createLikeButton(section: PhotoSection): HTMLButtonElement {
+    const actionId = section.likeActionId!;
+    const button = createButton('phone__photo-like', '点赞');
+    button.setAttribute('data-photo-like', actionId);
+    this.updateLikeButton(button, actionId);
+    button.addEventListener('click', () => this.handlePhotoAction(section, actionId));
+    return button;
+  }
+
+  private updateLikeButton(button: HTMLButtonElement, actionId: string): void {
+    const liked = this.photoActions.has(actionId);
+    button.textContent = liked ? '已赞' : '点赞';
+    button.setAttribute('aria-pressed', String(liked));
+    button.setAttribute('aria-disabled', String(liked));
+  }
+
+  private openPhoto(section: PhotoSection, opener: HTMLButtonElement): void {
+    if (!this.panel?.sections.includes(section)) return;
+    this.refreshShortcutCooldown();
+    this.photo = section;
+    this.photoOpener = opener;
+    this.frame.inert = true;
+    this.frame.setAttribute('aria-hidden', 'true');
+    this.photoModal.replaceChildren();
+    this.photoModal.setAttribute('aria-label', section.title);
+
+    const header = createElement('div', 'phone__photo-toolbar');
+    const back = createButton('phone__photo-back', '‹ 返回图片');
+    back.setAttribute('aria-label', '关闭放大，返回手机图片');
+    back.addEventListener('click', () => this.closePhoto());
+    header.append(back, createElement('h3', 'phone__photo-title', section.title));
+
+    const viewport = createElement('div', 'phone__photo-viewport');
+    const stage = createElement('div', 'phone__photo-stage');
+    this.renderPhotoImage(section, stage);
+    if (section.hotspot && section.noticeActionId) {
+      const { x, y, width, height } = section.hotspot;
+      const hotspot = createButton('phone__photo-hotspot', '');
+      hotspot.setAttribute('aria-label', '看看台阶上的浅黄色背影');
+      // 以实际图片盒子而非屏幕定位；中心锚定保证最小触控尺寸不会偏移热区。
+      hotspot.style.left = `${x + width / 2}%`;
+      hotspot.style.top = `${y + height / 2}%`;
+      hotspot.style.width = `${width}%`;
+      hotspot.style.height = `${height}%`;
+      hotspot.addEventListener('click', () => this.handlePhotoAction(section, section.noticeActionId!));
+      stage.append(hotspot);
+    }
+    viewport.append(stage);
+    const footer = createElement('div', 'phone__photo-toolbar phone__photo-toolbar--footer');
+    footer.append(createElement('p', 'phone__photo-hint', '轻点图片细节 · Esc 返回'));
+    if (section.likeActionId) footer.append(this.createLikeButton(section));
+    this.photoModal.append(header, viewport, footer);
+    this.photoModal.hidden = false;
+    back.focus();
+  }
+
+  private closePhoto(restoreFocus = true): void {
+    const opener = this.photoOpener;
+    this.photo = null;
+    this.photoOpener = null;
+    this.photoModal.hidden = true;
+    this.photoModal.replaceChildren();
+    this.frame.inert = false;
+    this.frame.setAttribute('aria-hidden', 'false');
+    if (restoreFocus && opener) {
+      this.refreshShortcutCooldown();
+      opener.focus();
+    }
+  }
+
+  private handlePhotoAction(section: PhotoSection, actionId: string): void {
+    const panel = this.panel;
+    if (!panel?.sections.includes(section) || this.photoActions.has(actionId)) return;
+    // 先去重再通知 core；观察不弹奖励、不切换页面，点赞只更新按钮状态。
+    this.photoActions.add(actionId);
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>('[data-photo-like]')) {
+      this.updateLikeButton(button, button.getAttribute('data-photo-like')!);
+    }
+    this.callbacks.onAction(panel.id, 'reply', actionId);
   }
 
   private renderChat(section: ChatSection): void {

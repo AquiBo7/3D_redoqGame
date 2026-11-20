@@ -9,6 +9,8 @@ import { CaptionView } from './captions';
 import { initObjectivePrompt } from './objectivePrompt';
 import { ChoicesPanel } from './choicesPanel';
 import { DialogueBox } from './dialogueBox';
+import { IntertitleView } from './intertitle';
+import { initVignette } from './vignette';
 import { PhonePanelView } from './phonePanel';
 import { PhoneVibrationView } from './phoneVibrate';
 import { createUiLockCoordinator } from './uiLock';
@@ -37,7 +39,9 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
 
   const lock = createUiLockCoordinator(options.getControls);
   const disposeObjective = initObjectivePrompt(root, bus);
+  const disposeVignette = initVignette(host, bus);
 
+  let intertitleBlockerId: string | null = null;
   let phoneBlockerId: string | null = null;
   let dialogueBlockerId: string | null = null;
   let choicesBlockerId: string | null = null;
@@ -53,6 +57,11 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       }
       bus.emit('ui:phoneAction', { phoneId: panelId, action: 'reply', optionId });
     },
+  });
+
+  const intertitle = new IntertitleView(root, (stepId) => {
+    closeIntertitle();
+    bus.emit('ui:dialogueEnd', { stepId });
   });
 
   const dialogue = new DialogueBox({
@@ -119,6 +128,12 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     choicesBlockerId = null;
   }
 
+  function closeIntertitle(): void {
+    intertitle.hide();
+    if (intertitleBlockerId) lock.release(intertitleBlockerId);
+    intertitleBlockerId = null;
+  }
+
   function closePhone(): void {
     phone.hide();
     releasePhoneLock();
@@ -142,6 +157,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   }
 
   function cleanupAll(): void {
+    closeIntertitle();
     closePhone();
     closeDialogue();
     closeChoices();
@@ -151,7 +167,16 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   }
 
   const unsubscribers = [
+    bus.on('ui:showIntertitle', (payload) => {
+      cleanupAll();
+      intertitleBlockerId = `intertitle:${payload.stepId}`;
+      // 空字幕也可能同步结束，必须先获取锁再调用 show。
+      lock.acquire(intertitleBlockerId);
+      intertitle.show(payload);
+    }),
+
     bus.on('ui:showPhone', ({ stepId, panel }) => {
+      closeIntertitle();
       closePhone();
       closeDialogue();
       closeChoices();
@@ -167,6 +192,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     }),
 
     bus.on('ui:showDialogue', (payload) => {
+      closeIntertitle();
       closePhone();
       closeChoices();
       closeDialogue();
@@ -177,6 +203,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     }),
 
     bus.on('ui:showChoices', (payload) => {
+      closeIntertitle();
       closePhone();
       closeDialogue();
       closeChoices();
@@ -219,6 +246,8 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       lock.releaseAll();
       lock.sync();
       lock.dispose();
+      intertitle.dispose();
+      disposeVignette();
       phone.dispose();
       dialogue.dispose();
       choices.dispose();

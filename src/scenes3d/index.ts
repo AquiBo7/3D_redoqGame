@@ -12,6 +12,8 @@ import { createGateDefinition, gateRuntime } from './gate';
 import { createRoomDefinition } from './room';
 import { createStreetDefinition, streetRuntime } from './street';
 
+const buildNarrativeStage: WorldSceneDefinition['build'] = () => ({ occluders: [] });
+
 export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
   switch (sceneId) {
     case 'S1':
@@ -28,6 +30,12 @@ export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
     case 'S8':
     case 'S9':
       return createBuildingDefinition(sceneId);
+    default:
+      return {
+        sceneKey: 'stage2d', spawn: { x: 0, z: 0 },
+        nav: { bounds: { minX: -1, maxX: 1, minZ: -1, maxZ: 1 }, obstacles: [] },
+        build: buildNarrativeStage,
+      };
   }
 }
 

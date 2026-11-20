@@ -9,7 +9,7 @@ vi.mock('../scenes3d', () => ({ getSceneDefinition: vi.fn(), getSceneRuntime: vi
 vi.mock('gsap', () => ({ gsap: { to: vi.fn(), killTweensOf: vi.fn() } }));
 
 const colorKeys = ['uZenith', 'uMid', 'uHorizon', 'uBelow', 'uCloud', 'uCloudHighlight', 'uSunHighlight'];
-const sceneKeys: Record<SceneId, SceneKey> = {
+const sceneKeys: Partial<Record<SceneId, SceneKey>> = {
   S1: 'room', S2: 'room', S3: 'room', S4: 'street', S5: 'gate', S6: 'gate',
   S7: 'desk', S8: 'building', S9: 'building',
 };
@@ -103,7 +103,11 @@ function expectParticleColor(world: TestWorld, index: number, expected: THREE.Co
 }
 
 beforeEach(() => {
-  vi.mocked(getSceneDefinition).mockImplementation((id) => definition(sceneKeys[id]));
+  vi.mocked(getSceneDefinition).mockImplementation((id) => {
+    const sceneKey = sceneKeys[id];
+    expect(sceneKey, `氛围测试未配置场景 ${id}`).toBeDefined();
+    return definition(sceneKey!);
+  });
   vi.mocked(getSceneRuntime).mockReturnValue(null);
   vi.stubGlobal('window', { getComputedStyle: () => ({ opacity: '1' }) });
   vi.stubGlobal('document', {

@@ -4,15 +4,23 @@ import { SCENE_IDS } from '../data/storySchema';
 import type { SceneId } from '../data/storySchema';
 import { buildLiteSceneModel, getLiteCutscene } from './liteWorldModel';
 
+const chapterOneSceneIds = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9'] as const;
 const sceneIds = Object.keys(chapter1.scenes) as SceneId[];
 
+function sceneOf(sceneId: SceneId) {
+  const scene = chapter1.scenes[sceneId];
+  expect(scene, `缺少降级剧本场景 ${sceneId}`).toBeDefined();
+  return scene!;
+}
+
 describe('liteWorldModel 降级场景契约', () => {
-  it('S1–S9 均有标题与清晨舞台描写', () => {
-    expect(sceneIds.sort()).toEqual([...SCENE_IDS].sort());
+  it('第一章 S1–S9 与 S10 字幕均有标题和舞台描写，只检查已配置场景', () => {
+    expect([...sceneIds].sort()).toEqual([...chapterOneSceneIds, 'S10'].sort());
     for (const sceneId of sceneIds) {
+      expect(SCENE_IDS).toContain(sceneId);
       const model = buildLiteSceneModel(sceneId);
       expect(model.id).toBe(sceneId);
-      expect(model.title).toBe(chapter1.scenes[sceneId].title);
+      expect(model.title).toBe(sceneOf(sceneId).title);
       expect(model.stage.length).toBeGreaterThan(8);
     }
   });
@@ -59,8 +67,33 @@ describe('liteWorldModel 降级场景契约', () => {
     );
   });
 
-  it('纯过场场景不产生多余按钮（S2 / S6 / S9）', () => {
-    for (const sceneId of ['S2', 'S6', 'S9'] as SceneId[]) {
+  it('S8 路边拍照热点与父亲观察同时可用，新卡片有明确中文提示', () => {
+    const model = buildLiteSceneModel('S8');
+    expect(model.actions.filter((action) => action.id === 'phone-behind')).toEqual([{
+      kind: 'hotspot', id: 'phone-behind',
+      label: '看看路边拍风景的同学', hint: '举起的手机晃过林荫道',
+    }]);
+    expect(model.actions).toContainEqual({
+      kind: 'hotspot', id: 'look-back-father', label: '回头看爸爸', hint: '校门口那个提袋子的身影',
+    });
+    expect(model.onward).toMatchObject({ kind: 'zone', id: 'building-entrance' });
+  });
+
+  it('S10 使用入学舞台与字幕契约，未配置 S11 不生成虚构降级节点', () => {
+    const scene = sceneOf('S10');
+    const model = buildLiteSceneModel('S10');
+    expect(model.title).toBe('入学几天');
+    expect(model.stage).toBe(scene.stageNotes!.join(' '));
+    const step = scene.steps[0];
+    if (step.kind !== 'intertitle') throw new Error('S10 必须使用字幕');
+    expect(step).toMatchObject({ id: 's10-days', lineDurationMs: 2000, skippable: true });
+    expect(step.lines).toHaveLength(7);
+    expect(chapter1.scenes.S11).toBeUndefined();
+    expect(() => buildLiteSceneModel('S11')).toThrow('未配置降级场景 S11');
+  });
+
+  it('纯过场或字幕场景不产生多余按钮（S2 / S6 / S9 / S10）', () => {
+    for (const sceneId of ['S2', 'S6', 'S9', 'S10'] as SceneId[]) {
       const model = buildLiteSceneModel(sceneId);
       expect(model.actions).toHaveLength(0);
       expect(model.onward).toBeNull();
@@ -69,7 +102,7 @@ describe('liteWorldModel 降级场景契约', () => {
 
   it('剧本中的每个过场都有非空文字，未知 key 走通用兜底', () => {
     for (const sceneId of sceneIds) {
-      for (const step of chapter1.scenes[sceneId].steps) {
+      for (const step of sceneOf(sceneId).steps) {
         if (step.kind !== 'cutscene') continue;
         const text = getLiteCutscene(step.key);
         expect(text.title.length).toBeGreaterThan(0);
@@ -92,7 +125,8 @@ describe('liteWorldModel 降级场景契约', () => {
       if (model.onward) texts.push(model.onward.label, model.onward.hint);
     }
     for (const sceneId of sceneIds) {
-      for (const step of chapter1.scenes[sceneId].steps) {
+      for (const step of sceneOf(sceneId).steps) {
+        if (step.kind === 'intertitle') texts.push(...step.lines);
         if (step.kind !== 'cutscene') continue;
         const text = getLiteCutscene(step.key);
         texts.push(text.title, text.text);
