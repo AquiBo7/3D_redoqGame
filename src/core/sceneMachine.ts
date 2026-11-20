@@ -40,8 +40,8 @@ function cloneState(state: StoryState): StoryState {
 
 function findReplyOption(panel: PhonePanel, optionId: string): PhoneReplyOption | undefined {
   for (const section of panel.sections) {
-    if (section.kind !== 'chat' || !section.replyOptions) continue;
-    const found = section.replyOptions.find((option) => option.id === optionId);
+    const options = section.kind === 'chat' ? section.replyOptions : section.kind === 'post' ? section.actions : undefined;
+    const found = options?.find((option) => option.id === optionId);
     if (found) return found;
   }
   return undefined;
@@ -154,11 +154,25 @@ export class SceneMachine {
     }
   }
 
+  onMinigameEnd(stepId: string, hits: number, kills: number, tries = 0): void {
+    const step = this.currentStep();
+    if (this.ended || step?.kind !== 'minigame' || step.id !== stepId) return;
+    if (![hits, kills, tries].every((value) => Number.isSafeInteger(value) && value >= 0)) return;
+    const changed = new Set<keyof StoryState>();
+    this.applyInto(changed, {
+      add: { harm: Math.min(hits, 8) - Math.min(Math.floor(kills / 5), 4) },
+      ...(step.game === 'crystal' ? { set: { crystalHits: hits, kills, stage1Tries: tries, helpedByAyuan: this.state.joined } } : {}),
+      log: { type: 'choice', summary: step.game === 'bubble' ? '尝试挡住不断涌来的评论。' : '守在浅黄色水晶旁。' },
+    });
+    this.emitStateChanged(changed);
+    this.advance();
+  }
+
   onDialogueEnd(stepId: string): void {
     const step = this.currentStep();
     if (!step || this.ended) return;
     const waiting =
-      step.kind === 'dialogue' || step.kind === 'caption' || step.kind === 'cutscene' || step.kind === 'intertitle';
+      step.kind === 'dialogue' || step.kind === 'caption' || step.kind === 'cutscene' || step.kind === 'intertitle' || step.kind === 'art';
     if (!waiting || step.id !== stepId) return;
     this.advance();
   }
@@ -317,7 +331,17 @@ export class SceneMachine {
       if (step.kind !== 'wait') this.applyInto(changed, step.effects);
       this.emitStateChanged(changed);
 
+      this.bus.emit('ui:worldBlocked', {
+        blocked: !['system', 'goto', 'wait', 'caption'].includes(step.kind) && !(step.kind === 'choice' && step.allowMovement === true),
+      });
       switch (step.kind) {
+        case 'minigame':
+          this.bus.emit('ui:showMinigame', { stepId: step.id, game: step.game, joined: this.state.joined, tries: this.state.stage1Tries });
+          return;
+
+        case 'art':
+          this.bus.emit('ui:showArt', { stepId: step.id, assetId: step.assetId });
+          return;
         case 'system':
           this.stepIndex += 1;
           continue;
@@ -453,7 +477,7 @@ export class SceneMachine {
           stepId: trigger.id,
           text: trigger.reveal.text,
           durationMs: trigger.reveal.durationMs ?? 2600,
-          kind: 'observation',
+          kind: trigger.reveal.kind ?? 'observation',
         });
       }
     }

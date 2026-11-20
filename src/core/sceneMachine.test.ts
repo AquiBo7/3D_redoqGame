@@ -85,7 +85,7 @@ function enterS2(h: Harness): void {
 }
 
 describe('SceneMachine 主线推进', () => {
-  it('完整走通 S1→S9 看手机→S10 字幕，状态、转场与本阶段结尾均正确', () => {
+  it('完整走通 S1→S9 看手机→S10 字幕后进入真实 S11，状态与转场正确且未结束', () => {
     const h = createHarness();
 
     beginS1(h);
@@ -138,7 +138,7 @@ describe('SceneMachine 主线推进', () => {
     h.machine.onPhoneAction('s9-phone', 'reply', 's9-like-photo');
     h.machine.onPhoneAction('s9-phone', 'close');
 
-    // 第一章收尾不是本阶段结束：必须等待 S10 字幕回执
+    // 第一章收尾后等待 S10 字幕回执，再进入第二章真实场景。
     expect(h.machine.getSceneId()).toBe('S10');
     expect(h.machine.isEnded()).toBe(false);
     expect(h.chapterEnds).toHaveLength(0);
@@ -151,7 +151,9 @@ describe('SceneMachine 主线推进', () => {
     h.machine.onDialogueEnd('s10-days');
 
     const state = h.machine.getState();
-    expect(h.machine.isEnded()).toBe(true);
+    expect(h.machine.getSceneId()).toBe('S11');
+    expect(h.machine.isEnded()).toBe(false);
+    expect(h.dialogues[h.dialogues.length - 1].stepId).toBe('s11-roommate');
     expect(state).toMatchObject({
       momReply: '起了起了。',
       phoneIgnored: 1,
@@ -181,6 +183,7 @@ describe('SceneMachine 主线推进', () => {
       'S8',
       'S9',
       'S10',
+      'S11',
     ]);
     expect(h.transitions[0].fromSceneId).toBeNull();
 
@@ -194,13 +197,12 @@ describe('SceneMachine 主线推进', () => {
       's2-caption',
     ]);
 
-    expect(h.chapterEnds).toHaveLength(1);
-    expect(h.chapterEnds[0].sceneId).toBe('S10');
-    expect(h.chapterEnds[0].state.log.some((entry) => entry.summary === '第一章 到校段结束。')).toBe(
-      true,
-    );
-    expect(h.persists[h.persists.length - 1]?.completed).toBe(true);
-    expect(h.persists.filter((item) => item.completed)).toHaveLength(1);
+    expect(h.chapterEnds).toHaveLength(0);
+    expect(state.log.some((entry) => entry.summary === '第一章 到校段结束。')).toBe(true);
+    expect(h.persists[h.persists.length - 1]).toMatchObject({
+      snapshot: { sceneId: 'S11', ended: false }, completed: false,
+    });
+    expect(h.persists.filter((item) => item.completed)).toHaveLength(0);
   });
 
   it('S7 不捡药袋 + S9 不看手机：trust 为 0，phoneIgnored 累计 4', () => {
@@ -238,8 +240,9 @@ describe('SceneMachine 主线推进', () => {
     expect(h.intertitles).toHaveLength(1);
     expect(h.intertitles[0].stepId).toBe('s10-days');
     h.machine.onDialogueEnd('s10-days');
-    expect(h.machine.isEnded()).toBe(true);
-    expect(h.chapterEnds[0].sceneId).toBe('S10');
+    expect(h.machine.getSceneId()).toBe('S11');
+    expect(h.machine.isEnded()).toBe(false);
+    expect(h.dialogues[h.dialogues.length - 1].stepId).toBe('s11-roommate');
 
     const state = h.machine.getState();
     expect(state).toMatchObject({
@@ -252,7 +255,7 @@ describe('SceneMachine 主线推进', () => {
     });
     expect(state.log.some((entry) => entry.summary === '没有捡药袋。')).toBe(true);
     expect(state.log.some((entry) => entry.summary === '没有看手机上的未读消息。')).toBe(true);
-    expect(h.chapterEnds).toHaveLength(1);
+    expect(h.chapterEnds).toHaveLength(0);
   });
 
   it('S4 触发点只生效一次，重复事件不重复累加', () => {
@@ -436,7 +439,7 @@ describe('SceneMachine Phase A 观察、照片与字幕', () => {
     expect(h.machine.getSnapshot()).toEqual(afterClose);
   });
 
-  it('S10 字幕只响应正确 ui:dialogueEnd，完成回执与章节结尾均幂等', () => {
+  it('S10 字幕只响应正确 ui:dialogueEnd，进入 S11 后忽略迟到的 S10 事件', () => {
     const h = createHarness();
     h.machine.startNew('S10', 'bystander');
     expect(chapter1.scenes.S10).toBeDefined();
@@ -458,15 +461,130 @@ describe('SceneMachine Phase A 观察、照片与字幕', () => {
     expect(h.persists.filter((item) => item.completed)).toHaveLength(0);
 
     h.machine.onDialogueEnd('s10-days');
-    expect(h.machine.isEnded()).toBe(true);
-    expect(h.chapterEnds).toHaveLength(1);
-    expect(h.chapterEnds[0]).toMatchObject({ chapterId: 'ch1', sceneId: 'S10' });
-    expect(h.persists.filter((item) => item.completed)).toHaveLength(1);
-    const ended = h.machine.getSnapshot();
+    expect(h.machine.getSnapshot()).toMatchObject({ sceneId: 'S11', stepIndex: 0, ended: false });
+    expect(h.dialogues[h.dialogues.length - 1].stepId).toBe('s11-roommate');
+    expect(h.chapterEnds).toHaveLength(0);
+    expect(h.persists.filter((item) => item.completed)).toHaveLength(0);
+    const entered = h.machine.getSnapshot();
+    const persistCount = h.persists.length;
+    const changeCount = h.stateChanges.length;
     h.machine.onDialogueEnd('s10-days');
+    h.machine.onEnterZone('S10', 'building-entrance');
+    h.machine.onGazeHotspot('S10', 'phone-behind');
+    h.machine.onInteract('S10', 'phone');
+    expect(h.machine.getSnapshot()).toEqual(entered);
+    expect(h.dialogues).toHaveLength(1);
+    expect(h.stateChanges).toHaveLength(changeCount);
+    expect(h.chapterEnds).toHaveLength(0);
+    expect(h.persists).toHaveLength(persistCount);
+  });
+});
+
+describe('SceneMachine 小游戏结算', () => {
+  // 单场景夹具隔离结算公式，避免真实剧本的分支与额外加值干扰。
+  function settlementHarness(game: 'bubble' | 'crystal' = 'crystal'): Harness {
+    return createHarness({
+      id: 'ch1', title: '小游戏结算测试', startScene: 'S1', characters: chapter1.characters,
+      scenes: {
+        S1: {
+          id: 'S1', sceneKey: 'stage2d', title: '结算', transitions: [],
+          steps: [
+            { kind: 'minigame', id: 'settlement', game },
+            { kind: 'minigame', id: 'settlement-next', game: 'bubble' },
+            { kind: 'caption', id: 'settlement-caption', text: '结算完成' },
+            { kind: 'end', id: 'settlement-end' },
+          ],
+        },
+      },
+    });
+  }
+
+  describe.each(['bubble', 'crystal'] as const)('%s 公式 min(hits,8)-min(floor(kills/5),4)', (game) => {
+    it.each([
+      [0, 0, 0],
+      [3, 4, 3],
+      [3, 5, 2],
+      [3, 9, 2],
+      [3, 10, 1],
+      [7, 19, 4],
+      [8, 20, 4],
+      [9, 25, 4],
+      [30, 0, 8],
+      [0, 100, -4],
+    ])('hits=%i kills=%i 时 harm 增量为 %i', (hits, kills, delta) => {
+      const h = settlementHarness(game);
+      h.machine.startNew('S1', 'bystander');
+      const before = h.machine.getState();
+      const changes = h.stateChanges.length;
+      h.machine.onMinigameEnd('settlement', hits, kills, 2);
+      const after = h.machine.getState();
+      expect(after.harm).toBe(before.harm + delta);
+      expect(after.log).toHaveLength(before.log.length + 1);
+      expect(after.log[after.log.length - 1]).toMatchObject({ sceneId: 'S1', type: 'choice' });
+      expect(after).toMatchObject(game === 'crystal'
+        ? { crystalHits: hits, kills, stage1Tries: 2, helpedByAyuan: false }
+        : { crystalHits: 0, kills: 0, stage1Tries: 0, helpedByAyuan: false });
+      expect(h.machine.getSnapshot()).toMatchObject({ stepIndex: 1, ended: false });
+      expect(h.stateChanges).toHaveLength(changes + 1);
+      expect(h.chapterEnds).toHaveLength(0);
+    });
+  });
+
+  it('水晶结算保留原始计数、继承 joined，省略 tries 时为 0', () => {
+    const h = settlementHarness();
+    h.machine.continueFrom(createEmptyChapterSave({
+      state: { ...createInitialStoryState(), joined: true, stage1Tries: 7 },
+    }));
+    h.machine.onMinigameEnd('settlement', 12, 30);
+    expect(h.machine.getState()).toMatchObject({
+      harm: 24, crystalHits: 12, kills: 30, stage1Tries: 0, helpedByAyuan: true,
+    });
+  });
+
+  describe.each(['hits', 'kills', 'tries'] as const)('非法 %s', (field) => {
+    it.each([NaN, -1, 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1])('%s 不改变状态、日志或步骤，随后仍可正常结算', (invalid) => {
+      const h = settlementHarness();
+      h.machine.startNew('S1', 'bystander');
+      const before = h.machine.getSnapshot();
+      const changes = h.stateChanges.length;
+      const persists = h.persists.length;
+      const values = { hits: 3, kills: 5, tries: 2, [field]: invalid };
+      h.machine.onMinigameEnd('settlement', values.hits, values.kills, values.tries);
+      expect(h.machine.getSnapshot()).toEqual(before);
+      expect(h.stateChanges).toHaveLength(changes);
+      expect(h.persists).toHaveLength(persists);
+      expect(h.chapterEnds).toHaveLength(0);
+      h.machine.onMinigameEnd('settlement', 3, 5, 2);
+      expect(h.machine.getSnapshot()).toMatchObject({ stepIndex: 1, state: { harm: 22 } });
+    });
+  });
+
+  it('错误步骤、后续小游戏中的过期回调、非小游戏步骤及结束后的重复回调均无效', () => {
+    const h = settlementHarness();
+    h.machine.startNew('S1', 'bystander');
+    const before = h.machine.getSnapshot();
+    h.machine.onMinigameEnd('outdated', 8, 0, 1);
+    expect(h.machine.getSnapshot()).toEqual(before);
+    h.machine.onMinigameEnd('settlement', 3, 5, 2);
+    const settled = h.machine.getSnapshot();
+    const changes = h.stateChanges.length;
+    h.machine.onMinigameEnd('settlement', 8, 0, 9);
+    expect(h.machine.getSnapshot()).toEqual(settled);
+    expect(h.stateChanges).toHaveLength(changes);
+    h.machine.onMinigameEnd('settlement-next', 0, 0);
+    const caption = h.machine.getSnapshot();
+    h.machine.onMinigameEnd('settlement-next', 8, 0);
+    h.machine.onMinigameEnd('settlement-caption', 8, 0);
+    expect(h.machine.getSnapshot()).toEqual(caption);
+    expect(h.captions).toHaveLength(1);
+    h.machine.onDialogueEnd('settlement-caption');
+    const ended = h.machine.getSnapshot();
+    const finalChanges = h.stateChanges.length;
+    h.machine.onMinigameEnd('settlement-next', 8, 0);
     expect(h.machine.getSnapshot()).toEqual(ended);
+    expect(h.stateChanges).toHaveLength(finalChanges);
     expect(h.chapterEnds).toHaveLength(1);
-    expect(h.persists.filter((item) => item.completed)).toHaveLength(1);
+    expect(h.persists.filter(({ completed }) => completed)).toHaveLength(1);
   });
 });
 

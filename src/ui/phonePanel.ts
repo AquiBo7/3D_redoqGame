@@ -10,6 +10,7 @@ import './phonePanel.css';
 type ChatSection = Extract<PhoneSection, { kind: 'chat' }>;
 type AlarmSection = Extract<PhoneSection, { kind: 'alarm' }>;
 type PhotoSection = Extract<PhoneSection, { kind: 'photo' }>;
+type PostSection = Extract<PhoneSection, { kind: 'post' }>;
 
 export interface PhonePanelCallbacks {
   onAction: (panelId: string, action: 'close' | 'reply', optionId?: string) => void;
@@ -230,6 +231,10 @@ export class PhonePanelView {
         list.append(this.createPhotoCard(section));
         continue;
       }
+      if (section.kind === 'post') {
+        list.append(this.createPostCard(section));
+        continue;
+      }
       list.append(this.createSectionRow(section));
     }
 
@@ -264,7 +269,7 @@ export class PhonePanelView {
     return card;
   }
 
-  private createSectionRow(section: Exclude<PhoneSection, { kind: 'alarm' | 'notice' | 'photo' }>): HTMLButtonElement {
+  private createSectionRow(section: Exclude<PhoneSection, { kind: 'alarm' | 'notice' | 'photo' | 'post' }>): HTMLButtonElement {
     const row = createButton('phone__row', '');
     const isChat = section.kind === 'chat';
     const icon = createElement(
@@ -361,6 +366,9 @@ export class PhonePanelView {
       case 'photo':
         this.body.append(this.createPhotoCard(section));
         break;
+      case 'post':
+        this.body.append(this.createPostCard(section));
+        break;
     }
   }
 
@@ -368,6 +376,86 @@ export class PhonePanelView {
     if (section.kind === 'notice') return '通知';
     if (section.kind === 'alarm') return '闹钟';
     return section.title;
+  }
+
+  private createPostCard(section: PostSection): HTMLElement {
+    const card = createElement('article', 'phone__post');
+    card.append(
+      createElement('h3', 'phone__post-title', section.title),
+      createElement('p', 'phone__post-time', section.publishedAt),
+    );
+    if (section.deleted) {
+      card.className += ' phone__post--deleted';
+      card.append(createElement('p', 'phone__post-placeholder', '该帖子已删除'));
+      return card;
+    }
+
+    card.append(createElement('p', 'phone__post-text', section.text));
+    const images = createElement('div', 'phone__post-images');
+    for (const assetId of section.assetIds) {
+      const image = renderAssetImage(assetId as AssetId, images);
+      image.draggable = false;
+    }
+    if (section.assetIds.length > 0) card.append(images);
+    card.append(createElement('p', 'phone__post-stats', `浏览 ${section.views} · 评论 ${section.commentCount}`));
+
+    const comments = createElement('ol', 'phone__post-comments');
+    comments.setAttribute('aria-label', '跟评');
+    const byId = new Map(section.comments.map((comment) => [comment.id, comment]));
+    const rendered = new Set<string>();
+    const appendComment = (comment: PostSection['comments'][number], container: HTMLElement): void => {
+      if (rendered.has(comment.id)) return;
+      rendered.add(comment.id);
+      const item = createElement('li', 'phone__post-comment');
+      item.setAttribute('data-comment-id', comment.id);
+      item.append(createElement('span', 'phone__post-author', comment.author));
+      const parent = comment.replyTo ? byId.get(comment.replyTo) : undefined;
+      if (parent) item.append(createElement('span', 'phone__post-reply-to', `回复 ${parent.author}`));
+      if (comment.actionId) {
+        const button = this.createPostAction(section, comment.actionId, comment.text);
+        button.setAttribute('aria-label', `查看${comment.author}的跟评：${comment.text}`);
+        item.append(button);
+      } else {
+        item.append(createElement('p', 'phone__post-text', comment.text));
+      }
+      item.append(createElement('span', 'phone__post-likes', `赞 ${comment.likes}`));
+      const replies = createElement('ol', 'phone__post-comments phone__post-comments--nested');
+      for (const reply of section.comments) {
+        if (reply.replyTo === comment.id) appendComment(reply, replies);
+      }
+      if (replies.children.length > 0) item.append(replies);
+      container.append(item);
+    };
+    for (const comment of section.comments) {
+      if (!comment.replyTo || !byId.has(comment.replyTo)) appendComment(comment, comments);
+    }
+    // 缺失父评论或循环引用不应吞掉内容，也不能无限递归。
+    for (const comment of section.comments) appendComment(comment, comments);
+    card.append(comments);
+
+    if (section.actions?.length) {
+      const actions = createElement('div', 'phone__post-actions');
+      for (const option of section.actions) {
+        actions.append(this.createPostAction(section, option.id, option.text));
+      }
+      card.append(actions);
+    }
+    return card;
+  }
+
+  private createPostAction(section: PostSection, actionId: string, text: string): HTMLButtonElement {
+    const button = createButton('phone__post-action', text);
+    button.setAttribute('data-post-action', actionId);
+    button.addEventListener('click', () => {
+      const panel = this.panel;
+      // 关闭、重开或切页后，旧节点不得把动作发给当前面板。
+      if (!panel?.sections.includes(section) || section.deleted || !this.isOpen()
+        || this.photo || !this.body.contains(button)) return;
+      this.refreshShortcutCooldown();
+      // 不应用 effects、不增改赞数、不发心声；全部交给 core trigger。
+      this.callbacks.onAction(panel.id, 'reply', actionId);
+    });
+    return button;
   }
 
   private createPhotoCard(section: PhotoSection): HTMLElement {

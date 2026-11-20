@@ -2,12 +2,12 @@
 // 保证 wait 步骤 / 触发器的目标 id 真实存在于对应场景定义中，防止剧情推进死锁；
 // 保证 cutscene key 均在过场播放器支持列表内。
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { posePiggybackPassenger } from './characterAnimation';
 import { chapter1 } from '../data/story';
 import type { SceneId, SceneKey, StoryStep } from '../data/storySchema';
-import { getSceneDefinition, getSceneRuntime } from './index';
+import { getSceneDefinition, getSceneRuntime, prepareSceneModule } from './index';
 import { CHARACTER_MODELS } from './modelManifest';
 
 const configuredSceneIds = Object.keys(chapter1.scenes) as SceneId[];
@@ -31,8 +31,13 @@ const EXPECTED_SCENE_KEYS: Partial<Record<SceneId, SceneKey>> = {
   S7: 'desk',
   S8: 'building',
   S9: 'building',
-  S10: 'stage2d',
+  S10: 'stage2d', S11: 'stage2d', S12: 'canteen', S13: 'canteen',
+  S14: 'stage2d', C1: 'stage2d', E1: 'stage2d',
 };
+
+beforeAll(async () => {
+  await Promise.all(configuredSceneIds.map(prepareSceneModule));
+});
 
 describe('背负姿态', () => {
   it('模型仍在占位时等待骨骼加载', () => {

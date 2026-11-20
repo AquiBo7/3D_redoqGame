@@ -13,7 +13,7 @@ import { sampleGroundHeight } from './navMath';
 import type { EventBus } from '../core/eventBus';
 import { eventBus as defaultEventBus } from '../core/eventBus';
 import type { SceneId, SceneKey } from '../data/storySchema';
-import { getSceneDefinition, getSceneRuntime } from '../scenes3d';
+import { getSceneDefinition, getSceneRuntime, isSceneModuleReady, prepareSceneModule } from '../scenes3d';
 import {
   createContactShadowDisc,
   disposeMaterialCache,
@@ -350,7 +350,7 @@ export class WorldApp {
 
     // 场景装载（注册表按 sceneId → sceneKey）；实际建场交给 mountInitialScene：
     // 房间（requiredModels 为空）同步建好，需要角色的直达场景等预载完成后再建（黑幕期间）
-    this.currentDefinition = getSceneDefinition(this.currentSceneId);
+    this.currentDefinition = getSceneDefinition(isSceneModuleReady(this.currentSceneId) ? this.currentSceneId : 'S10');
 
     this.debugOverlay = options.debug ? new DebugOverlay(this.scene) : null;
 
@@ -507,6 +507,19 @@ export class WorldApp {
    * 直达 S4/S5/S7/S8 等需要角色的场景，保持黑幕等待预载（≤8s），完成后再建场并淡入。
    */
   private mountInitialScene(): void {
+    if (!isSceneModuleReady(this.currentSceneId)) {
+      const sceneId = this.currentSceneId;
+      const token = ++this.transitionToken;
+      this.controller.setTransitionLocked(true);
+      void prepareSceneModule(sceneId).then(() => {
+        if (this.disposed || token !== this.transitionToken || this.currentSceneId !== sceneId) return;
+        this.currentDefinition = getSceneDefinition(sceneId);
+        this.mountInitialScene();
+        this.controller.setTransitionLocked(false);
+        this.tryInitialFade();
+      });
+      return;
+    }
     const definition = this.currentDefinition;
     const ids = definition.requiredModels ?? [];
     if (ids.length === 0) {
@@ -594,6 +607,16 @@ export class WorldApp {
     this.runtimeContextToken += 1;
     this.resetMotionAudio();
     this.currentSceneId = payload.toSceneId;
+    if (!isSceneModuleReady(payload.toSceneId)) {
+      const token = ++this.transitionToken;
+      this.controller.setTransitionLocked(true);
+      this.currentRuntime?.exit();
+      void prepareSceneModule(payload.toSceneId).then(() => {
+        if (this.disposed || token !== this.transitionToken || this.currentSceneId !== payload.toSceneId) return;
+        this.handleSceneTransition(payload);
+      });
+      return;
+    }
     const definition = getSceneDefinition(payload.toSceneId);
 
     if (definition.sceneKey === this.currentDefinition.sceneKey) {

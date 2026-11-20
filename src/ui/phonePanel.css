@@ -587,6 +587,87 @@ button.phone__row:active {
   text-align: center;
 }
 
+/* 校园墙帖子直接呈现在主页，不隐藏在需要猜测的入口后。 */
+.phone__post {
+  min-width: 0;
+  padding: 14px;
+  border-left: 2px solid rgba(176, 211, 222, 0.4);
+  background: rgba(255, 255, 255, 0.045);
+  color: #e8edf0;
+  overflow-wrap: anywhere;
+}
+
+.phone__post-title {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+.phone__post-time,
+.phone__post-stats,
+.phone__post-reply-to,
+.phone__post-likes {
+  color: #aab8c2;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.phone__post-time { margin: 4px 0 12px; }
+.phone__post-stats { margin: 12px 0; }
+.phone__post-text { margin: 6px 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
+.phone__post-images { display: grid; gap: 8px; margin-top: 12px; }
+.phone__post-images img { display: block; width: 100%; height: auto; }
+
+.phone__post-comments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.phone__post-comment {
+  min-width: 0;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.phone__post-author { font-size: 13px; color: #cbe6ee; }
+.phone__post-reply-to { display: block; }
+.phone__post-likes { display: block; margin-top: 4px; }
+.phone__post-comments--nested {
+  margin-top: 10px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(176, 211, 222, 0.2);
+}
+
+/* 深层跟评不继续压缩窄屏的可读宽度。 */
+.phone__post-comments--nested .phone__post-comments--nested { padding-left: 0; border-left: 0; }
+.phone__post-actions { display: grid; gap: 8px; margin-top: 12px; }
+.phone__post-action {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid rgba(176, 211, 222, 0.25);
+  background: rgba(176, 211, 222, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.phone__post-comment > .phone__post-action { margin-top: 6px; }
+.phone__post-action:active { background: rgba(176, 211, 222, 0.15); }
+.phone__post-action:focus-visible { outline: 2px solid #dfd0a6; outline-offset: 2px; }
+.phone__post--deleted { background: #252b30; border-color: #687078; color: #bac0c5; }
+.phone__post-placeholder { margin: 0; padding: 28px 0; text-align: center; font-size: 14px; }
+
 /* 合照卡片与独立图片模态：不改变手机主页的滚动位置。 */
 .phone__photo-card {
   padding: 14px;

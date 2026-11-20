@@ -126,6 +126,8 @@ export function initLiteWorld(options: LiteWorldOptions = {}): LiteWorldHandle {
 
   function renderScene(): void {
     const model = buildLiteSceneModel(currentSceneId);
+    const chapterNumber = currentSceneId.startsWith('E') ? 5 : currentSceneId.startsWith('D') ? 4 : currentSceneId.startsWith('C') ? 3 : Number(currentSceneId.slice(1)) >= 10 ? 2 : 1;
+    badges.firstElementChild!.textContent = ['第一章 · 到校', '第二章 · 一张照片', '第三章 · 第二天', '第四章 · 对峙', '第五章 · 回望'][chapterNumber - 1];
     title.textContent = model.title;
     stage.textContent = model.stage;
 
@@ -258,15 +260,7 @@ export function initLiteWorld(options: LiteWorldOptions = {}): LiteWorldHandle {
       updateMemory(state);
     }),
 
-    bus.on('ui:showIntertitle', () => setBlocked(true)),
-    bus.on('ui:showDialogue', () => setBlocked(true)),
-    bus.on('ui:showPhone', () => setBlocked(true)),
-    bus.on('ui:showChoices', () => setBlocked(true)),
-    bus.on('ui:dialogueEnd', () => setBlocked(false)),
-    bus.on('ui:chooseOption', () => setBlocked(false)),
-    bus.on('ui:phoneAction', ({ action }) => {
-      if (action === 'close' || action === 'ignore') setBlocked(false);
-    }),
+    bus.on('ui:worldBlocked', ({ blocked: value }) => setBlocked(value)),
 
     bus.on('game:chapterEnd', () => {
       clearCutscene();

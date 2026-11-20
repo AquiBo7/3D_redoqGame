@@ -1,4 +1,16 @@
-// data/story.ts —— 章节数据汇总出口
-// 后续章节在此追加导出，core 不关心具体章节内容。
+import { chapter1 as arrival } from './story.ch1';
+import { chapter2Scenes } from './story.ch2';
+import { chapter3Scenes } from './story.ch3';
+import { endingScene } from './story.ending';
+import type { ChapterStory } from './storySchema';
 
-export { chapter1 } from './story.ch1';
+export const chapter1: ChapterStory = {
+  ...arrival,
+  scenes: {
+    ...arrival.scenes,
+    S10: { ...arrival.scenes.S10!, transitions: [{ to: 'S11' }] },
+    ...chapter2Scenes,
+    ...chapter3Scenes,
+    E1: endingScene,
+  },
+};

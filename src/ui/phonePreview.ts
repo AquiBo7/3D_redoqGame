@@ -3,7 +3,7 @@
 // 便于单独开发手机 UI：顶部切换面板，左下角实时打印回传的 ui:phoneAction 参数。
 // 边界：纯展示层，不 import three、不修改 core 逻辑。
 
-import { chapter1 } from '../data/story.ch1';
+import { chapter1 } from '../data/story';
 import type { PhonePanel, SceneId } from '../data/storySchema';
 import type { EventBus } from '../core/eventBus';
 import { eventBus as defaultEventBus } from '../core/eventBus';

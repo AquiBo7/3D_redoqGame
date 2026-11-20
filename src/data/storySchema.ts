@@ -132,6 +132,15 @@ export interface PhoneReplyOption {
   effects?: StoryEffect;
 }
 
+export interface PhonePostComment {
+  id: string;
+  author: string;
+  text: string;
+  likes: number;
+  replyTo?: string;
+  actionId?: string;
+}
+
 export type PhoneSection =
   | { kind: 'alarm'; id: string; label: string; dismissed: boolean }
   | {
@@ -151,6 +160,13 @@ export type PhoneSection =
       hotspot?: { x: number; y: number; width: number; height: number };
       likeActionId?: string;
       noticeActionId?: string;
+    }
+  | {
+      kind: 'post'; id: string; title: string; publishedAt: string;
+      assetIds: string[]; views: number; commentCount: number;
+      text: string; comments: PhonePostComment[];
+      actions?: PhoneReplyOption[];
+      deleted?: boolean;
     }
   | { kind: 'notice'; id: string; text: string };
 
@@ -260,7 +276,7 @@ export interface SceneTrigger {
   once?: boolean;
   effects?: StoryEffect;
   /** 客观观察字幕（不占心声字幕名额） */
-  reveal?: { text: string; durationMs?: number };
+  reveal?: { text: string; durationMs?: number; kind?: 'inner' | 'observation' };
 }
 
 export interface TransitionRule {

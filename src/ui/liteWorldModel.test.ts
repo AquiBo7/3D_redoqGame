@@ -79,7 +79,7 @@ describe('liteWorldModel 降级场景契约', () => {
     expect(model.onward).toMatchObject({ kind: 'zone', id: 'building-entrance' });
   });
 
-  it('S10 使用入学舞台与字幕契约，未配置 S11 不生成虚构降级节点', () => {
+  it('S10 使用入学字幕契约，第二章宿舍与食堂提供真实降级节点', () => {
     const scene = sceneOf('S10');
     const model = buildLiteSceneModel('S10');
     expect(model.title).toBe('入学几天');
@@ -88,8 +88,10 @@ describe('liteWorldModel 降级场景契约', () => {
     if (step.kind !== 'intertitle') throw new Error('S10 必须使用字幕');
     expect(step).toMatchObject({ id: 's10-days', lineDurationMs: 2000, skippable: true });
     expect(step.lines).toHaveLength(7);
-    expect(chapter1.scenes.S11).toBeUndefined();
-    expect(() => buildLiteSceneModel('S11')).toThrow('未配置降级场景 S11');
+    expect(buildLiteSceneModel('S11')).toMatchObject({ id: 'S11', title: '宿舍 · 室友递来手机' });
+    expect(buildLiteSceneModel('S12').actions.map((action) => action.id)).toEqual(
+      expect.arrayContaining(['window-three', 'canteen-whisper-1', 'canteen-whisper-2', 'canteen-whisper-3']),
+    );
   });
 
   it('纯过场或字幕场景不产生多余按钮（S2 / S6 / S9 / S10）', () => {

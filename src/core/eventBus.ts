@@ -40,6 +40,9 @@ export interface GameEvents {
     optionId?: string;
   };
   'ui:dialogueEnd': { stepId: string };
+  'ui:minigameEnd': { stepId: string; hits: number; kills: number; tries?: number };
+  'ui:worldBlocked': { blocked: boolean };
+  'ui:restoreCheckpoint': { key: 'ch2_canteen' | 'ch3_morning' | 'ch4_platform' };
 
   // Core → 外部
   'scene:transition': {
@@ -60,6 +63,8 @@ export interface GameEvents {
     lines: DialogueLine[];
     speakerNames: Record<string, string>;
   };
+  'ui:showMinigame': { stepId: string; game: 'bubble' | 'crystal'; joined: boolean; tries: number };
+  'ui:showArt': { stepId: string; assetId: string };
   'ui:showIntertitle': { stepId: string; lines: string[]; lineDurationMs: number; skippable: boolean };
   'ui:showPhone': { stepId: string; panel: PhonePanel };
   'ui:hidePhone': { phoneId: string };

@@ -80,7 +80,9 @@ async function checkPhoto(mobile) {
   assert.equal(await page.locator('.intertitle__line').textContent(), '入学第三天，你记住了室友的名字。');
   await page.locator('.intertitle__skip').click();
   await page.waitForFunction(() => document.querySelector('.intertitle').hidden);
-  assert.equal(await page.evaluate(() => window.__v05.events.filter(event => event.name === 'game:chapterEnd').length), 1);
+  assert.equal(await page.evaluate(() => window.__v05.events.filter(event => event.name === 'game:chapterEnd').length), 0);
+  await page.locator('.dialogue:not([hidden])').waitFor();
+  assert.ok(await page.evaluate(() => window.__v05.events.some(event => event.name === 'scene:transition' && event.payload.toSceneId === 'S11')));
   await context.close();
   report.checks.push(`S9 合照解码、热点、点赞幂等、返回焦点、48px安全区及S10跳过：${mobile ? '竖屏与横屏' : '桌面'}`);
 }

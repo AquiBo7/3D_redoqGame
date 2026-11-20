@@ -1,7 +1,7 @@
 // ui/liteWorldModel.ts —— 2D 降级模式的纯数据推导（无 DOM / 无 three）
 // 场景舞台描写、可交互卡片与过场文案均在此维护；liteWorld 只负责渲染与事件回发。
 
-import { chapter1 } from '../data/story.ch1';
+import { chapter1 } from '../data/story';
 import type { SceneId } from '../data/storySchema';
 
 export interface LiteAction {
@@ -34,12 +34,16 @@ const SCENE_STAGE: Partial<Record<SceneId, string>> = {
 };
 
 const ZONE_LABELS: Record<string, { label: string; hint: string }> = {
+  'canteen-whisper-1': { label: '经过靠窗的餐桌', hint: '几个人正在看手机' },
+  'canteen-whisper-2': { label: '走过中间的队伍', hint: '低语声停了一下' },
+  'canteen-whisper-3': { label: '走近取餐窗口', hint: '前面的人抬起头' },
   stairs: { label: '沿街道向前走', hint: '校门就在街道尽头' },
   'school-gate': { label: '穿过校门', hint: '台阶上的人群就在前面' },
   'building-entrance': { label: '走到 A 栋楼下', hint: '陪林夏走完这段路' },
 };
 
 const INTERACT_LABELS: Record<string, { label: string; hint: string }> = {
+  'window-three': { label: '在三号窗口打饭', hint: '端起餐盘' },
   phone: { label: '拿起枕边手机', hint: '看看几点了' },
   'culture-shirt': { label: '带上文化衫', hint: '椅背上的新生文化衫' },
   'document-bag': { label: '拿上证件袋', hint: '桌上的证件袋' },
@@ -110,6 +114,10 @@ export function buildLiteSceneModel(sceneId: SceneId): LiteSceneModel {
   }
 
   for (const trigger of scene.triggers ?? []) {
+    if (trigger.event === 'scene:enterZone' && trigger.target) {
+      const info = pickLabel(ZONE_LABELS, trigger.target, '走近 ');
+      pushAction({ kind: 'zone', id: trigger.target, label: info.label, hint: info.hint });
+    }
     if (trigger.event === 'scene:interact' && trigger.target) {
       const info = pickLabel(INTERACT_LABELS, trigger.target, '操作 ');
       pushAction({ kind: 'interact', id: trigger.target, label: info.label, hint: info.hint });

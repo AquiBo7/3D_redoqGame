@@ -11,10 +11,14 @@ import {
   CHAPTER_SAVE_VERSION,
   clearChapterSave,
   loadChapterSave,
+  loadCheckpoint,
+  saveCheckpoint,
+  unlockAchievement,
+  unlockEnding,
   resetMetaProgress as resetMetaProgressStore,
   saveChapterSave,
 } from './saveStore';
-import type { StorageLike } from './saveStore';
+import type { ChapterSave, CheckpointKey, StorageLike } from './saveStore';
 import type { MetaProgress, StoryState } from './state';
 import { parseUrlParams } from './urlParams';
 import type { UrlParams } from './urlParams';
@@ -43,6 +47,7 @@ export class GameEngine {
   private readonly storage: StorageLike | null | undefined;
   private readonly now: () => number;
   private readonly machine: SceneMachine;
+  private readonly chapter: ChapterStory;
 
   private autoSave = true;
   private debugSession = false;
@@ -56,8 +61,9 @@ export class GameEngine {
     this.storage = options.storage;
     this.now = options.now ?? (() => Date.now());
 
+    this.chapter = options.chapter ?? chapter1;
     this.machine = new SceneMachine({
-      chapter: options.chapter ?? chapter1,
+      chapter: this.chapter,
       bus: this.bus,
       now: this.now,
       onPersist: (snapshot, completed) => this.persist(snapshot, completed),
@@ -71,6 +77,8 @@ export class GameEngine {
     this.unsubscribers.push(
       this.bus.on('game:start', () => this.startNewGame()),
       this.bus.on('ui:continueGame', () => this.continueGame()),
+      this.bus.on('ui:restoreCheckpoint', ({ key }) => this.restoreCheckpoint(key)),
+      this.bus.on('ui:minigameEnd', ({ stepId, hits, kills, tries }) => this.machine.onMinigameEnd(stepId, hits, kills, tries)),
       this.bus.on('scene:enterZone', ({ sceneId, zoneId }) => {
         this.machine.onEnterZone(sceneId, zoneId);
       }),
@@ -121,7 +129,19 @@ export class GameEngine {
     this.autoSave = true;
     this.debugSession = false;
     this.started = true;
-    this.machine.continueFrom(save);
+    const next = this.chapter.scenes[save.sceneId]?.transitions[0];
+    const legacyEnd = save.completed && !save.state.ending && (save.sceneId === 'S9' || save.sceneId === 'S10') && next && !next.when;
+    this.machine.continueFrom(legacyEnd ? { ...save, sceneId: next.to, completed: false } : save);
+  }
+
+  restoreCheckpoint(key: CheckpointKey): boolean {
+    const save = loadCheckpoint(key, this.storage);
+    if (!save) return false;
+    this.autoSave = true;
+    this.debugSession = false;
+    this.started = true;
+    this.machine.continueFrom({ ...save, completed: false });
+    return true;
   }
 
   /** 调试跳关：进入隔离会话，不读写玩家正式单局存档 */
@@ -173,17 +193,19 @@ export class GameEngine {
 
   private persist(snapshot: MachineSnapshot, completed: boolean): void {
     if (!this.autoSave) return;
-    saveChapterSave(
-      {
-        version: CHAPTER_SAVE_VERSION,
-        chapterId: 'ch1',
-        savedAt: this.now(),
-        sceneId: snapshot.sceneId,
-        role: snapshot.role,
-        state: snapshot.state,
-        completed,
-      },
-      this.storage,
-    );
+    const save: ChapterSave = {
+      version: CHAPTER_SAVE_VERSION, chapterId: 'ch1', savedAt: this.now(),
+      sceneId: snapshot.sceneId, role: snapshot.role, state: snapshot.state, completed,
+    };
+    saveChapterSave(save, this.storage);
+    if (completed && snapshot.state.ending === 'joined') {
+      unlockEnding('joined', this.storage);
+      unlockAchievement('A5', this.storage);
+    }
+    const checkpoints: Partial<Record<SceneId, CheckpointKey>> = {
+      S12: 'ch2_canteen', C1: 'ch3_morning', D1: 'ch4_platform',
+    };
+    const key = checkpoints[snapshot.sceneId];
+    if (key && !completed) saveCheckpoint(key, save, this.storage);
   }
 }

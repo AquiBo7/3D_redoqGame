@@ -1,0 +1,177 @@
+.bubble-game {
+  --bubble-ink: #e8e6d9;
+  --bubble-muted: #b3c4ca;
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: max(18px, env(safe-area-inset-top, 0px))
+    max(20px, env(safe-area-inset-right, 0px))
+    calc(48px + env(safe-area-inset-bottom, 0px))
+    max(20px, env(safe-area-inset-left, 0px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  color: var(--bubble-ink);
+  background: radial-gradient(ellipse at 50% 35%, #263c48, #0b1521 85%);
+  font-family: 'Noto Sans SC', sans-serif;
+  isolation: isolate;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bubble-game *,
+.bubble-game *::before,
+.bubble-game *::after { box-sizing: border-box; }
+
+.bubble-game__header {
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 0 0 14px;
+}
+
+.bubble-game__eyebrow {
+  color: #d0be8d;
+  font-size: 10px;
+  letter-spacing: 0.38em;
+}
+
+.bubble-game__heading {
+  margin: 7px 0;
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(22px, 3.6vw, 32px);
+  font-weight: 400;
+  letter-spacing: 0.18em;
+}
+
+.bubble-game__status {
+  margin: 0;
+  color: var(--bubble-muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  line-height: 1.6;
+}
+
+.bubble-game__field {
+  position: relative;
+  flex: 1 0 160px;
+  min-height: 160px;
+  width: min(100%, 1040px);
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgb(179 198 202 / 18%);
+  border-radius: 20px;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 24%), inset 0 0 80px rgb(0 0 0 / 10%);
+}
+
+.bubble-game__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.bubble-game__panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+  background: linear-gradient(180deg, rgb(13 25 36 / 64%), rgb(17 33 43 / 91%));
+}
+
+.bubble-game__panel[hidden] { display: none; }
+
+.bubble-game__panel-title {
+  margin: 0;
+  font-family: 'Noto Serif SC', serif;
+  font-size: clamp(18px, 3vw, 25px);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-wrap: balance;
+}
+
+.bubble-game__copy {
+  max-width: 430px;
+  margin: 0;
+  color: #c2cdd0;
+  font-size: 13px;
+  line-height: 1.95;
+}
+
+.bubble-game__button {
+  min-width: 190px;
+  min-height: 48px;
+  flex-shrink: 0;
+  padding: 12px 28px;
+  border: 1px solid #d7c390;
+  border-radius: 999px;
+  color: #f3e7c7;
+  background: linear-gradient(135deg, #45514c, #2b3f43);
+  font: inherit;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: background 180ms ease, opacity 300ms ease;
+  touch-action: manipulation;
+}
+
+.bubble-game__button:hover:not(:disabled) { background: #526056; }
+.bubble-game__button:active:not(:disabled) { background: #657166; }
+.bubble-game__button:disabled { opacity: 0; pointer-events: none; }
+.bubble-game__button:focus-visible { outline: 2px solid #fff0bb; outline-offset: 5px; }
+.bubble-game__canvas:focus-visible { outline: 2px solid #c8d7d4; outline-offset: -5px; border-radius: 18px; }
+.bubble-game:focus { outline: none; }
+
+.bubble-game__hint {
+  flex: 0 0 auto;
+  margin: 12px 0 0;
+  color: var(--bubble-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+
+.bubble-game[data-mode='ending'] .bubble-game__panel,
+.bubble-game[data-mode='finished'] .bubble-game__panel {
+  background: linear-gradient(180deg, rgb(11 20 30 / 65%), rgb(11 20 30 / 94%));
+  animation: bubble-game-settle 900ms ease both;
+}
+
+@keyframes bubble-game-settle {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (orientation: portrait) {
+  .bubble-game { padding-left: max(14px, env(safe-area-inset-left, 0px)); padding-right: max(14px, env(safe-area-inset-right, 0px)); }
+  .bubble-game__field { min-height: 340px; }
+  .bubble-game__panel { padding: 24px 20px; gap: 24px; }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .bubble-game { padding-top: max(8px, env(safe-area-inset-top, 0px)); }
+  .bubble-game__header { padding-bottom: 6px; }
+  .bubble-game__eyebrow { display: none; }
+  .bubble-game__heading { margin: 0 0 3px; font-size: 19px; }
+  .bubble-game__status { font-size: 11px; }
+  .bubble-game__hint { margin-top: 6px; font-size: 10px; }
+  .bubble-game__panel { gap: 8px; padding: 12px 20px; }
+  .bubble-game__panel-title { font-size: 18px; }
+  .bubble-game__copy { max-width: 660px; font-size: 12px; line-height: 1.65; }
+  .bubble-game__button { min-height: 48px; padding: 8px 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-game__panel { animation: none !important; }
+  .bubble-game__button { transition: none; }
+}

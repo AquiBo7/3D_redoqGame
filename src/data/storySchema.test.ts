@@ -52,7 +52,7 @@ describe('全五章 schema 契约', () => {
     expect(steps.map((step) => step.kind)).toEqual(['intertitle', 'intertitle', 'minigame', 'minigame', 'art', 'goto']);
   });
 
-  it('照片包含资源、可选热区及动作标识，本阶段不引入 post', () => {
+  it('照片与帖子共享手机分区契约，照片保留可选热区与动作', () => {
     const minimal: PhoneSection = { kind: 'photo', id: 'album', title: '合照', assetId: 'future_asset' };
     const photo: PhoneSection = {
       ...minimal,
@@ -60,6 +60,6 @@ describe('全五章 schema 契约', () => {
       likeActionId: 'like-photo', noticeActionId: 'notice-photo',
     };
     expect(photo.hotspot?.width).toBe(0.1);
-    expectTypeOf<PhoneSection['kind']>().toEqualTypeOf<'alarm' | 'chat' | 'memo' | 'notice' | 'photo'>();
+    expectTypeOf<PhoneSection['kind']>().toEqualTypeOf<'alarm' | 'chat' | 'memo' | 'notice' | 'photo' | 'post'>();
   });
 });

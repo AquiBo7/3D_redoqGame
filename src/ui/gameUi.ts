@@ -41,6 +41,9 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   const disposeObjective = initObjectivePrompt(root, bus);
   const disposeVignette = initVignette(host, bus);
 
+  let minigameStepId: string | null = null;
+  let minigame: import('./minigame/bubbleGame').BubbleGame | null = null;
+  let minigameGeneration = 0;
   let intertitleBlockerId: string | null = null;
   let phoneBlockerId: string | null = null;
   let dialogueBlockerId: string | null = null;
@@ -128,6 +131,14 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     choicesBlockerId = null;
   }
 
+  function closeMinigame(): void {
+    minigameGeneration += 1;
+    minigame?.dispose();
+    minigame = null;
+    if (minigameStepId) lock.release(`minigame:${minigameStepId}`);
+    minigameStepId = null;
+  }
+
   function closeIntertitle(): void {
     intertitle.hide();
     if (intertitleBlockerId) lock.release(intertitleBlockerId);
@@ -157,6 +168,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   }
 
   function cleanupAll(): void {
+    closeMinigame();
     closeIntertitle();
     closePhone();
     closeDialogue();
@@ -167,6 +179,21 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   }
 
   const unsubscribers = [
+    bus.on('ui:showMinigame', async ({ stepId, game }) => {
+      cleanupAll();
+      minigameStepId = stepId;
+      lock.acquire(`minigame:${stepId}`);
+      const generation = minigameGeneration;
+      if (game === 'bubble') {
+        const { BubbleGame } = await import('./minigame/bubbleGame');
+        if (generation !== minigameGeneration) return;
+        minigame = new BubbleGame(root, (result) => {
+          closeMinigame();
+          bus.emit('ui:minigameEnd', { stepId, ...result });
+        });
+        minigame.show();
+      }
+    }),
     bus.on('ui:showIntertitle', (payload) => {
       cleanupAll();
       intertitleBlockerId = `intertitle:${payload.stepId}`;
@@ -176,6 +203,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     }),
 
     bus.on('ui:showPhone', ({ stepId, panel }) => {
+      closeMinigame();
       closeIntertitle();
       closePhone();
       closeDialogue();
@@ -192,6 +220,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     }),
 
     bus.on('ui:showDialogue', (payload) => {
+      closeMinigame();
       closeIntertitle();
       closePhone();
       closeChoices();
@@ -203,6 +232,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     }),
 
     bus.on('ui:showChoices', (payload) => {
+      closeMinigame();
       closeIntertitle();
       closePhone();
       closeDialogue();
@@ -243,6 +273,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
 
     dispose(): void {
       for (const unsubscribe of unsubscribers) unsubscribe();
+      closeMinigame();
       lock.releaseAll();
       lock.sync();
       lock.dispose();

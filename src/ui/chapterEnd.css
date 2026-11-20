@@ -15,6 +15,7 @@
     rgba(10, 14, 19, 0.96);
   color: #eef2f5;
   text-align: center;
+  overflow-y: auto;
   pointer-events: auto;
   animation: chapter-end-in 0.6s var(--yt-ease) both;
 }
@@ -29,7 +30,8 @@
   pointer-events: none;
 }
 
-.chapter-end[hidden] {
+.chapter-end[hidden],
+.chapter-end [hidden] {
   display: none;
 }
 
@@ -37,6 +39,13 @@
   position: relative;
   z-index: 1;
   max-width: 26em;
+  margin: auto;
+}
+
+.chapter-end__card summary {
+  min-height: 44px;
+  padding: 12px;
+  cursor: pointer;
 }
 
 .chapter-end__eyebrow {

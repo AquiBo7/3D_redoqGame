@@ -5,7 +5,10 @@ import type { SceneId, SceneKey } from '../data/storySchema';
 import type { SceneRuntime, SceneRuntimeContext, WorldSceneDefinition } from './worldSceneTypes';
 import { smoothAtmosphereProgress, WorldApp } from './WorldApp';
 
-vi.mock('../scenes3d', () => ({ getSceneDefinition: vi.fn(), getSceneRuntime: vi.fn() }));
+vi.mock('../scenes3d', () => ({
+  getSceneDefinition: vi.fn(), getSceneRuntime: vi.fn(),
+  isSceneModuleReady: () => true, prepareSceneModule: async () => {},
+}));
 vi.mock('gsap', () => ({ gsap: { to: vi.fn(), killTweensOf: vi.fn() } }));
 
 const colorKeys = ['uZenith', 'uMid', 'uHorizon', 'uBelow', 'uCloud', 'uCloudHighlight', 'uSunHighlight'];

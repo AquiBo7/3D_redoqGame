@@ -12,6 +12,19 @@ import { createGateDefinition, gateRuntime } from './gate';
 import { createRoomDefinition } from './room';
 import { createStreetDefinition, streetRuntime } from './street';
 
+let canteen: typeof import('./canteen') | null = null;
+let canteenLoad: Promise<void> | null = null;
+
+export function isSceneModuleReady(sceneId: SceneId): boolean {
+  return !['S12', 'S13'].includes(sceneId) || canteen !== null;
+}
+
+export function prepareSceneModule(sceneId: SceneId): Promise<void> {
+  if (isSceneModuleReady(sceneId)) return Promise.resolve();
+  canteenLoad ??= import('./canteen').then((module) => { canteen = module; });
+  return canteenLoad;
+}
+
 const buildNarrativeStage: WorldSceneDefinition['build'] = () => ({ occluders: [] });
 
 export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
@@ -20,6 +33,10 @@ export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
     case 'S2':
     case 'S3':
       return createRoomDefinition(sceneId);
+    case 'S12':
+    case 'S13':
+      if (!canteen) throw new Error('食堂模块尚未加载');
+      return canteen.createCanteenDefinition(sceneId);
     case 'S4':
       return createStreetDefinition(sceneId);
     case 'S5':
@@ -42,6 +59,9 @@ export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
 /** 运行时装（震动 / 演出 / 跟随 / 药袋隐藏）；同一 sceneKey 共享同一实例 */
 export function getSceneRuntime(sceneId: SceneId): SceneRuntime | null {
   switch (sceneId) {
+    case 'S12':
+    case 'S13':
+      return canteen?.canteenRuntime ?? null;
     case 'S4':
       return streetRuntime;
     case 'S5':
