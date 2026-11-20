@@ -136,6 +136,11 @@ export class SceneMachine {
     this.emitStateChanged(triggered);
 
     const step = this.currentStep();
+    if (step?.kind === 'choice' && step.allowMovement) {
+      const option = step.options.find((item) => item.interactId === targetId && evaluateCondition(item.when, this.state, this.role));
+      if (option) this.onChooseOption(step.id, option.id);
+      return;
+    }
     if (
       step?.kind === 'wait' &&
       'interactId' in step.waitFor &&
@@ -344,6 +349,7 @@ export class SceneMachine {
           this.bus.emit('ui:showChoices', {
             stepId: step.id,
             prompt: step.prompt,
+            ...(step.allowMovement ? { allowMovement: true } : {}),
             options: options.map((option) => ({ id: option.id, text: option.text })),
           });
           return;

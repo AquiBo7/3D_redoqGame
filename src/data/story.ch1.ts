@@ -444,10 +444,12 @@ export const chapter1: ChapterStory = {
         {
           kind: 'choice',
           id: 's7-bag',
+          allowMovement: true,
           prompt: '林夏掏学生证时，一只药袋掉在地上。',
           options: [
             {
               id: 's7-bag-pick',
+              interactId: 'medicine-bag',
               text: '（把药袋捡起来）',
               effects: {
                 set: { picked: true },

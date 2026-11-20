@@ -24,6 +24,9 @@ import type { CharacterAnimationController } from './characterAnimation';
 import type { Vec3 } from './shared';
 import { createCampusMeadow, createFoliageWindMaterial } from './foliageWind';
 import type { MeadowBed, WindTime } from './foliageWind';
+import { advanceColorBloom, applyColorBloomShader, createColorBloomUniforms } from './colorBloom';
+import type { ColorBloomUniforms } from './colorBloom';
+import { SHARED_RESOURCE_FLAG } from '../world/resources';
 
 const buildingWindTime: WindTime = { value: 0 };
 
@@ -353,13 +356,29 @@ function buildBuilding(parent: THREE.Object3D): {
 } {
   buildingWindTime.value = 0;
   const occluders: THREE.Object3D[] = [];
-  const paving = getPavingMaterial({ repeatX: 6, repeatY: 36 });
+  const bloomUniforms = createColorBloomUniforms();
+  const bloomEnvironment = new THREE.Group();
+  bloomEnvironment.name = 'building-color-bloom';
+  bloomEnvironment.userData.colorBloomUniforms = bloomUniforms;
+  parent.add(bloomEnvironment);
+  const bloomClone = (source: THREE.MeshStandardMaterial, name: string): THREE.MeshStandardMaterial => {
+    const material = source.clone();
+    delete material.userData[SHARED_RESOURCE_FLAG];
+    material.name = `building-bloom-${name}`;
+    return applyColorBloomShader(material, bloomUniforms);
+  };
+  const paving = bloomClone(getPavingMaterial({ repeatX: 6, repeatY: 36 }), 'paving');
   const plaster = getPlasterMaterial({ repeatX: 3, repeatY: 2 });
   const bark = getBarkMaterial({ repeatY: 2 });
-  const foliage = getFoliageMaterial();
+  const foliageSource = getFoliageMaterial();
+  const foliage = bloomClone(foliageSource, 'shrubs');
   const glass = getWindowGlassMaterial();
   const wood = getWoodFloorMaterial();
-  const foliageWind = createFoliageWindMaterial(foliage, buildingWindTime, { base: -1, height: 2, amplitude: 0.03 });
+  const foliageWind = applyColorBloomShader(
+    createFoliageWindMaterial(foliageSource, buildingWindTime, { base: -1, height: 2, amplitude: 0.03 }),
+    bloomUniforms,
+  );
+  foliageWind.name = 'building-bloom-canopies';
   const lobby = campusLobbyMaterial();
   const poster = campusPosterMaterial();
   const paper = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
@@ -369,7 +388,12 @@ function buildBuilding(parent: THREE.Object3D): {
   const sage = new THREE.MeshStandardMaterial({ color: 0x657568, roughness: 0.88 });
   const iron = new THREE.MeshStandardMaterial({ color: 0x414e49, roughness: 0.64, metalness: 0.35 });
   const recess = new THREE.MeshStandardMaterial({ color: 0x344744, roughness: 0.92 });
-  const lawn = new THREE.MeshStandardMaterial({ color: 0x869477, roughness: 1 });
+  const lawn = applyColorBloomShader(new THREE.MeshStandardMaterial({ color: 0x869477, roughness: 1 }), bloomUniforms);
+  lawn.name = 'building-bloom-lawn';
+  const planterBrick = bloomClone(brick, 'planter-brick');
+  const planterStone = bloomClone(stone, 'planter-stone');
+  const planterCap = bloomClone(cream, 'planter-cap');
+  const pathInlay = bloomClone(recess, 'path-inlay');
   const warm = new THREE.MeshStandardMaterial({
     color: 0xddc99b, emissive: 0xc9a66d, emissiveIntensity: 0.24, roughness: 0.55,
   });
@@ -434,15 +458,15 @@ function buildBuilding(parent: THREE.Object3D): {
     inlays.push({ p: [0, -0.011, z], s: [11.6, 0.16, 1], r: [-Math.PI / 2, 0, 0] });
     inlays.push({ p: [0, -0.011, z - 0.34], s: [5.3, 0.045, 1], r: [-Math.PI / 2, 0, 0] });
   }
-  campusInstances(parent, new THREE.PlaneGeometry(1, 1), recess, inlays, false);
+  campusInstances(parent, new THREE.PlaneGeometry(1, 1), pathInlay, inlays, false);
 
   const pockets = [{ x: -9.5, z: -14 }, { x: 9.6, z: -29 }, { x: -10, z: -37 }];
-  const pocketPaving = getPavingMaterial({ repeatX: 3, repeatY: 4 });
+  const pocketPaving = bloomClone(getPavingMaterial({ repeatX: 3, repeatY: 4 }), 'pocket-paving');
   for (const pocket of pockets) {
     const side = Math.sign(pocket.x);
     plane(pocketPaving, pocket.x, pocket.z, 7, 7.6, -0.026);
-    box(brick, [pocket.x + side * 2.75, 0.21, pocket.z], [0.6, 0.42, 6.4]);
-    box(cream, [pocket.x + side * 2.75, 0.46, pocket.z], [0.74, 0.08, 6.55]);
+    box(planterBrick, [pocket.x + side * 2.75, 0.21, pocket.z], [0.6, 0.42, 6.4]);
+    box(planterCap, [pocket.x + side * 2.75, 0.46, pocket.z], [0.74, 0.08, 6.55]);
     const x = pocket.x + side * 0.75;
     for (let slat = 0; slat < 5; slat += 1) {
       box(wood, [x - 0.28 + slat * 0.14, 0.48, pocket.z], [0.115, 0.075, 2.65]);
@@ -489,8 +513,8 @@ function buildBuilding(parent: THREE.Object3D): {
   ];
   const bushes: CampusPart[] = [];
   for (const [index, bed] of planters.entries()) {
-    box(brick, [bed.x, 0.18, bed.z], [1.7, 0.36, bed.length]);
-    box(stone, [bed.x, 0.39, bed.z], [1.84, 0.06, bed.length + 0.12]);
+    box(planterBrick, [bed.x, 0.18, bed.z], [1.7, 0.36, bed.length]);
+    box(planterStone, [bed.x, 0.39, bed.z], [1.84, 0.06, bed.length + 0.12]);
     box(lawn, [bed.x, 0.425, bed.z], [1.45, 0.025, bed.length - 0.24]);
     for (let i = 0; i < 12; i += 1) {
       bushes.push({
@@ -515,7 +539,12 @@ function buildBuilding(parent: THREE.Object3D): {
       depth: bed.length - 0.6, y: 0.444, density: 38, flowers: 12,
     })),
   ];
-  createCampusMeadow(parent, 'building-meadow', meadowBeds, buildingWindTime);
+  const meadow = createCampusMeadow(parent, 'building-meadow', meadowBeds, buildingWindTime);
+  for (const [name, mesh] of Object.entries(meadow)) {
+    const material = mesh.material as THREE.MeshLambertMaterial;
+    applyColorBloomShader(material, bloomUniforms);
+    material.name = `building-bloom-meadow-${name}`;
+  }
 
   const grove = [
     ...TREES.map((tree) => ({ ...tree, size: 1 })),
@@ -587,7 +616,7 @@ function buildBuilding(parent: THREE.Object3D): {
       color: [0x99936d, 0xb4a57b, 0x798e67][i % 3],
     });
   }
-  campusInstances(parent, new THREE.CircleGeometry(1, 5), cream, fallenLeaves, false);
+  campusInstances(parent, new THREE.CircleGeometry(1, 5), bloomClone(cream, 'fallen-leaves'), fallenLeaves, false);
 
   const understory = [
     { x: -14.5, z: -1.2, size: 0.76, height: 3.55 },
@@ -1043,8 +1072,8 @@ function buildBuilding(parent: THREE.Object3D): {
     });
   }
 
-  // 55–60 米长轴的三层椭圆外围山环适配校园地坪（x ±65、z -78..30）。
-  // 每层错开半节距并相互搭接；山脚下沉到地坪以下，远林冠到远山逐层增高、融雾。
+  // 环心 z=-24，三层世界半径为 55/58/60 米，不压缩 Z 轴；外边界约 x ±65、z -89..41。
+  // 真实圆环的必要外景扩展不扩大原地坪；各层错开半节距、搭接封缝，山脚 y=-4 下沉，逐层增高融雾。
   const ridgeParts: CampusPart[] = [];
   const ridgeColor = new THREE.Color();
   const ridgeAccent = new THREE.Color();
@@ -1070,9 +1099,8 @@ function buildBuilding(parent: THREE.Object3D): {
     new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), ridgeParts, false);
   ridge.name = 'building-horizon-ring';
   ridge.userData.horizonRing = true;
-  // 只改变本批山环的世界变换，不染色或修改任何共享环境材质。
+  // 仅平移本批山环的环心，保留真实世界圆环半径；不染色或修改任何共享环境材质。
   ridge.position.z = -24;
-  ridge.scale.z = 54 / 65;
   ridge.receiveShadow = false;
   ridge.computeBoundingBox();
 
@@ -1106,7 +1134,7 @@ function buildBuilding(parent: THREE.Object3D): {
     parent.add(actor);
   }
 
-  return { occluders, actors: { linxia, father, campusReader, campusObserver } };
+  return { occluders, actors: { linxia, father, campusReader, campusObserver, bloomEnvironment } };
 }
 
 let campusIdleActors: THREE.Object3D[] = [];
@@ -1154,6 +1182,20 @@ let walkTween: gsap.core.Tween | null = null;
 let fatherIdleDispose: (() => void) | null = null;
 let walkingLinxia: THREE.Object3D | null = null;
 let linxiaAnimation: CharacterAnimationController | null = null;
+let bloomContext: SceneRuntimeContext | null = null;
+let activeBloomUniforms: ColorBloomUniforms | null = null;
+const playerFeet = new THREE.Vector3();
+const companionFeet = new THREE.Vector3();
+
+function tickColorBloom(dtSeconds: number): void {
+  if (!bloomContext || !activeBloomUniforms) return;
+  playerFeet.copy(activeBloomUniforms.uPlayerPos.value);
+  bloomContext.getPlayerFeet?.(playerFeet);
+  companionFeet.copy(bloomContext.actors.linxia.position);
+  const progress = advanceColorBloom(activeBloomUniforms, playerFeet, companionFeet, dtSeconds);
+  bloomContext.setAtmosphereProgress?.(progress);
+}
+
 /** 路线是否已走完（用于到点后交叉淡出走路、切到站定待机） */
 let walkArrived = false;
 
@@ -1165,6 +1207,9 @@ function disposeLinxiaAnimation(): void {
 /** S8 运行时装：林夏沿路线慢步；S9（同 sceneKey）不重启行走，但爸爸呼吸持续 */
 export const buildingRuntime: SceneRuntime = {
   enter(context: SceneRuntimeContext): void {
+    bloomContext = context;
+    activeBloomUniforms = context.actors.bloomEnvironment?.userData.colorBloomUniforms ?? null;
+    tickColorBloom(0);
     enterCampusIdle(context.actors);
     const father = context.actors.father;
     if (fatherIdleDispose) {
@@ -1221,6 +1266,7 @@ export const buildingRuntime: SceneRuntime = {
 
   tick(dtSeconds: number): void {
     buildingWindTime.value += dtSeconds;
+    tickColorBloom(dtSeconds);
     tickCampusIdle(dtSeconds);
     if (!linxiaAnimation && walkingLinxia) {
       linxiaAnimation = createActorAnimation(walkingLinxia);
@@ -1230,6 +1276,9 @@ export const buildingRuntime: SceneRuntime = {
   },
 
   exit(): void {
+    bloomContext?.setAtmosphereProgress?.(0);
+    bloomContext = null;
+    activeBloomUniforms = null;
     disposeCampusIdle();
     if (walkTween) {
       walkTween.kill();

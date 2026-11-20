@@ -7,7 +7,7 @@ const browser = await chromium.launch({
   executablePath: 'C:/Users/AnQi/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe',
   headless: true,
 });
-const report = { scope: ['M1: 模块1、2', 'M2: 模块3、4', 'M3: 模块5、6、7'], checks: [], screenshots: [], problems: [], diagnostics: {} };
+const report = { scope: ['M1: 模块1、2', 'M2: 模块3、4', 'M3: 模块5、6、7', 'M4: 模块8，水彩漫染与朝霞复位'], checks: [], screenshots: [], problems: [], diagnostics: {} };
 function check(name, ok, detail) {
   report.checks.push({ name, ok, detail });
   assert.ok(ok, `${name}: ${JSON.stringify(detail)}`);
@@ -38,9 +38,9 @@ async function settleAssets(page) {
   await page.waitForFunction((ids) => ids.every((id) => window.__worldApp.hasModel(id)), models, { timeout: 60000 });
   await page.waitForLoadState('networkidle');
 }
-async function enter(page, sceneId) {
+async function enter(page, sceneId, debug = false) {
   await settleAssets(page);
-  await page.goto(`${base}?scene=${sceneId}`, { waitUntil: 'load' });
+  await page.goto(`${base}?scene=${sceneId}${debug ? '&debug=1' : ''}`, { waitUntil: 'load' });
   await page.waitForFunction((id) => window.__worldApp?.getSceneId() === id, sceneId, { timeout: 60000 });
   await page.waitForFunction(() => Number.parseFloat(getComputedStyle(document.querySelector('.scene-fade')).opacity) < .05, null, { timeout: 60000 });
   check(`${sceneId} 调试直达跳过指南`, await page.locator('.controls-guide').count() === 0);
@@ -255,6 +255,266 @@ async function deskChecks(page) {
   await shot(page, 'S7-tent-desk-details');
   await page.evaluate(() => window.__worldApp.teleport(3.3, -3, 25));
   await shot(page, 'S7-campus-background');
+  check('S7 药袋选项期间真正开放移动控制', await page.evaluate(() => window.__worldApp.getPlayerPosition().enabled));
+  await page.evaluate(async () => {
+    const { eventBus } = await import('/src/core/eventBus.ts');
+    window.__polishBagPicked = false;
+    eventBus.on('state:changed', ({ state }) => { if (state.picked) window.__polishBagPicked = true; });
+  });
+  await page.evaluate(() => window.__worldApp.teleport(1.15, -1.6, 0));
+  const startFeet = await page.evaluate(() => window.__worldApp.getPlayerPosition().feet);
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(200);
+  await page.keyboard.up('KeyW');
+  check('S7 选项保留时仍能实际前行', await page.evaluate((start) => window.__worldApp.getPlayerPosition().feet.z < start.z - .1, startFeet));
+  // 靠近光点后按 E：命中 1.8m 近距拾取（与真实玩家走向发光药袋再按 E 一致），不依赖指针锁定。
+  await page.evaluate(() => window.__worldApp.teleport(1.15, -1.95, 0));
+  await page.waitForTimeout(120);
+  await page.keyboard.press('KeyE');
+  await page.getByRole('button', { name: '给你。', exact: true }).waitFor();
+  check('S7 靠近药袋按 E 真正拾取并进入交还选项', await page.evaluate(() => window.__polishBagPicked));
+  await page.getByRole('button', { name: '给你。', exact: true }).click();
+  await page.locator('.dialogue:not([hidden])').waitFor();
+  await page.evaluate(() => window.__worldApp.teleport(0, -1.6, 0));
+  await shot(page, 'S7-registration-after-return');
+  await page.evaluate(() => window.__worldApp.teleport(-3.3, -2, -35));
+  await shot(page, 'S7-supply-cloth-props');
+}
+async function bloomGpuChecks(page) {
+  const results = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/.vite/deps/three.js');
+    const { applyColorBloomShader, createColorBloomUniforms } = await import('/src/scenes3d/colorBloom.ts');
+    const { createFoliageWindMaterial, createCampusMeadow } = await import('/src/scenes3d/foliageWind.ts');
+    const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+    renderer.setSize(64, 64);
+    renderer.setPixelRatio(1);
+    renderer.setClearColor(0x000000, 1);
+    const gl = renderer.getContext();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 20);
+    camera.position.set(0, 8, -12);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(0, 0, -12);
+    const cases = [
+      ['standard', 'mesh', false], ['standard', 'instance', false], ['standard', 'batch', false],
+      ['lambert', 'mesh', false], ['lambert', 'instance', false], ['lambert', 'batch', false],
+      ['standard', 'instance', true], ['standard', 'batch', true], ['lambert', 'instance', true],
+    ];
+    const results = [];
+    try {
+      for (const [kind, branch, wind] of cases) {
+        const scene = new THREE.Scene();
+        scene.add(new THREE.AmbientLight(0xffffff, 2));
+        const geometry = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
+        const source = kind === 'standard'
+          ? new THREE.MeshStandardMaterial({ color: 0x579e48, roughness: 1 })
+          : new THREE.MeshLambertMaterial({ color: 0x579e48 });
+        let material = source;
+        if (wind && kind === 'standard') material = createFoliageWindMaterial(source, { value: 0 });
+        if (wind && kind === 'lambert') {
+          const meadowRoot = new THREE.Group();
+          const meadow = createCampusMeadow(meadowRoot, 'gpu-test', [{ x: 0, z: 0, width: 1, depth: 1, y: 0, density: 1, flowers: 1 }], { value: 0 });
+          material = meadow.grass.material;
+          material.color.setHex(0x579e48);
+          for (const mesh of [meadow.grass, meadow.flowers]) {
+            mesh.geometry.dispose();
+            if (mesh.material !== material) mesh.material.dispose();
+          }
+        }
+        const uniforms = createColorBloomUniforms();
+        applyColorBloomShader(material, uniforms);
+        let mesh;
+        const transform = new THREE.Matrix4().makeTranslation(0, 0, -12);
+        if (branch === 'instance') {
+          mesh = new THREE.InstancedMesh(geometry, material, 1);
+          mesh.setMatrixAt(0, transform);
+          mesh.instanceMatrix.needsUpdate = true;
+        } else if (branch === 'batch') {
+          mesh = new THREE.BatchedMesh(1, geometry.getAttribute('position').count, geometry.index.count, material);
+          mesh.setMatrixAt(mesh.addInstance(mesh.addGeometry(geometry)), transform);
+        } else {
+          mesh = new THREE.Mesh(geometry, material);
+          mesh.position.z = -12;
+        }
+        scene.add(mesh);
+        const sample = () => {
+          renderer.render(scene, camera);
+          const rgba = new Uint8Array(4);
+          gl.readPixels(32, 32, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+          return Array.from(rgba);
+        };
+        const cold = sample();
+        uniforms.uRevealedZ.value = -20;
+        const warm = sample();
+        uniforms.uPlayerPos.value.set(0, 0, 8);
+        uniforms.uCompanionPos.value.set(1, 0, 9);
+        uniforms.uBloomTime.value = 1000;
+        const retained = sample();
+        results.push({ kind, branch, wind, cold, warm, retained, glError: gl.getError(),
+          programs: renderer.info.programs.map((program) => ({ runnable: program.diagnostics?.runnable ?? true })) });
+        scene.remove(mesh);
+        if (mesh.isInstancedMesh || mesh.isBatchedMesh) mesh.dispose();
+        geometry.dispose();
+        material.dispose();
+        if (source !== material) source.dispose();
+      }
+      return results;
+    } finally {
+      renderer.dispose();
+      renderer.domElement.width = 0;
+      renderer.domElement.height = 0;
+    }
+  });
+  report.diagnostics.bloomGpu = results;
+  check('水彩普通/实例/批次及风草链实际 GPU 编译零错误', results.length === 9 && results.every((result) => result.glError === 0 && result.programs.every((program) => program.runnable)), results);
+  const saturation = (rgba) => Math.max(...rgba.slice(0, 3)) - Math.min(...rgba.slice(0, 3));
+  check('九种真实世界坐标着色均由冷灰恢复彩色', results.every((result) => saturation(result.warm) > saturation(result.cold) + 12 && result.warm[3] === 255), results);
+  check('GPU 回头与长时间流动不让已走区域褪色', results.every((result) => result.warm.every((channel, i) => channel === result.retained[i])), results);
+}
+async function particleGpuChecks(page) {
+  const result = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/.vite/deps/three.js');
+    const source = window.__worldApp.getAirParticles();
+    const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+    renderer.setSize(64, 64);
+    renderer.setPixelRatio(1);
+    renderer.setClearColor(0x132026, 0);
+    const material = source.material.clone();
+    material.size = 24;
+    material.opacity = .9;
+    const shape = { value: 0 };
+    material.onBeforeCompile = (shader, renderer) => {
+      source.material.onBeforeCompile(shader, renderer);
+      shader.uniforms.uAirShape = shape;
+      shader.uniforms.uAirTime = { value: 0 };
+    };
+    material.customProgramCacheKey = () => `${source.material.customProgramCacheKey()}:visual-test`;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute([1, .75, .65], 3));
+    geometry.setAttribute('airType', new THREE.Float32BufferAttribute([0], 1));
+    const scene = new THREE.Scene();
+    const points = new THREE.Points(geometry, material);
+    scene.add(points);
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 10);
+    camera.position.z = 2;
+    const gl = renderer.getContext();
+    const masks = [];
+    try {
+      for (const [type, progress] of [[0, 0], [1, 1], [2, 1]]) {
+        geometry.getAttribute('airType').setX(0, type);
+        geometry.getAttribute('airType').needsUpdate = true;
+        shape.value = progress;
+        renderer.render(scene, camera);
+        const pixels = new Uint8Array(64 * 64 * 4);
+        gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const samples = [];
+        for (let y = 0; y < 64; y += 1) for (let x = 0; x < 64; x += 1) if (pixels[(y * 64 + x) * 4 + 3] > 20) samples.push([x, y]);
+        const cx = samples.reduce((sum, [x]) => sum + x, 0) / samples.length;
+        const cy = samples.reduce((sum, [, y]) => sum + y, 0) / samples.length;
+        let xx = 0, yy = 0, xy = 0;
+        for (const [x, y] of samples) { xx += (x - cx) ** 2; yy += (y - cy) ** 2; xy += (x - cx) * (y - cy); }
+        const delta = Math.sqrt((xx - yy) ** 2 + 4 * xy ** 2);
+        masks.push({ type, count: samples.length, anisotropy: (xx + yy + delta) / (xx + yy - delta), glError: gl.getError() });
+      }
+      renderer.setSize(192, 64);
+      camera.left = -3; camera.right = 3; camera.updateProjectionMatrix();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute([-2, 0, 0, 0, 0, 0, 2, 0, 0], 3));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute([1, .75, .4, 1, .65, .78, .65, .9, .5], 3));
+      geometry.setAttribute('airType', new THREE.Float32BufferAttribute([0, 1, 2], 1));
+      geometry.computeBoundingSphere();
+      shape.value = 1;
+      renderer.render(scene, camera);
+      return { masks, image: renderer.domElement.toDataURL('image/png'), sourceCount: source.geometry.getAttribute('position').count };
+    } finally {
+      geometry.dispose(); material.dispose(); renderer.dispose();
+      renderer.domElement.width = 0; renderer.domElement.height = 0;
+    }
+  });
+  report.diagnostics.particleGpu = { masks: result.masks, sourceCount: result.sourceCount };
+  check('48粒子原生材质实际GPU呈现圆形光尘与非圆形花瓣嫩叶', result.sourceCount === 48 && result.masks.every((mask) => mask.glError === 0 && mask.count > 30) && result.masks[0].anisotropy < 1.1 && result.masks.slice(1).every((mask) => mask.anisotropy > 1.8), result.masks);
+  const path = 'tools/shots/polish-S8-particle-shapes-gpu.png';
+  writeFileSync(path, Buffer.from(result.image.split(',')[1], 'base64'));
+  report.screenshots.push(path);
+}
+function atmosphereSnapshot(diagnostics) {
+  return {
+    sky: diagnostics.skyColors, sun: diagnostics.sunColor, intensity: diagnostics.sunIntensity,
+    fog: diagnostics.fogColor, colors: diagnostics.particleColors, shape: diagnostics.shapeProgress,
+  };
+}
+async function moveToZ(page, key, z, decreasing = true) {
+  await page.keyboard.down(key);
+  try {
+    await page.waitForFunction(({ z, decreasing }) => {
+      const feet = window.__worldApp.getPlayerPosition().feet;
+      return decreasing ? feet.z <= z : feet.z >= z;
+    }, { z, decreasing }, { timeout: 40000 });
+  } finally { await page.keyboard.up(key); }
+}
+async function debugJump(page, sceneId, sceneKey) {
+  await settleAssets(page);
+  await page.locator('.debug-toggle').click();
+  await page.locator(`.debug-panel__jump[data-scene-id="${sceneId}"]`).click();
+  await page.locator('.debug-panel__close').click();
+  await page.waitForFunction(({ sceneId, sceneKey }) => {
+    const diagnostics = window.__worldApp.getVisualDiagnostics();
+    return diagnostics.sceneId === sceneId && diagnostics.sceneKey === sceneKey;
+  }, { sceneId, sceneKey }, { timeout: 60000 });
+  await page.waitForFunction(() => Number.parseFloat(getComputedStyle(document.querySelector('.scene-fade')).opacity) < .05, null, { timeout: 60000 });
+  await settleAssets(page);
+}
+async function bloomStoryChecks(page) {
+  await page.evaluate(() => { window.__polishWorldIdentity = window.__worldApp; });
+  const cold = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  report.diagnostics.bloomCold = cold;
+  check('S8 起点冷灰，景观共享漫染且皮肤与楼牌不被染色', cold.atmosphereProgress < .2 && cold.shapeProgress === 0 && cold.colorBloom.shared && cold.colorBloom.characterBloomCount === 0 && cold.colorBloom.materials.length >= 10, cold.colorBloom);
+  await shot(page, 'S8-cold-start');
+  await bloomGpuChecks(page);
+  await moveToZ(page, 'KeyW', -25);
+  const middle = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  check('真实键盘同行脚底推进已走边界和天空', middle.colorBloom.player[2] <= -25 && middle.colorBloom.player[1] === 0 && middle.colorBloom.revealedZ <= -25 && middle.atmosphereProgress > .5, middle.colorBloom);
+  await shot(page, 'S8-watercolor-middle');
+  await moveToZ(page, 'KeyW', -38);
+  await page.waitForFunction(() => window.__worldApp.getActorPosition('linxia')[2] <= -40, null, { timeout: 60000 });
+  const warm = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  report.diagnostics.bloomWarm = warm;
+  check('S8 后半段金粉朝霞、转暖晨光与金尘粉瓣渐变', warm.atmosphereProgress > .9 && warm.shapeProgress > .85 && warm.skyColors.mid !== cold.skyColors.mid && warm.skyColors.cloudHighlight !== cold.skyColors.cloudHighlight && warm.sunColor !== cold.sunColor && warm.particleTypeDistribution.petal === 8 && warm.particleTypeDistribution.leaf === 8 && warm.particleTypeDistribution.dust === 32, atmosphereSnapshot(warm));
+  check('S8 演出没有新增桌面后处理Pass', warm.postprocessingPasses === 3, warm.postprocessingPasses);
+  await shot(page, 'S8-watercolor-golden-dawn');
+  await particleGpuChecks(page);
+  await moveToZ(page, 'KeyS', 1.2, false);
+  await page.evaluate(() => window.__worldApp.teleport(.2, 1.2, 0));
+  const back = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  report.diagnostics.bloomBacktrack = back;
+  check('真实回头行走不重置脚步历史或朝霞', back.colorBloom.revealedZ <= warm.colorBloom.revealedZ && back.atmosphereProgress >= warm.atmosphereProgress && back.colorBloom.instanceId === cold.colorBloom.instanceId, back.colorBloom);
+  await shot(page, 'S8-warm-start-same-view');
+  await horizonChecks(page);
+  await page.evaluate(() => window.__worldApp.teleport(.2, -40, 0));
+  const beforeS9 = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  await page.keyboard.down('KeyW');
+  try { await page.waitForFunction(() => window.__worldApp.getSceneId() === 'S9', null, { timeout: 30000 }); }
+  finally { await page.keyboard.up('KeyW'); }
+  const s9 = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  check('真实门口触发S9保留同一漫染实例和全部朝霞', s9.colorBloom.instanceId === beforeS9.colorBloom.instanceId && s9.colorBloom.revealedZ <= beforeS9.colorBloom.revealedZ && JSON.stringify(atmosphereSnapshot(s9)) === JSON.stringify(atmosphereSnapshot(beforeS9)), s9.colorBloom);
+  await shot(page, 'S9-retained-dawn');
+  await page.getByRole('button', { name: '不看。', exact: true }).click();
+  await page.locator('.chapter-end:not([hidden])').waitFor();
+  await page.getByRole('button', { name: '重新体验第一章', exact: true }).click();
+  await page.waitForFunction(() => window.__worldApp.getVisualDiagnostics().sceneKey === 'room', null, { timeout: 60000 });
+  await page.waitForFunction(() => Number.parseFloat(getComputedStyle(document.querySelector('.scene-fade')).opacity) < .05, null, { timeout: 60000 });
+  const room = await page.evaluate(() => ({ sameWorld: window.__worldApp === window.__polishWorldIdentity, diagnostics: window.__worldApp.getVisualDiagnostics() }));
+  report.diagnostics.bloomResetRoom = room;
+  check('同一个WorldApp真实重开S1完全恢复天空灯光与粒子', room.sameWorld && room.diagnostics.colorBloom === null && room.diagnostics.atmosphereProgress === 0 && JSON.stringify(atmosphereSnapshot(room.diagnostics)) === JSON.stringify(report.diagnostics.defaultRoom), room);
+  await shot(page, 'S1-restart-atmosphere-restored');
+  await debugJump(page, 'S5', 'gate');
+  const gate = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  check('同一WorldApp重入校门天空灯光雾与48粒子精确复位', gate.colorBloom === null && gate.atmosphereProgress === 0 && JSON.stringify(atmosphereSnapshot(gate)) === JSON.stringify(report.diagnostics.defaultGate), atmosphereSnapshot(gate));
+  await debugJump(page, 'S8', 'building');
+  const reentered = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  check('再进S8新漫染实例从冷灰起步且无跨场景缓存污染', reentered.colorBloom.instanceId !== cold.colorBloom.instanceId && reentered.colorBloom.revealedZ > -8 && reentered.shapeProgress === 0 && reentered.atmosphereProgress < .2, reentered.colorBloom);
+  await dialogue(page);
+  await page.getByRole('button', { name: '你慢慢来。', exact: true }).click();
+  await shot(page, 'S8-reentered-cold-reset');
 }
 async function horizonChecks(page) {
   const details = await page.evaluate(async () => {
@@ -287,8 +547,12 @@ async function horizonChecks(page) {
   report.diagnostics.horizon = details;
   check('S8 层叠远山单实例批次覆盖校园四周', details.rings === 1 && details.instanced && details.count >= 48 && details.bounds.min[0] < -55 && details.bounds.max[0] > 55 && details.bounds.min[2] < -70 && details.bounds.max[2] > 25, details);
   check('S8 起中终点每15度树缝视线均有远山封边', details.coverage.length === 72 && details.coverage.every((sample) => sample.hit), details.coverage.filter((sample) => !sample.hit));
-  await page.evaluate(() => window.__worldApp.teleport(0, -39.5, 0));
+  await page.evaluate(() => window.__worldApp.teleport(0, -32, 0));
   await shot(page, 'S8-linked-corridors');
+  for (const [side, yaw] of [['left', 35], ['right', -35]]) {
+    await page.evaluate((yaw) => window.__worldApp.teleport(0, -32, yaw), yaw);
+    await shot(page, `S8-complete-corridor-${side}`);
+  }
   for (const [name, yaw] of [['west', 90], ['east', -90], ['rear', 180]]) {
     await page.evaluate((yaw) => window.__worldApp.teleport(0, -20, yaw), yaw);
     await shot(page, `S8-horizon-${name}`);
@@ -307,6 +571,7 @@ try {
   page.on('request', (request) => { if (/\.glb(?:\?|$)/.test(request.url())) glbs.push(request.url()); });
   await guide(page, 'desktop');
   await waitObjective(page, 'S1');
+  report.diagnostics.defaultRoom = atmosphereSnapshot(await page.evaluate(() => window.__worldApp.getVisualDiagnostics()));
   check('S1 首屏零 GLB', glbs.length === 0, [...glbs]);
   await roomChecks(page);
   await page.evaluate(() => window.__worldApp.teleport(-2.85, -2.7, 0));
@@ -373,16 +638,18 @@ try {
   await enter(page, 'S5');
   await dialogue(page);
   await waitObjective(page, 'S5');
+  report.diagnostics.defaultGate = atmosphereSnapshot(await page.evaluate(() => window.__worldApp.getVisualDiagnostics()));
   await gateChecks(page);
   await enter(page, 'S7');
   await dialogue(page);
+  for (const name of ['你先写吧。', '路上耽搁了。']) await page.getByRole('button', { name, exact: true }).click();
   await waitObjective(page, 'S7');
   await deskChecks(page);
-  await enter(page, 'S8');
+  await enter(page, 'S8', true);
   await dialogue(page);
   await page.getByRole('button', { name: '我陪你走一段。', exact: true }).click();
   await waitObjective(page, 'S8');
-  await horizonChecks(page);
+  await bloomStoryChecks(page);
   await page.waitForLoadState('networkidle');
   await page.close();
 
@@ -413,6 +680,26 @@ try {
   const runDistance = Math.hypot(running.feet.x - before.feet.x, running.feet.z - before.feet.z);
   check('触屏双击地面实际移动快于单击', walkDistance > .5 && runDistance > walkDistance * 1.25, { walkDistance, runDistance });
   await shot(mobile, 'touch-sprint');
+  await enter(mobile, 'S8');
+  await dialogue(mobile);
+  await mobile.getByRole('button', { name: '我陪你走一段。', exact: true }).click();
+  const mobileCold = await mobile.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  await shot(mobile, 'S8-mobile-cold-start');
+  await mobile.evaluate(() => window.__worldApp.teleport(.2, -36, 0));
+  await mobile.waitForFunction(() => window.__worldApp.getActorPosition('linxia')[2] <= -40, null, { timeout: 60000 });
+  const mobileWarm = await mobile.evaluate(() => window.__worldApp.getVisualDiagnostics());
+  report.diagnostics.mobileBloom = { cold: mobileCold, warm: mobileWarm };
+  check('触屏S8运行同款GPU漫染朝霞与粉瓣且始终零后处理', mobileWarm.atmosphereProgress > .9 && mobileWarm.shapeProgress > .85 && mobileCold.postprocessingPasses === 0 && mobileWarm.postprocessingPasses === 0 && mobileWarm.colorBloom.shared && mobileWarm.colorBloom.characterBloomCount === 0, report.diagnostics.mobileBloom);
+  await shot(mobile, 'S8-mobile-watercolor-dawn');
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  const portrait = await mobile.evaluate(() => ({
+    ratio: document.querySelector('canvas').width / document.querySelector('canvas').clientWidth,
+    overflow: document.documentElement.scrollWidth > innerWidth,
+    padding: Number.parseFloat(getComputedStyle(document.querySelector('.dialogue')).paddingBottom),
+    diagnostics: window.__worldApp.getVisualDiagnostics(),
+  }));
+  check('漫染朝霞竖屏切换仍保留1.5像素比、安全区与零Pass', portrait.ratio <= 1.5 && !portrait.overflow && portrait.padding >= 48 && portrait.diagnostics.postprocessingPasses === 0 && portrait.diagnostics.atmosphereProgress >= mobileWarm.atmosphereProgress, portrait);
+  await shot(mobile, 'S8-portrait-watercolor-dawn');
   await mobile.waitForLoadState('networkidle');
   await mobile.close();
   check('浏览器零错误零警告及资源失败', report.problems.length === 0, report.problems);

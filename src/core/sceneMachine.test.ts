@@ -290,6 +290,57 @@ describe('SceneMachine 主线推进', () => {
   });
 });
 
+describe('SceneMachine 自由探索选项', () => {
+  function beginBag(): Harness {
+    const h = createHarness();
+    h.machine.startNew('S7', 'bystander');
+    h.machine.onDialogueEnd('s7-volunteer');
+    h.machine.onChooseOption('s7-pen', 's7-pen-hand');
+    h.machine.onChooseOption('s7-reason', 's7-reason-delay');
+    return h;
+  }
+
+  it('药袋阶段允许移动，真实交互与原按钮得到完全相同的状态和下一步', () => {
+    const physical = beginBag();
+    const button = beginBag();
+    expect(physical.choices[physical.choices.length - 1]).toMatchObject({ stepId: 's7-bag', allowMovement: true });
+    physical.machine.onGazeHotspot('S7', 'reason-form');
+    button.machine.onGazeHotspot('S7', 'reason-form');
+    physical.machine.onInteract('S7', 'medicine-bag');
+    button.machine.onChooseOption('s7-bag', 's7-bag-pick');
+    expect(physical.machine.getState()).toEqual(button.machine.getState());
+    expect(physical.machine.getState().picked).toBe(true);
+    expect(physical.machine.getState().seenCrossedOut).toBe(true);
+    expect(physical.choices[physical.choices.length - 1].stepId).toBe('s7-return-bag');
+    physical.machine.onInteract('S7', 'medicine-bag');
+    expect(physical.machine.getState()).toEqual(button.machine.getState());
+  });
+
+  it('错误场景或物体不能代替拾取，也不能抢先跳过登记步骤', () => {
+    const h = createHarness();
+    h.machine.startNew('S7', 'bystander');
+    h.machine.onInteract('S7', 'medicine-bag');
+    h.machine.onDialogueEnd('s7-volunteer');
+    h.machine.onInteract('S7', 'medicine-bag');
+    expect(h.machine.getState().picked).toBe(false);
+    const ready = beginBag();
+    ready.machine.onInteract('S8', 'medicine-bag');
+    ready.machine.onInteract('S7', 'unknown');
+    expect(ready.machine.getState().picked).toBe(false);
+    expect(ready.choices[ready.choices.length - 1].stepId).toBe('s7-bag');
+  });
+
+  it('不捡选项保持可通关，普通选项仍不开放移动', () => {
+    const h = beginBag();
+    expect(h.choices[0].allowMovement).toBeUndefined();
+    h.machine.onChooseOption('s7-bag', 's7-bag-leave');
+    expect(h.machine.getState().picked).toBe(false);
+    expect(h.dialogues[h.dialogues.length - 1].stepId).toBe('s7-linxia-picks');
+    h.machine.onDialogueEnd('s7-linxia-picks');
+    expect(h.machine.getSceneId()).toBe('S8');
+  });
+});
+
 describe('SceneMachine 继续游戏与条件转场', () => {
   it('继续游戏从存档场景第 0 步开始，且不重复执行 onEnter 日志', () => {
     const first = createHarness();

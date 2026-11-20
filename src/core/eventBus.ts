@@ -71,6 +71,7 @@ export interface GameEvents {
   'ui:showChoices': {
     stepId: string;
     prompt?: string;
+    allowMovement?: boolean;
     options: Array<{ id: string; text: string }>;
   };
   'ui:phoneVibrate': { vibrationId: string; preview: string };

@@ -62,7 +62,6 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       playUiClick();
       releaseDialogueLock();
       bus.emit('ui:dialogueEnd', { stepId });
-      if (stepId === 's7-volunteer') bus.emit('ui:showObjective', { sceneId: 'S7' });
     },
   });
 
@@ -183,8 +182,12 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       closeChoices();
 
       choices.show(payload);
-      choicesBlockerId = `choices:${payload.stepId}`;
-      lock.acquire(choicesBlockerId);
+      if (payload.allowMovement) {
+        if (payload.stepId === 's7-bag') bus.emit('ui:showObjective', { sceneId: 'S7' });
+      } else {
+        choicesBlockerId = `choices:${payload.stepId}`;
+        lock.acquire(choicesBlockerId);
+      }
     }),
 
     bus.on('ui:showCaption', (payload) => {

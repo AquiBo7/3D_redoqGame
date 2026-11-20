@@ -113,6 +113,8 @@ export interface SceneRuntimeContext {
   actors: Record<string, THREE.Object3D>;
   /** 按 id 显示 / 隐藏交互光点（如捡起药袋后隐藏药袋光点） */
   setInteractableVisible: (id: string, visible: boolean) => void;
+  getPlayerFeet?: (target: THREE.Vector3) => THREE.Vector3;
+  setAtmosphereProgress?: (progress: number) => void;
 }
 
 export interface SceneRuntime {

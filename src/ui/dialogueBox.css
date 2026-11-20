@@ -208,6 +208,15 @@
   display: none;
 }
 
+.choices--exploration {
+  padding-top: 20px;
+  pointer-events: none;
+}
+
+.choices--exploration .choices__option {
+  pointer-events: auto;
+}
+
 .choices__prompt {
   width: min(600px, 100%);
   margin: 0;

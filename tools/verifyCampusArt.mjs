@@ -6,6 +6,13 @@ const base = process.env.CAMPUS_URL ?? 'http://127.0.0.1:5174/';
 const launchOptions = {
   executablePath: 'C:/Users/AnQi/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe',
   headless: false,
+  // 窗口被遮挡时 Chromium 会把 rAF 节流到 ~1fps，gsap 默认 lagSmoothing 在每帧 >500ms
+  // 时只推进 33ms，12s 演出会被拉长到数分钟；禁用后台节流保证头屏浏览器满帧。
+  args: [
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+  ],
 };
 let browser = await chromium.launch(launchOptions);
 const report = { checks: [], problems: [], diagnostics: {} };
@@ -43,7 +50,7 @@ async function frames(page, name, count = 90) {
   check(`${name} 渲染预算与后处理通道符合配置`, name.includes('Mobile')
     ? renderBudget.postprocessingPasses === 0
     : renderBudget.postprocessingPasses === 3 && renderBudget.bloomBuffer.every((size, index) => size === Math.round(renderBudget.canvas[index] / 4)), renderBudget);
-  const warmupFrames = name.startsWith('S6') ? 15 : 120;
+  const warmupFrames = name.startsWith('S6') ? 15 : 240;
   await page.evaluate((count) => new Promise((resolve) => {
     let frames = 0;
     const warm = () => { if (++frames < count) requestAnimationFrame(warm); else resolve(); };
@@ -212,6 +219,17 @@ function check(name, result, detail) {
   console.log(`PASS ${name}`);
 }
 
+/** Node 侧轮询：不依赖页面 rAF，避免头屏窗口被遮挡时节流导致 waitForFunction 永不重查。 */
+async function waitState(page, predicate, label, timeoutMs = 30000, arg) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await page.evaluate(predicate, arg);
+    if (value) return;
+    if (Date.now() >= deadline) throw new Error(`${label} 超时（${timeoutMs}ms）`);
+    await page.waitForTimeout(1000);
+  }
+}
+
 function watch(page) {
   page.on('console', (message) => {
     if (['error', 'warning'].includes(message.type())) {
@@ -240,16 +258,18 @@ async function settle(page) {
 async function enter(page, id) {
   await settle(page);
   await page.goto(id === 'S1' ? base : `${base}?scene=${id}`, { waitUntil: 'load' });
+  // 头屏浏览器必须置于前台，否则后台 rAF 节流会冻结 gsap 时间轴与移动，导致后续等待超时。
+  await page.bringToFront();
   const start = page.locator('#btn-start');
   if (await start.isVisible()) {
     await start.click();
     await page.locator('.controls-guide__enter').click();
   }
   await page.waitForFunction((sceneId) => window.__worldApp?.getSceneId() === sceneId, id, { timeout: 60000 });
-  await page.waitForFunction(() => {
+  await waitState(page, () => {
     const fade = document.querySelector('.scene-fade');
     return fade && Number.parseFloat(getComputedStyle(fade).opacity) < 0.05;
-  }, null, { timeout: 60000 });
+  }, `${id} 切图淡出`, 60000);
   await settle(page);
 }
 
@@ -287,10 +307,12 @@ try {
   await enter(page, 'S5');
   await shot(page, 'S5-entry');
   await dialogue(page);
-  await page.waitForFunction(() => {
+  // 冷启动下 gsap 默认 lagSmoothing 会在首个 >500ms 帧（着色器编译）时仅推进 33ms，
+  // 演出墙钟时间会被拉长；用 Node 侧轮询等待落点，断言不变。
+  await waitState(page, () => {
     const pos = window.__worldApp.getActorPosition('linxiaSolo');
     return pos && pos[2] < 0.51;
-  }, null, { timeout: 30000 });
+  }, 'S5 林夏拆分落点', 90000);
   check('S5 拆分后林夏到达既有落点', true);
   await shot(page, 'S5-split');
   report.diagnostics.gate = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
@@ -304,7 +326,11 @@ try {
   await page.evaluate(() => window.__worldApp.teleport(0, 7.6, 0));
   await page.keyboard.down('KeyW');
   try {
-    await page.waitForFunction(() => window.__worldApp.getSceneId() === 'S6', null, { timeout: 15000 });
+    await waitState(page, () => window.__worldApp.getSceneId() === 'S6', 'S5 步行进入 S6', 30000);
+  } catch (error) {
+    console.error('S5 进门超时现场', await page.evaluate(() => ({ player: window.__worldApp.getPlayerPosition(), sceneId: window.__worldApp.getSceneId(), focus: document.activeElement?.outerHTML, dialogue: document.querySelector('.dialogue')?.hidden, choices: document.querySelector('.choices')?.hidden, visibility: document.visibilityState })));
+    await shot(page, 'S5-transition-failure');
+    throw error;
   } finally {
     await page.keyboard.up('KeyW');
   }
@@ -314,7 +340,7 @@ try {
   await shot(page, 'S6-panorama');
   await page.waitForTimeout(250);
   await shot(page, 'S6-wide');
-  await page.waitForFunction(() => window.__worldApp.getSceneId() === 'S7', null, { timeout: 20000 });
+  await waitState(page, () => window.__worldApp.getSceneId() === 'S7', 'S6 全景进入 S7', 20000);
   check('S6 全景自然完成进入 S7', true);
   await shot(page, 'S7-regression');
 
@@ -330,17 +356,17 @@ try {
   await shot(page, 'S8-cycle-shelter');
   await page.evaluate(() => window.__worldApp.teleport(0.2, -12, 180));
   await shot(page, 'S8-father');
-  await page.waitForFunction(() => {
+  await waitState(page, () => {
     const pos = window.__worldApp.getActorPosition('linxia');
     return pos && pos[2] < -43.9;
-  }, null, { timeout: 40000 });
+  }, 'S8 林夏路线', 40000);
   check('S8 林夏正常完成原有路线', true);
   await page.evaluate(() => window.__worldApp.teleport(0.2, -39.5, 0));
   await shot(page, 'S8-facade');
   report.diagnostics.building = await page.evaluate(() => window.__worldApp.getVisualDiagnostics());
   await page.keyboard.down('KeyW');
   try {
-    await page.waitForFunction(() => window.__worldApp.getSceneId() === 'S9', null, { timeout: 15000 });
+    await waitState(page, () => window.__worldApp.getSceneId() === 'S9', 'S8 步行进入 S9', 15000);
   } finally {
     await page.keyboard.up('KeyW');
   }
@@ -397,17 +423,20 @@ try {
   await geometryPage.close();
   check('黄金路径与几何验证零浏览器警告', report.problems.length === 0, report.problems);
   await browser.close();
+  // 前面视觉/移动/几何各段已连续渲染数分钟，610M 核显升温会拖慢后续帧率采样；
+  // 关闭浏览器后静置 30s 让 GPU 回到稳态，避免把热节流误判为场景性能回归。
+  await new Promise((resolve) => setTimeout(resolve, 30000));
   browser = await chromium.launch(launchOptions);
   const desktopPerf = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   watch(desktopPerf);
   await trackDraws(desktopPerf);
   await enter(desktopPerf, 'S5');
   await dialogue(desktopPerf);
-  await desktopPerf.waitForFunction(() => window.__worldApp.getActorPosition('linxiaSolo')?.[2] < .51);
+  await waitState(desktopPerf, () => window.__worldApp.getActorPosition('linxiaSolo')?.[2] < .51, 'S5 桌面性能林夏落点', 90000);
   await frames(desktopPerf, 'S5Desktop', 300);
   await desktopPerf.keyboard.down('KeyW');
   try {
-    await desktopPerf.waitForFunction(() => window.__worldApp.getSceneId() === 'S6', null, { timeout: 15000 });
+    await waitState(desktopPerf, () => window.__worldApp.getSceneId() === 'S6', 'S5 桌面性能进入 S6', 30000);
   } finally {
     await desktopPerf.keyboard.up('KeyW');
   }
@@ -428,6 +457,18 @@ try {
       await scenePage.evaluate(() => window.__worldApp.teleport(.2, -20, 0));
     }
     await frames(scenePage, `${id}Desktop`, 300);
+    if (id === 'S8') {
+      await scenePage.evaluate(() => window.__worldApp.teleport(.2, -36, 0));
+      await waitState(scenePage, () => window.__worldApp.getActorPosition('linxia')[2] === -44, 'S8 朝霞后段推进', 60000);
+      check('S8Desktop 朝霞后段实际推进到完整暖色', await scenePage.evaluate(() => {
+        const diagnostics = window.__worldApp.getVisualDiagnostics();
+        return diagnostics.atmosphereProgress === 1 && diagnostics.shapeProgress === 1;
+      }));
+      await frames(scenePage, 'S8DawnDesktop', 300);
+      await scenePage.evaluate(() => window.__worldApp.teleport(.2, -44, 0));
+      await waitState(scenePage, () => window.__worldApp.getSceneId() === 'S9', 'S8 桌面进入 S9');
+      await frames(scenePage, 'S9DawnDesktop', 300);
+    }
     await settle(scenePage);
     await scenePage.context().close();
   }
@@ -444,6 +485,18 @@ try {
       await scenePage.evaluate(() => window.__worldApp.teleport(.2, -20, 0));
     }
     await frames(scenePage, `${id}MobileLandscape`, 300);
+    if (id === 'S8') {
+      await scenePage.evaluate(() => window.__worldApp.teleport(.2, -36, 0));
+      await waitState(scenePage, () => window.__worldApp.getActorPosition('linxia')[2] === -44, 'S8 移动朝霞后段推进', 60000);
+      check('S8MobileLandscape 朝霞后段实际推进到完整暖色', await scenePage.evaluate(() => {
+        const diagnostics = window.__worldApp.getVisualDiagnostics();
+        return diagnostics.atmosphereProgress === 1 && diagnostics.shapeProgress === 1;
+      }));
+      await frames(scenePage, 'S8DawnMobileLandscape', 300);
+      await scenePage.evaluate(() => window.__worldApp.teleport(.2, -44, 0));
+      await waitState(scenePage, () => window.__worldApp.getSceneId() === 'S9', 'S8 移动进入 S9');
+      await frames(scenePage, 'S9DawnMobileLandscape', 300);
+    }
     await settle(scenePage);
     await scenePage.context().close();
   }

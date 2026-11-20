@@ -38,6 +38,7 @@ export class ChoicesPanel {
   show(payload: ChoicesPayload): void {
     this.stepId = payload.stepId;
     this.active = true;
+    this.root.classList.toggle('choices--exploration', !!payload.allowMovement);
 
     this.prompt.textContent = payload.prompt ?? '';
     this.prompt.hidden = !payload.prompt;

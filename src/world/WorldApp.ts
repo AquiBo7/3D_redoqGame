@@ -20,6 +20,7 @@ import {
   isGroundedActor,
 } from '../scenes3d/materials';
 import type { CharacterModelId } from '../scenes3d/modelManifest';
+import type { ColorBloomUniforms } from '../scenes3d/colorBloom';
 import { CutscenePlayer } from './CutscenePlayer';
 import { DebugOverlay } from './debugOverlay';
 import { FirstPersonController } from './FirstPersonController';
@@ -63,7 +64,50 @@ const DEFAULT_HAZE_COLOR = 0xa7bec8;
 const SKY_ZENITH_COLOR = 0x82acd0;
 const SKY_MID_COLOR = 0xc2d2d7;
 const SKY_HORIZON_WARM = 0xf3c28e;
+const DEFAULT_ATMOSPHERE = {
+  uZenith: new THREE.Color(SKY_ZENITH_COLOR),
+  uMid: new THREE.Color(SKY_MID_COLOR),
+  uHorizon: new THREE.Color(SKY_HORIZON_WARM),
+  uCloud: new THREE.Color(0.7, 0.78, 0.82),
+  uCloudHighlight: new THREE.Color(0.94, 0.87, 0.75),
+  uSunHighlight: new THREE.Color(1, 0.58, 0.25),
+  sun: new THREE.Color(0xffd29b),
+};
+const COOL_ATMOSPHERE = {
+  uZenith: new THREE.Color(0x7e9aae),
+  uMid: new THREE.Color(0xa9bec7),
+  uHorizon: new THREE.Color(0xb4c6ca),
+  uCloud: new THREE.Color(0.52, 0.62, 0.68),
+  uCloudHighlight: new THREE.Color(0.68, 0.75, 0.79),
+  uSunHighlight: new THREE.Color(0.64, 0.73, 0.8),
+  sun: new THREE.Color(0xd4dee4),
+  fog: new THREE.Color(0x9eb7c2),
+};
+const DAWN_ATMOSPHERE = {
+  uZenith: new THREE.Color(0x9caed0),
+  uMid: new THREE.Color(0xe7c4d0),
+  uHorizon: new THREE.Color(0xffcb99),
+  uCloud: new THREE.Color(0.82, 0.72, 0.79),
+  uCloudHighlight: new THREE.Color(1, 0.82, 0.63),
+  uSunHighlight: new THREE.Color(1, 0.55, 0.27),
+  sun: new THREE.Color(0xffc48f),
+  fog: new THREE.Color(0xe3c6ba),
+};
+const SKY_COLOR_UNIFORMS = ['uZenith', 'uMid', 'uCloud', 'uCloudHighlight', 'uSunHighlight'] as const;
+const HAZE_TINT = new THREE.Color(0x91b3c2);
+const DEFAULT_DUST = new THREE.Color(0xffdfad);
+const DEFAULT_LEAF = new THREE.Color(0xa6ad79);
+const DAWN_PARTICLE_COLORS = [
+  new THREE.Color(0xffd58b),
+  new THREE.Color(0xffc9d9),
+  new THREE.Color(0xc5d99c),
+];
 const SUN_DIRECTION = new THREE.Vector3(-11, 6.5, 9).normalize();
+
+export function smoothAtmosphereProgress(progress: number): number {
+  const t = Number.isNaN(progress) ? 0 : Math.max(0, Math.min(1, progress));
+  return t * t * (3 - 2 * t);
+}
 const OUTDOOR_PARTICLE_SCENE_KEYS: ReadonlySet<SceneKey> = new Set<SceneKey>([
   'street',
   'gate',
@@ -83,6 +127,9 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uMid;
   uniform vec3 uHorizon;
   uniform vec3 uBelow;
+  uniform vec3 uCloud;
+  uniform vec3 uCloudHighlight;
+  uniform vec3 uSunHighlight;
   uniform vec3 uSunDirection;
   uniform float uTime;
   varying vec3 vDir;
@@ -122,13 +169,13 @@ const SKY_FRAGMENT_SHADER = /* glsl */ `
     cloudUv = cloudUv * 1.35 + vec2(uTime * 0.0035, uTime * 0.0012);
     float cloudNoise = fbm(cloudUv) * 0.76 + fbm(cloudUv * 2.3 + 7.1) * 0.24;
     float clouds = smoothstep(0.5, 0.7, cloudNoise) * smoothstep(0.015, 0.17, h);
-    vec3 cloudColor = mix(vec3(0.7, 0.78, 0.82), vec3(0.94, 0.87, 0.75),
+    vec3 cloudColor = mix(uCloud, uCloudHighlight,
       pow(max(dot(direction, uSunDirection), 0.0), 5.0));
     sky = mix(sky, cloudColor, clouds * 0.46);
 
     float sunDot = max(dot(direction, uSunDirection), 0.0);
     float halo = pow(sunDot, 24.0) * 0.22 + pow(sunDot, 180.0) * 0.5;
-    sky += vec3(1.0, 0.58, 0.25) * halo * smoothstep(-0.04, 0.12, h);
+    sky += uSunHighlight * halo * smoothstep(-0.04, 0.12, h);
 
     vec3 color = mix(uBelow, sky, smoothstep(-0.12, 0.015, h));
     gl_FragColor = vec4(color, 1.0);
@@ -175,6 +222,14 @@ export class WorldApp {
   private readonly levelGroup = new THREE.Group();
   private readonly skyDome: THREE.Mesh;
   private readonly skyMaterial: THREE.ShaderMaterial;
+  private readonly sun = new THREE.DirectionalLight(0xffd29b, 2.05);
+  private readonly baseHaze = new THREE.Color(DEFAULT_HAZE_COLOR);
+  private readonly atmosphereHaze = new THREE.Color();
+  private readonly atmosphereHorizon = new THREE.Color();
+  private readonly particleColor = new THREE.Color();
+  private readonly airParticleShape = { value: 0 };
+  private atmosphereProgress = 0;
+  private runtimeContextToken = 0;
   private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
   private outputPass: OutputPass | null = null;
@@ -233,6 +288,9 @@ export class WorldApp {
         uMid: { value: new THREE.Color(SKY_MID_COLOR) },
         uHorizon: { value: new THREE.Color(SKY_HORIZON_WARM) },
         uBelow: { value: new THREE.Color(DEFAULT_HAZE_COLOR) },
+        uCloud: { value: DEFAULT_ATMOSPHERE.uCloud.clone() },
+        uCloudHighlight: { value: DEFAULT_ATMOSPHERE.uCloudHighlight.clone() },
+        uSunHighlight: { value: DEFAULT_ATMOSPHERE.uSunHighlight.clone() },
         uSunDirection: { value: SUN_DIRECTION.clone() },
         uTime: { value: 0 },
       },
@@ -250,7 +308,7 @@ export class WorldApp {
     this.skyDome.frustumCulled = false;
     this.scene.add(this.skyDome);
     this.scene.add(this.levelGroup);
-    this.updateSkyHaze(new THREE.Color(DEFAULT_HAZE_COLOR));
+    this.updateSkyHaze(this.baseHaze);
 
     // 远裁剪面 120：street/gate/building 的雾最远 75，充足不裁切
     this.camera = new THREE.PerspectiveCamera(LANDSCAPE_FOV, 1, 0.1, 120);
@@ -329,6 +387,7 @@ export class WorldApp {
       (window as unknown as Record<string, unknown>).__worldApp = {
         getSceneId: () => this.currentSceneId,
         getPlayerPosition: () => ({ feet: this.controller.getFeetPosition(), camera: this.camera.position.toArray(), direction: this.camera.getWorldDirection(new THREE.Vector3()).toArray(), enabled: this.controller.isEnabled() }),
+        getAirParticles: () => this.airParticles,
         /** 传送并设定视角（yawDeg=0 面向 -Z，180 面向 +Z） */
         teleport: (x: number, z: number, yawDeg = 0) => {
           this.controller.setSpawn({ x, z, yaw: (yawDeg * Math.PI) / 180 });
@@ -355,8 +414,60 @@ export class WorldApp {
             }
           });
           const carryLinxia = this.actors.carryLinxia;
+          const bloomEnvironment = this.actors.bloomEnvironment;
+          const bloomUniforms = bloomEnvironment?.userData.colorBloomUniforms as ColorBloomUniforms | undefined;
+          const bloomMaterials = new Set<THREE.Material>();
+          let characterBloomCount = 0;
+          this.levelGroup.traverse((object) => {
+            if (!(object instanceof THREE.Mesh)) return;
+            for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+              if (!material.userData.colorBloomUniforms) continue;
+              bloomMaterials.add(material);
+              let parent: THREE.Object3D | null = object;
+              while (parent && !parent.userData.actorModelId) parent = parent.parent;
+              if (parent) characterBloomCount += 1;
+            }
+          });
+          const types = this.airParticles?.geometry.getAttribute('airType');
+          const colors = this.airParticles?.geometry.getAttribute('color');
+          const particleTypeDistribution = { dust: 0, petal: 0, leaf: 0 };
+          if (types) {
+            for (let index = 0; index < types.count; index += 1) {
+              const type = types.getX(index);
+              if (type === 0) particleTypeDistribution.dust += 1;
+              else if (type === 1) particleTypeDistribution.petal += 1;
+              else particleTypeDistribution.leaf += 1;
+            }
+          }
           return {
             sceneId: this.currentSceneId,
+            sceneKey: this.currentDefinition.sceneKey,
+            atmosphereProgress: this.atmosphereProgress,
+            colorBloom: bloomUniforms ? {
+              instanceId: bloomEnvironment.uuid,
+              player: bloomUniforms.uPlayerPos.value.toArray(),
+              companion: bloomUniforms.uCompanionPos.value.toArray(),
+              revealedZ: bloomUniforms.uRevealedZ.value,
+              time: bloomUniforms.uBloomTime.value,
+              materials: Array.from(bloomMaterials, (material) => material.name),
+              shared: Array.from(bloomMaterials).every((material) => material.userData.colorBloomUniforms === bloomUniforms),
+              characterBloomCount,
+            } : null,
+            skyColors: {
+              zenith: (this.skyMaterial.uniforms.uZenith.value as THREE.Color).getHexString(),
+              mid: (this.skyMaterial.uniforms.uMid.value as THREE.Color).getHexString(),
+              horizon: (this.skyMaterial.uniforms.uHorizon.value as THREE.Color).getHexString(),
+              below: (this.skyMaterial.uniforms.uBelow.value as THREE.Color).getHexString(),
+              cloud: (this.skyMaterial.uniforms.uCloud.value as THREE.Color).getHexString(),
+              cloudHighlight: (this.skyMaterial.uniforms.uCloudHighlight.value as THREE.Color).getHexString(),
+              sunHighlight: (this.skyMaterial.uniforms.uSunHighlight.value as THREE.Color).getHexString(),
+            },
+            sunColor: this.sun.color.getHexString(),
+            sunIntensity: this.sun.intensity,
+            fogColor: this.scene.fog?.color.getHexString() ?? null,
+            particleColors: colors ? Array.from(colors.array) : [],
+            shapeProgress: this.airParticleShape.value,
+            particleTypeDistribution,
             skyCameraDelta: this.skyDome.position.distanceTo(this.camera.position),
             skyRadius: SKY_DOME_RADIUS,
             cameraFar: this.camera.far,
@@ -479,15 +590,25 @@ export class WorldApp {
   }
 
   /** scene:transition：同 sceneKey 只换交互配置；异 key 黑幕淡出 → 重建 → 淡入 */
-  private handleSceneTransition(payload: { toSceneId: SceneId; sceneKey: SceneKey }): void {
+  private handleSceneTransition(payload: { toSceneId: SceneId; sceneKey: SceneKey; fromSceneId?: SceneId | null }): void {
+    this.runtimeContextToken += 1;
     this.resetMotionAudio();
     this.currentSceneId = payload.toSceneId;
     const definition = getSceneDefinition(payload.toSceneId);
 
     if (definition.sceneKey === this.currentDefinition.sceneKey) {
+      if (payload.fromSceneId === null && definition.sceneKey === 'building') {
+        this.currentRuntime?.exit();
+        this.mountDefinition(definition, payload.toSceneId);
+        return;
+      }
       // 同 sceneKey（S1→S2→S3 / S5→S6 / S8→S9）：绝不销毁重建或重置站位，
       // 复用几何体与 occluders，仅更新交互配置与调试线框
       this.currentDefinition = definition;
+      if (payload.fromSceneId === null) {
+        this.atmosphereProgress = 0;
+        this.applyFog(definition);
+      }
       this.applyInteraction(definition);
       this.debugOverlay?.setDefinition(definition);
       // 共享 runtime 按 sceneId 自行判断是否重启演出（如 gate 只在 S5 播放）
@@ -496,7 +617,21 @@ export class WorldApp {
       return;
     }
 
+    if (payload.fromSceneId === null && (definition.requiredModels?.length ?? 0) === 0) {
+      // 起床过场会接管黑幕，零模型新局必须先同步挂载，避免淡出回调被取消。
+      this.transitionToken += 1;
+      this.pendingDefinition = null;
+      this.pendingSceneId = null;
+      gsap.killTweensOf(this.fadeEl);
+      this.currentRuntime?.exit();
+      this.mountDefinition(definition, payload.toSceneId);
+      this.fadeEl.style.opacity = '0';
+      this.controller.setTransitionLocked(false);
+      return;
+    }
+
     // 异 sceneKey：黑幕过渡。transitionLocked 只锁输入，与 uiLock（controlsLocked）相互独立
+    this.resetAtmosphere();
     this.controller.setTransitionLocked(true);
     this.pendingDefinition = definition;
     this.pendingSceneId = payload.toSceneId;
@@ -583,15 +718,15 @@ export class WorldApp {
     const count = 48;
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
+    const types = new Float32Array(count);
     this.airParticleSpeeds = new Float32Array(count);
-    const dust = new THREE.Color(0xffdfad);
-    const leaf = new THREE.Color(0xa6ad79);
     for (let index = 0; index < count; index += 1) {
       const offset = index * 3;
       positions[offset] = (Math.random() - 0.5) * 16;
       positions[offset + 1] = 0.35 + Math.random() * 4.5;
       positions[offset + 2] = (Math.random() - 0.5) * 18;
-      const color = index % 7 === 0 ? leaf : dust;
+      const color = index % 7 === 0 ? DEFAULT_LEAF : DEFAULT_DUST;
+      types[index] = index % 6 === 0 ? 2 : index % 6 === 3 ? 1 : 0;
       colors[offset] = color.r;
       colors[offset + 1] = color.g;
       colors[offset + 2] = color.b;
@@ -614,6 +749,7 @@ export class WorldApp {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('airType', new THREE.BufferAttribute(types, 1));
     const material = new THREE.PointsMaterial({
       map: texture,
       size: 0.055,
@@ -623,6 +759,43 @@ export class WorldApp {
       depthWrite: false,
       sizeAttenuation: true,
     });
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uAirShape = this.airParticleShape;
+      shader.uniforms.uAirTime = this.skyMaterial.uniforms.uTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>
+          attribute float airType;
+          uniform float uAirShape;
+          uniform float uAirTime;
+          varying float vAirType;
+          varying float vAirAngle;`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vAirType = airType;
+          vAirAngle = position.x * 0.6 + airType * 1.37 + uAirTime * (0.5 + airType * 0.12);`)
+        .replace('gl_PointSize = size;',
+          'gl_PointSize = size * mix(1.0, airType > 0.5 ? 2.2 : 1.1, uAirShape);');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          uniform float uAirShape;
+          varying float vAirType;
+          varying float vAirAngle;`)
+        .replace('#include <map_particle_fragment>', `
+          float airOpacity = diffuseColor.a;
+          #include <map_particle_fragment>
+          if (vAirType > 0.5 && uAirShape > 0.0) {
+            vec2 p = gl_PointCoord - 0.5;
+            float c = cos(vAirAngle), s = sin(vAirAngle);
+            vec2 q = mat2(c, -s, s, c) * p;
+            float radius = vAirType > 1.5
+              ? abs(q.x) / 0.25 + pow(abs(q.y) / 0.46, 1.5)
+              : length(vec2(q.x / (0.22 + q.y * 0.16), (q.y + 0.02) / 0.43));
+            float mask = 1.0 - smoothstep(0.84, 1.0, radius);
+            diffuseColor.a = mix(diffuseColor.a, airOpacity * mask * 0.72, uAirShape);
+            if (vAirType > 1.5) diffuseColor.rgb *=
+              1.0 - uAirShape * 0.16 * (1.0 - smoothstep(0.007, 0.025, abs(q.x)));
+          }`);
+    };
+    material.customProgramCacheKey = () => 'morning-air-shapes-v1';
     this.airParticles = new THREE.Points(geometry, material);
     this.airParticles.name = 'morning-air-particles';
     this.airParticles.frustumCulled = false;
@@ -634,9 +807,16 @@ export class WorldApp {
     if (!this.airParticles || !this.airParticleSpeeds) return;
     const attribute = this.airParticles.geometry.getAttribute('position') as THREE.BufferAttribute;
     const positions = attribute.array as Float32Array;
+    const types = this.airParticles.geometry.getAttribute('airType');
+    const time = this.skyMaterial.uniforms.uTime.value as number;
     for (let index = 0; index < this.airParticleSpeeds.length; index += 1) {
       const offset = index * 3;
       positions[offset] += Math.sin(index * 1.7 + positions[offset + 1]) * dt * 0.025;
+      if (this.airParticleShape.value > 0 && types.getX(index) > 0) {
+        const flutter = this.airParticleShape.value * dt * 0.12;
+        positions[offset] += Math.sin(time * 1.4 + index) * flutter;
+        positions[offset + 2] += Math.cos(time * 1.1 + index) * flutter;
+      }
       positions[offset + 1] -= this.airParticleSpeeds[index] * dt;
       if (positions[offset + 1] < 0.22) positions[offset + 1] = 4.85;
     }
@@ -646,6 +826,8 @@ export class WorldApp {
 
   /** 全量装载：清理旧关卡几何 → build 新场景 → 重置导航与站位 → 更新交互配置 */
   private buildDefinition(definition: WorldSceneDefinition): void {
+    this.runtimeContextToken += 1;
+    this.resetAtmosphere();
     disposeObjectTree(this.levelGroup);
     this.rebuildAirParticles(definition.sceneKey);
     const built = definition.build(this.levelGroup);
@@ -671,22 +853,59 @@ export class WorldApp {
 
   /** 切换 sceneKey 时更新雾；无 fog 的场景清除上一场景残留 */
   private applyFog(definition: WorldSceneDefinition): void {
-    const haze = new THREE.Color(definition.fog?.color ?? DEFAULT_HAZE_COLOR).lerp(
-      new THREE.Color(0x91b3c2),
-      0.36,
-    );
+    this.baseHaze.setHex(definition.fog?.color ?? DEFAULT_HAZE_COLOR).lerp(HAZE_TINT, 0.36);
     this.scene.fog = definition.fog
-      ? new THREE.Fog(haze, definition.fog.near, definition.fog.far)
+      ? new THREE.Fog(this.baseHaze, definition.fog.near, definition.fog.far)
       : null;
-    this.updateSkyHaze(haze);
+    this.applyAtmosphere();
   }
 
   /** 天空球地平线以下与雾色衔接：暖橘金只在地平线附近混入，避免与地面尽头出现硬切线 */
-  private updateSkyHaze(haze: THREE.Color): void {
+  private updateSkyHaze(haze: THREE.Color, horizon = DEFAULT_ATMOSPHERE.uHorizon): void {
     (this.skyMaterial.uniforms.uBelow.value as THREE.Color).copy(haze);
-    (this.skyMaterial.uniforms.uHorizon.value as THREE.Color)
-      .copy(haze)
-      .lerp(new THREE.Color(SKY_HORIZON_WARM), 0.62);
+    (this.skyMaterial.uniforms.uHorizon.value as THREE.Color).copy(haze).lerp(horizon, 0.62);
+  }
+
+  private setAtmosphereProgress(progress: number): void {
+    if (this.currentDefinition.sceneKey !== 'building' || !Number.isFinite(progress)) return;
+    const next = Math.max(0, Math.min(1, progress));
+    if (next === this.atmosphereProgress) return;
+    this.atmosphereProgress = next;
+    this.applyAtmosphere();
+  }
+
+  private resetAtmosphere(): void {
+    this.atmosphereProgress = 0;
+    this.applyAtmosphere(false);
+  }
+
+  private applyAtmosphere(building = this.currentDefinition.sceneKey === 'building'): void {
+    const blend = smoothAtmosphereProgress(this.atmosphereProgress);
+    for (const key of SKY_COLOR_UNIFORMS) {
+      const color = this.skyMaterial.uniforms[key].value as THREE.Color;
+      if (building) color.lerpColors(COOL_ATMOSPHERE[key], DAWN_ATMOSPHERE[key], blend);
+      else color.copy(DEFAULT_ATMOSPHERE[key]);
+    }
+    this.atmosphereHaze.copy(this.baseHaze);
+    this.atmosphereHorizon.copy(DEFAULT_ATMOSPHERE.uHorizon);
+    this.sun.color.copy(DEFAULT_ATMOSPHERE.sun);
+    if (building) {
+      this.atmosphereHaze.lerpColors(COOL_ATMOSPHERE.fog, DAWN_ATMOSPHERE.fog, blend);
+      this.atmosphereHorizon.lerpColors(COOL_ATMOSPHERE.uHorizon, DAWN_ATMOSPHERE.uHorizon, blend);
+      this.sun.color.lerpColors(COOL_ATMOSPHERE.sun, DAWN_ATMOSPHERE.sun, blend);
+    }
+    this.scene.fog?.color.copy(this.atmosphereHaze);
+    this.updateSkyHaze(this.atmosphereHaze, this.atmosphereHorizon);
+    this.airParticleShape.value = building ? smoothAtmosphereProgress((this.atmosphereProgress - 0.5) * 2) : 0;
+    if (!this.airParticles) return;
+    const colors = this.airParticles.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const types = this.airParticles.geometry.getAttribute('airType');
+    for (let index = 0; index < colors.count; index += 1) {
+      this.particleColor.copy(index % 7 === 0 ? DEFAULT_LEAF : DEFAULT_DUST)
+        .lerp(DAWN_PARTICLE_COLORS[types.getX(index)], this.airParticleShape.value);
+      colors.setXYZ(index, this.particleColor.r, this.particleColor.g, this.particleColor.b);
+    }
+    colors.needsUpdate = true;
   }
 
   /**
@@ -724,11 +943,22 @@ export class WorldApp {
   }
 
   private createRuntimeContext(sceneId: SceneId): SceneRuntimeContext {
+    const token = this.runtimeContextToken;
+    const level = this.actors;
     return {
       sceneId,
       bus: this.bus,
-      actors: this.actors,
+      actors: level,
       setInteractableVisible: (id, visible) => this.interaction.setItemVisible(id, visible),
+      getPlayerFeet: (target) => {
+        const feet = this.controller.getFeetPosition();
+        return target.set(feet.x, feet.y, feet.z);
+      },
+      setAtmosphereProgress: (progress) => {
+        if (this.disposed || token !== this.runtimeContextToken || level !== this.actors
+          || this.pendingSceneId !== null) return;
+        this.setAtmosphereProgress(progress);
+      },
     };
   }
 
@@ -737,7 +967,7 @@ export class WorldApp {
     const hemisphere = new THREE.HemisphereLight(0xa9cada, 0x586e68, 0.46);
     this.scene.add(hemisphere);
 
-    const sun = new THREE.DirectionalLight(0xffd29b, 2.05);
+    const sun = this.sun;
     sun.position.copy(SUN_DIRECTION).multiplyScalar(16);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);

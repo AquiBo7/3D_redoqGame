@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHARED_RESOURCE_FLAG } from '../world/resources';
 import { buildingRuntime, createBuildingDefinition } from './building';
-import { disposeMaterialCache, getFoliageMaterial, getPlasterMaterial } from './materials';
+import { disposeMaterialCache, getFoliageMaterial, getPavingMaterial, getPlasterMaterial } from './materials';
+import { EventBus } from '../core/eventBus';
+import type { ColorBloomUniforms } from './colorBloom';
+import { sampleColorBloomReveal } from './colorBloom';
 
 // 仅替代 Node 中不存在的 Canvas；场景、材质工厂、角色工厂和所有几何均使用真实实现。
 beforeEach(() => {
@@ -32,6 +35,7 @@ function disposeLocal(root: THREE.Group): void {
   root.clear();
 }
 afterEach(() => {
+  buildingRuntime.exit();
   for (const root of roots) disposeLocal(root);
   roots.length = 0;
   disposeMaterialCache();
@@ -267,6 +271,7 @@ describe('M3 模块6：教学楼真实几何封边', () => {
     expect(material.flatShading).toBe(true);
     expect(material.fog).toBe(true);
     expect(material.transparent).toBe(false);
+    expect(material.opacity).toBe(1);
     expect(material.depthWrite).toBe(true);
     expect(ring.castShadow).toBe(false);
     expect(ring.receiveShadow).toBe(false);
@@ -274,6 +279,7 @@ describe('M3 模块6：教学楼真实几何封边', () => {
     const position = ring.geometry.getAttribute('position');
     const triangles = (ring.geometry.index ? ring.geometry.index.count : position.count) / 3;
     expect(triangles).toBe(32);
+    expect(triangles * ring.count).toBe(4608);
     expect(triangles * ring.count).toBeLessThanOrEqual(5000);
     ring.geometry.computeBoundingBox();
     const size = ring.geometry.boundingBox!.getSize(new THREE.Vector3());
@@ -291,11 +297,17 @@ describe('M3 模块6：教学楼真实几何封边', () => {
     expect(bounds.max.x).toBeGreaterThan(60);
     expect(bounds.min.x).toBeGreaterThan(-66);
     expect(bounds.max.x).toBeLessThan(66);
-    expect(bounds.min.z).toBeGreaterThan(-79);
-    expect(bounds.min.z).toBeLessThan(-74);
-    expect(bounds.max.z).toBeGreaterThan(26);
-    expect(bounds.max.z).toBeLessThan(31);
+    // 真实圆环不压缩 Z 轴：保留原 X 范围，必要外景边界扩展至约 z -89..41。
+    expect(bounds.min.z).toBeGreaterThan(-90);
+    expect(bounds.min.z).toBeLessThan(-88);
+    expect(bounds.max.z).toBeGreaterThan(40);
+    expect(bounds.max.z).toBeLessThan(42);
     expect(bounds.min.y).toBe(-4);
+    const ringCenter = new THREE.Vector3().setFromMatrixPosition(ring.matrixWorld);
+    expect(ringCenter.toArray()).toEqual([0, 0, -24]);
+    expect(ring.scale.toArray()).toEqual([1, 1, 1]);
+    expect(bounds.min.z).toBeCloseTo(bounds.min.x + ringCenter.z, 4);
+    expect(bounds.max.z).toBeCloseTo(bounds.max.x + ringCenter.z, 4);
     const fog = new THREE.Color(definition.fog!.color);
     const colors = new Set<string>();
     const means: THREE.Color[] = [];
@@ -309,9 +321,10 @@ describe('M3 模块6：教学楼真实几何封边', () => {
         ring.getMatrixAt(i, matrix);
         const p = new THREE.Vector3();
         const s = new THREE.Vector3();
+        matrix.premultiply(ring.matrixWorld);
         matrix.decompose(p, new THREE.Quaternion(), s);
-        expect(Math.hypot(p.x, p.z)).toBeGreaterThanOrEqual(54.99);
-        expect(Math.hypot(p.x, p.z)).toBeLessThanOrEqual(78);
+        expect(Math.hypot(p.x - ringCenter.x, p.z - ringCenter.z)).toBeGreaterThanOrEqual(54.99);
+        expect(Math.hypot(p.x - ringCenter.x, p.z - ringCenter.z)).toBeLessThanOrEqual(78);
         expect(s.z).toBeGreaterThan(3.5);
         heights.push(p.y + s.y);
         const color = new THREE.Color();
@@ -433,5 +446,126 @@ describe('M3 模块6：教学楼真实几何封边', () => {
     expect(nextRing.instanceMatrix.count).toBe(144);
     foliage.removeEventListener('dispose', cacheDisposed);
     plaster.removeEventListener('dispose', cacheDisposed);
+  });
+});
+
+function bloomOf(built: ReturnType<typeof build>['built']): ColorBloomUniforms {
+  return built.actors!.bloomEnvironment.userData.colorBloomUniforms as ColorBloomUniforms;
+}
+
+describe('M4 模块8：林荫道景观漫染集成', () => {
+  it('铺装、草地、花坛砖石、草花与树冠共用独立 Uniform，标识楼体与人物不染色', () => {
+    const { root, built } = build();
+    const uniforms = bloomOf(built);
+    const materials = new Set<THREE.Material>();
+    root.traverse((object) => {
+      if (object instanceof THREE.Mesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material);
+    });
+    const bloomed = Array.from(materials).filter((material) => material.userData.colorBloomUniforms);
+    expect(bloomed.map((material) => material.name)).toEqual(expect.arrayContaining([
+      'building-bloom-paving', 'building-bloom-pocket-paving', 'building-bloom-lawn',
+      'building-bloom-planter-brick', 'building-bloom-planter-stone', 'building-bloom-planter-cap',
+      'building-bloom-meadow-grass', 'building-bloom-meadow-flowers', 'building-bloom-canopies', 'building-bloom-shrubs',
+    ]));
+    for (const material of bloomed) {
+      expect(material.userData.colorBloomUniforms).toBe(uniforms);
+      expect(material.userData[SHARED_RESOURCE_FLAG]).toBeUndefined();
+    }
+    for (const actor of Object.values(built.actors!).filter((object) => object.userData.actorModelId)) {
+      actor.traverse((object) => {
+        if (object instanceof THREE.Mesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) expect(material.userData.colorBloomUniforms).toBeUndefined();
+      });
+    }
+    for (const material of materials) {
+      if (material.userData.colorBloomUniforms) continue;
+      expect(material.customProgramCacheKey()).not.toContain('color-bloom');
+    }
+    expect(getPavingMaterial({ repeatX: 6, repeatY: 36 }).userData.colorBloomUniforms).toBeUndefined();
+    expect(getFoliageMaterial().userData.colorBloomUniforms).toBeUndefined();
+    expect(getPlasterMaterial({ repeatX: 3, repeatY: 2 }).userData.colorBloomUniforms).toBeUndefined();
+    const parts = actualParts(root);
+    expect(parts.filter((part) => part.material.userData.colorBloomUniforms && part.material.name.includes('planter-')).every((part) => part.p.y < 0.6)).toBe(true);
+    expect(parts.filter((part) => part.material instanceof THREE.MeshStandardMaterial && part.material.map && part.size.y >= 7).every((part) => !part.material.userData.colorBloomUniforms)).toBe(true);
+  });
+
+  it('风场与草花梯度保留，漫染读取扰动后的实例世界位置并保留全部共享引用', () => {
+    const { root, built } = build();
+    const uniforms = bloomOf(built);
+    for (const name of ['building-meadow-wind-grass', 'building-meadow-wind-flowers', 'building-second-row-crowns-1']) {
+      const mesh = root.getObjectByName(name) as THREE.Mesh;
+      const material = mesh.material as THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
+      const template = material instanceof THREE.MeshLambertMaterial ? THREE.ShaderLib.lambert : THREE.ShaderLib.standard;
+      const shader = { uniforms: {}, vertexShader: template.vertexShader, fragmentShader: template.fragmentShader } as Parameters<THREE.Material['onBeforeCompile']>[0];
+      material.onBeforeCompile(shader, {} as THREE.WebGLRenderer);
+      expect(material.customProgramCacheKey()).toContain('campus-wind-v1:');
+      expect(material.customProgramCacheKey()).toContain(':color-bloom-v1');
+      expect(shader.vertexShader).toContain('foliageWorldPosition.x += breeze;');
+      expect(shader.vertexShader).toContain('vBloomWorldPos = foliageWorldPosition.xyz;');
+      expect(shader.vertexShader.indexOf('vBloomWorldPos =')).toBeGreaterThan(shader.vertexShader.indexOf('foliageWorldPosition.z += breeze'));
+      if (name.includes('grass')) expect(shader.fragmentShader.indexOf('diffuseColor.rgb *= mix(uMeadowBottom')).toBeLessThan(shader.fragmentShader.indexOf('float bloomDistance'));
+      expect(shader.uniforms.uPlayerPos).toBe(uniforms.uPlayerPos);
+      expect(shader.uniforms.uRevealedZ).toBe(uniforms.uRevealedZ);
+    }
+  });
+
+  it('运行时读真实脚底和林夏，回头时历史色彩与朝霞进度不倒退，离场停止更新', () => {
+    const { built } = build();
+    const uniforms = bloomOf(built);
+    const player = new THREE.Vector3(0.2, 0, 1.2);
+    const atmosphere = vi.fn();
+    const getter = vi.fn((target: THREE.Vector3) => target.copy(player));
+    buildingRuntime.enter({ sceneId: 'S8', bus: new EventBus(), actors: built.actors!, setInteractableVisible: () => {}, getPlayerFeet: getter, setAtmosphereProgress: atmosphere });
+    const playerUniform = uniforms.uPlayerPos, companionUniform = uniforms.uCompanionPos;
+    player.set(-0.3, 0, -20);
+    built.actors!.linxia.position.set(0.5, 0, -24);
+    buildingRuntime.tick!(0.25);
+    expect(uniforms.uPlayerPos.value.toArray()).toEqual([-0.3, 0, -20]);
+    expect(uniforms.uCompanionPos.value.toArray()).toEqual([0.5, 0, -24]);
+    expect(uniforms.uRevealedZ.value).toBe(-24);
+    expect(atmosphere).toHaveBeenLastCalledWith(23 / 43);
+    expect(sampleColorBloomReveal(8, -23, uniforms)).toBe(1);
+    player.z = 6;
+    built.actors!.linxia.position.z = -10;
+    buildingRuntime.tick!(0.5);
+    expect(uniforms.uRevealedZ.value).toBe(-24);
+    expect(sampleColorBloomReveal(8, -23, uniforms)).toBe(1);
+    expect(atmosphere).toHaveBeenLastCalledWith(23 / 43);
+    expect(uniforms.uPlayerPos).toBe(playerUniform);
+    expect(uniforms.uCompanionPos).toBe(companionUniform);
+    expect(getter).toHaveBeenCalledTimes(3);
+    expect(getter.mock.calls.every(([target]) => target === getter.mock.calls[0][0])).toBe(true);
+    expect(uniforms.uBloomTime.value).toBe(0.75);
+    buildingRuntime.exit();
+    expect(atmosphere).toHaveBeenLastCalledWith(0);
+    const calls = getter.mock.calls.length;
+    buildingRuntime.tick!(1);
+    expect(getter).toHaveBeenCalledTimes(calls);
+    expect(uniforms.uBloomTime.value).toBe(0.75);
+  });
+
+  it('新建 S8/S9 不共用历史边界或材质；重进建立新钩子且只更新当前实例', () => {
+    const first = build();
+    const second = build('S9');
+    const a = bloomOf(first.built), b = bloomOf(second.built);
+    expect(a).not.toBe(b);
+    for (const key of Object.keys(a) as Array<keyof ColorBloomUniforms>) expect(a[key]).not.toBe(b[key]);
+    const context = (actors: Record<string, THREE.Object3D>, sceneId: 'S8' | 'S9', z: number) => ({
+      sceneId, bus: new EventBus(), actors, setInteractableVisible: () => {},
+      getPlayerFeet: (target: THREE.Vector3) => target.set(0, 0, z), setAtmosphereProgress: vi.fn(),
+    });
+    const old = context(first.built.actors!, 'S8', -39);
+    buildingRuntime.enter(old);
+    buildingRuntime.tick!(0.4);
+    expect(a.uRevealedZ.value).toBe(-39);
+    expect(b.uRevealedZ.value).toBe(-1);
+    buildingRuntime.exit();
+    const next = context(second.built.actors!, 'S9', 1.2);
+    buildingRuntime.enter(next);
+    buildingRuntime.tick!(0.2);
+    expect(b.uRevealedZ.value).toBe(-1);
+    expect(b.uBloomTime.value).toBe(0.2);
+    expect(a.uBloomTime.value).toBe(0.4);
+    expect(old.setAtmosphereProgress).toHaveBeenLastCalledWith(0);
+    expect(next.setAtmosphereProgress).toHaveBeenLastCalledWith(0);
   });
 });

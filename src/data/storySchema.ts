@@ -113,6 +113,7 @@ export interface PhonePanel {
 export interface StoryChoice {
   id: string;
   text: string;
+  interactId?: string;
   when?: Condition;
   effects?: StoryEffect;
   /** 跳转到本场景内的步骤 id；缺省进入下一步 */
@@ -149,6 +150,7 @@ export type StoryStep =
       id: string;
       when?: Condition;
       prompt?: string;
+      allowMovement?: boolean;
       options: StoryChoice[];
       effects?: StoryEffect;
     }
