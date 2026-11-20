@@ -185,10 +185,39 @@ describe('Phase B 校园墙帖子', () => {
     });
   });
 
+  it('计数从上一时刻滚动到真实数值，关闭取消未完成动画', () => {
+    vi.stubGlobal('window', Object.assign(new EventTarget(), { matchMedia: () => ({ matches: false }) }));
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextId = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextId, callback); return nextId; });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    const post = { ...postData(), previousStats: { views: 68, commentCount: 3 } };
+    phone.open(panelFor(post));
+    expect(query('.phone__post-stats').textContent).toBe('浏览 68 · 评论 3');
+    const callback = [...frames.values()][0];
+    frames.clear();
+    callback(performance.now() + 2000);
+    expect(query('.phone__post-stats').textContent).toBe('浏览 1250 · 评论 86');
+    expect(frames.size).toBe(0);
+    phone.open(panelFor(post));
+    expect(frames.size).toBe(1);
+    phone.hide();
+    expect(frames.size).toBe(0);
+  });
+
+  it('减少动态效果直接显示终值而不申请动画帧', () => {
+    vi.stubGlobal('window', Object.assign(new EventTarget(), { matchMedia: () => ({ matches: true }) }));
+    const request = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', request);
+    phone.open(panelFor({ ...postData(), previousStats: { views: 68, commentCount: 3 } }));
+    expect(query('.phone__post-stats').textContent).toBe('浏览 1250 · 评论 86');
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('删除态仅显示灰色占位，不渲染原图、正文、评论或操作', () => {
     phone.open(panelFor({ ...postData(), deleted: true }));
     const card = query('.phone__post--deleted');
-    expect(card.textContent).toContain('该帖子已删除');
+    expect(card.textContent).toContain('该内容已删除');
     expect(card.textContent).not.toContain('照片之外');
     expect(card.querySelectorAll('img')).toHaveLength(0);
     expect(card.querySelectorAll('button')).toHaveLength(0);

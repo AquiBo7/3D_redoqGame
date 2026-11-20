@@ -108,6 +108,8 @@ export type Condition =
   | { any: Condition[] }
   | { not: Condition }
   | { role: Role | Role[] }
+  | { key: 'yuanKeys' | 'clues'; matches: string[] }
+  | { key: 'yuanKeys' | 'clues'; only: string[] }
   | { key: BooleanStateKey; equals: boolean }
   | { key: NumericStateKey; op: ComparisonOp; value: number }
   | { [K in StringStateKey]: { key: K; op: '==' | '!='; value: StoryVariables[K] } }[StringStateKey];
@@ -164,6 +166,7 @@ export type PhoneSection =
   | {
       kind: 'post'; id: string; title: string; publishedAt: string;
       assetIds: string[]; views: number; commentCount: number;
+      previousStats?: { views: number; commentCount: number };
       text: string; comments: PhonePostComment[];
       actions?: PhoneReplyOption[];
       deleted?: boolean;

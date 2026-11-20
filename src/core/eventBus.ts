@@ -20,6 +20,7 @@ export interface GameEvents {
   'scene:enterZone': { sceneId: SceneId; zoneId: string };
   'scene:gazeHotspot': { sceneId: SceneId; hotspotId: string; dwellMs?: number };
   'scene:interact': { sceneId: SceneId; targetId: string };
+  'scene:interactionOptions': { sceneId: SceneId; ids: string[] };
 
   // 3D → 音频（由入口接线）
   'audio:motion': {

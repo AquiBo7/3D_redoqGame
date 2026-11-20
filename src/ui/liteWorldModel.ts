@@ -34,6 +34,10 @@ const SCENE_STAGE: Partial<Record<SceneId, string>> = {
 };
 
 const ZONE_LABELS: Record<string, { label: string; hint: string }> = {
+  'stairwell-corner': { label: '走到楼梯转角', hint: '那里传来轻轻的说话声' },
+  'night-phone': { label: '走近夜晚的楼梯间', hint: '橙色手机壳亮了一下' },
+  'platform-ayuan': { label: '走近平台上的阿远', hint: '他低头看着手机' },
+  'corridor-linxia': { label: '在走廊与林夏见面', hint: '夕阳落在教室外' },
   'canteen-whisper-1': { label: '经过靠窗的餐桌', hint: '几个人正在看手机' },
   'canteen-whisper-2': { label: '走过中间的队伍', hint: '低语声停了一下' },
   'canteen-whisper-3': { label: '走近取餐窗口', hint: '前面的人抬起头' },
@@ -63,6 +67,10 @@ const HOTSPOT_LABELS: Record<string, { label: string; hint: string }> = {
 };
 
 const CUTSCENE_TEXT: Record<string, { title: string; text: string }> = {
+  'platform-approach': {
+    title: '侧楼梯平台',
+    text: '夕阳落在栏杆上。你慢慢走近，阿远抬起头，橙色手机壳在掌心转了一下。',
+  },
   's1-wake': {
     title: '醒来',
     text: '闹钟响了三声，被按掉。窗帘缝里透进清晨的光，楼下传来行李箱滚轮的声音。',

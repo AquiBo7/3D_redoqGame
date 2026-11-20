@@ -1,0 +1,137 @@
+.stage2d {
+  position: fixed;
+  z-index: 8;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #d9dece;
+  color: #43554e;
+  isolation: isolate;
+  animation: stage2d-appear 360ms ease-out both;
+}
+
+.stage2d[hidden],
+.art-view[hidden] { display: none; }
+
+.stage2d *,
+.stage2d::after { pointer-events: none; }
+
+.stage2d__background,
+.stage2d__background img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100% !important;
+}
+
+.stage2d__background img {
+  object-fit: cover;
+  filter: saturate(.7) brightness(.9);
+}
+
+.stage2d::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #283b3b24, transparent 32%, #142a32ba),
+    radial-gradient(ellipse at 40% 35%, transparent 35%, #293d4338);
+}
+
+.stage2d__portrait {
+  position: absolute;
+  right: max(5vw, env(safe-area-inset-right));
+  bottom: calc(48px + env(safe-area-inset-bottom));
+  width: min(34vw, 390px);
+  height: 80%;
+  opacity: .65;
+  filter: saturate(.35) brightness(.65);
+  mask-image: linear-gradient(#000 62%, transparent 99%);
+}
+
+.stage2d__portrait img {
+  width: 100%;
+  height: 100% !important;
+  object-fit: contain;
+  object-position: bottom;
+  animation: stage2d-appear 260ms ease-out both;
+}
+
+.stage2d__title {
+  position: absolute;
+  top: calc(24px + env(safe-area-inset-top));
+  left: calc(24px + env(safe-area-inset-left));
+  right: calc(24px + env(safe-area-inset-right));
+  margin: 0;
+  font-size: clamp(13px, 1.4vw, 18px);
+  letter-spacing: .18em;
+  text-shadow: 0 1px 12px #fff9;
+}
+
+.art-view {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  pointer-events: auto;
+  padding: calc(16px + env(safe-area-inset-top))
+    calc(16px + env(safe-area-inset-right))
+    calc(48px + env(safe-area-inset-bottom))
+    calc(16px + env(safe-area-inset-left));
+  background: #17252bed;
+  color: #f4efdf;
+  animation: stage2d-appear 180ms ease-out both;
+}
+
+.art-view__panel {
+  width: min(100%, 1000px);
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.art-view__figure {
+  margin: 0;
+  max-width: 100%;
+}
+
+.art-view__figure img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 152px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  object-fit: contain;
+  box-shadow: 0 8px 30px #0003;
+}
+
+.art-view__close {
+  min-height: 44px;
+  padding: 10px 24px;
+  border: 1px solid #c4cabb;
+  border-radius: 6px;
+  background: #f3edde;
+  color: #304c49;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.art-view__close:focus-visible { outline: 3px solid #edc978; outline-offset: 4px; }
+
+@media (orientation: portrait) {
+  .stage2d__portrait { width: 65vw; right: 0; height: 65%; }
+  .stage2d__background img { object-position: 58% center; }
+}
+
+@keyframes stage2d-appear { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .stage2d, .stage2d *, .art-view, .art-view * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -10,6 +10,7 @@ import { initObjectivePrompt } from './objectivePrompt';
 import { ChoicesPanel } from './choicesPanel';
 import { DialogueBox } from './dialogueBox';
 import { IntertitleView } from './intertitle';
+import { Stage2D, ArtView } from './stage2d';
 import { initVignette } from './vignette';
 import { PhonePanelView } from './phonePanel';
 import { PhoneVibrationView } from './phoneVibrate';
@@ -40,9 +41,15 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   const lock = createUiLockCoordinator(options.getControls);
   const disposeObjective = initObjectivePrompt(root, bus);
   const disposeVignette = initVignette(host, bus);
+  const stage = new Stage2D(host, bus);
+  let artStepId: string | null = null;
+  const art = new ArtView(root, (stepId) => {
+    closeArt();
+    bus.emit('ui:dialogueEnd', { stepId });
+  });
 
   let minigameStepId: string | null = null;
-  let minigame: import('./minigame/bubbleGame').BubbleGame | null = null;
+  let minigame: { show(): void; dispose(): void } | null = null;
   let minigameGeneration = 0;
   let intertitleBlockerId: string | null = null;
   let phoneBlockerId: string | null = null;
@@ -131,7 +138,14 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     choicesBlockerId = null;
   }
 
+  function closeArt(): void {
+    art.hide();
+    if (artStepId) lock.release(`art:${artStepId}`);
+    artStepId = null;
+  }
+
   function closeMinigame(): void {
+    closeArt();
     minigameGeneration += 1;
     minigame?.dispose();
     minigame = null;
@@ -179,7 +193,13 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   }
 
   const unsubscribers = [
-    bus.on('ui:showMinigame', async ({ stepId, game }) => {
+    bus.on('ui:showArt', (payload) => {
+      cleanupAll();
+      artStepId = payload.stepId;
+      lock.acquire(`art:${payload.stepId}`);
+      art.show(payload);
+    }),
+    bus.on('ui:showMinigame', async ({ stepId, game, joined, tries }) => {
       cleanupAll();
       minigameStepId = stepId;
       lock.acquire(`minigame:${stepId}`);
@@ -191,6 +211,14 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
           closeMinigame();
           bus.emit('ui:minigameEnd', { stepId, ...result });
         });
+        minigame.show();
+      } else {
+        const { CrystalGame } = await import('./minigame/crystalGame');
+        if (generation !== minigameGeneration) return;
+        minigame = new CrystalGame(root, (result) => {
+          closeMinigame();
+          bus.emit('ui:minigameEnd', { stepId, ...result });
+        }, { joined, tries });
         minigame.show();
       }
     }),
@@ -278,6 +306,8 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       lock.sync();
       lock.dispose();
       intertitle.dispose();
+      art.dispose();
+      stage.dispose();
       disposeVignette();
       phone.dispose();
       dialogue.dispose();

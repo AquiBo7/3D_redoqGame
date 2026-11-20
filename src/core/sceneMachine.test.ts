@@ -8,6 +8,30 @@ import { SceneMachine } from './sceneMachine';
 import type { MachineSnapshot } from './sceneMachine';
 import { createInitialStoryState } from './state';
 
+describe('当前步骤交互权限', () => {
+  it('走廊找人只在辨认步骤开放，三次错问后移除无关同学', () => {
+    const bus = new EventBus();
+    const options: GameEvents['scene:interactionOptions'][] = [];
+    bus.on('scene:interactionOptions', (value) => options.push(value));
+    const machine = new SceneMachine({ chapter: chapter1, bus });
+    const save = createEmptyChapterSave({ sceneId: 'C5' });
+    save.state.wrongAsks = 3;
+    machine.continueFrom(save);
+    machine.onInteract('C5', 'student-4');
+    expect(machine.getState().foundAyuanWay).toBeNull();
+    expect(options[options.length - 1].ids).toEqual([]);
+    machine.onPhoneAction('c5-memo-unknown', 'close');
+    machine.onChooseOption('c5-find-path', 'recognize');
+    expect(options[options.length - 1].ids).toEqual(['student-4']);
+    machine.onInteract('C5', 'student-1');
+    expect(machine.getState().wrongAsks).toBe(3);
+    machine.onInteract('C5', 'student-4');
+    expect(options[options.length - 1].ids).toEqual([]);
+    machine.onDialogueEnd('c5-recognized');
+    expect(machine.getState().foundAyuanWay).toBe('recognize');
+  });
+});
+
 interface Harness {
   machine: SceneMachine;
   transitions: Array<GameEvents['scene:transition']>;

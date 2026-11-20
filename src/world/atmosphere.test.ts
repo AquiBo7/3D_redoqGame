@@ -1,20 +1,20 @@
 import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSceneDefinition, getSceneRuntime } from '../scenes3d';
+import { getSceneDefinition, getSceneRuntime, isSceneModuleReady, prepareSceneModule } from '../scenes3d';
 import type { SceneId, SceneKey } from '../data/storySchema';
 import type { SceneRuntime, SceneRuntimeContext, WorldSceneDefinition } from './worldSceneTypes';
 import { smoothAtmosphereProgress, WorldApp } from './WorldApp';
 
 vi.mock('../scenes3d', () => ({
   getSceneDefinition: vi.fn(), getSceneRuntime: vi.fn(),
-  isSceneModuleReady: () => true, prepareSceneModule: async () => {},
+  isSceneModuleReady: vi.fn(() => true), prepareSceneModule: vi.fn(async () => {}),
 }));
 vi.mock('gsap', () => ({ gsap: { to: vi.fn(), killTweensOf: vi.fn() } }));
 
 const colorKeys = ['uZenith', 'uMid', 'uHorizon', 'uBelow', 'uCloud', 'uCloudHighlight', 'uSunHighlight'];
 const sceneKeys: Partial<Record<SceneId, SceneKey>> = {
   S1: 'room', S2: 'room', S3: 'room', S4: 'street', S5: 'gate', S6: 'gate',
-  S7: 'desk', S8: 'building', S9: 'building',
+  S7: 'desk', S8: 'building', S9: 'building', C2: 'interior', C4: 'interior',
 };
 
 function definition(sceneKey: SceneKey): WorldSceneDefinition {
@@ -39,6 +39,7 @@ function createWorld(sceneKey: SceneKey = 'building') {
     updateAirParticles(dt: number): void;
     mountDefinition(definition: WorldSceneDefinition, sceneId: SceneId): void;
     createRuntimeContext(sceneId: SceneId): SceneRuntimeContext;
+    mountInitialScene(): void;
     handleSceneTransition(payload: { toSceneId: SceneId; sceneKey: SceneKey; fromSceneId?: SceneId | null }): void;
   };
   const world = Object.assign(methods, {
@@ -56,6 +57,7 @@ function createWorld(sceneKey: SceneKey = 'building') {
     transitionToken: 0,
     currentDefinition: definition(sceneKey),
     currentSceneId: 'S8' as SceneId,
+    interactionOptions: null as { sceneId: SceneId; ids: string[] } | null,
     currentRuntime: null as SceneRuntime | null,
     actors: {} as Record<string, THREE.Object3D>,
     levelGroup: new THREE.Group(),
@@ -73,7 +75,7 @@ function createWorld(sceneKey: SceneKey = 'building') {
     },
     interaction: { setup: vi.fn(), setItemVisible: vi.fn() },
     attachContactShadows: vi.fn(), syncHudHints: vi.fn(), resetMotionAudio: vi.fn(),
-    preloadRequiredModels: vi.fn(async () => undefined),
+    preloadRequiredModels: vi.fn<() => Promise<void>>(async () => {}),
   });
   world.applyFog(world.currentDefinition);
   world.rebuildAirParticles(sceneKey);
@@ -106,6 +108,8 @@ function expectParticleColor(world: TestWorld, index: number, expected: THREE.Co
 }
 
 beforeEach(() => {
+  vi.mocked(isSceneModuleReady).mockReset().mockReturnValue(true);
+  vi.mocked(prepareSceneModule).mockReset().mockResolvedValue(undefined);
   vi.mocked(getSceneDefinition).mockImplementation((id) => {
     const sceneKey = sceneKeys[id];
     expect(sceneKey, `氛围测试未配置场景 ${id}`).toBeDefined();
@@ -132,6 +136,55 @@ afterEach(() => {
   worlds.length = 0;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+
+describe('异步场景生命周期', () => {
+  it('返回已挂载场景会取消旧模块加载并释放切场锁', async () => {
+    const world = createWorld('building');
+    let resolve!: () => void;
+    vi.mocked(isSceneModuleReady).mockImplementation((id) => id !== 'C2');
+    vi.mocked(prepareSceneModule).mockReturnValue(new Promise<void>((done) => { resolve = done; }));
+    const mount = vi.spyOn(world, 'mountDefinition');
+    world.handleSceneTransition({ fromSceneId: 'S8', toSceneId: 'C2', sceneKey: 'interior' });
+    expect(world.controller.setTransitionLocked).toHaveBeenLastCalledWith(true);
+    world.handleSceneTransition({ fromSceneId: 'C2', toSceneId: 'S8', sceneKey: 'building' });
+    expect(world.controller.setTransitionLocked).toHaveBeenLastCalledWith(false);
+    resolve();
+    await Promise.resolve();
+    expect(mount).not.toHaveBeenCalled();
+    expect(world.currentSceneId).toBe('S8');
+    expect(world.pendingDefinition).toBeNull();
+  });
+
+  it('教学楼同几何切换重置导航站位，不重建模型且保留当前步骤交互', () => {
+    const world = createWorld('interior');
+    world.currentSceneId = 'C2';
+    world.interactionOptions = { sceneId: 'C4', ids: [] };
+    const next = { ...definition('interior'), spawn: { x: 2, z: 6 }, interactables: [{ id: 'student-4', position: { x: 1, y: 1, z: 1 } }] };
+    vi.mocked(getSceneDefinition).mockReturnValue(next);
+    const mount = vi.spyOn(world, 'mountDefinition');
+    world.handleSceneTransition({ fromSceneId: 'C2', toSceneId: 'C4', sceneKey: 'interior' });
+    expect(mount).not.toHaveBeenCalled();
+    expect(world.controller.setNavigation).toHaveBeenCalledWith(next.nav);
+    expect(world.controller.setSpawn).toHaveBeenCalledWith(next.spawn);
+    expect(world.interaction.setItemVisible).toHaveBeenLastCalledWith('student-4', false);
+  });
+
+  it('初始异步模块完成后仍等待模型，不提前解锁', async () => {
+    const world = createWorld('room');
+    world.currentSceneId = 'C2';
+    vi.mocked(isSceneModuleReady).mockReturnValueOnce(false).mockReturnValue(true);
+    vi.mocked(getSceneDefinition).mockReturnValue({ ...definition('interior'), requiredModels: ['linxia'] });
+    let finishModels!: () => void;
+    world.preloadRequiredModels.mockReturnValue(new Promise<void>((done) => { finishModels = done; }));
+    world.mountInitialScene();
+    await Promise.resolve();
+    expect(world.controller.setTransitionLocked.mock.calls.every(([locked]) => locked)).toBe(true);
+    world.disposed = true;
+    finishModels();
+    await Promise.resolve();
+    expect(world.controller.setTransitionLocked).not.toHaveBeenCalledWith(false);
+  });
 });
 
 describe('smoothAtmosphereProgress', () => {
@@ -316,6 +369,7 @@ describe('WorldApp 氛围与运行时钩子', () => {
     const particles = world.airParticles;
     const contexts: SceneRuntimeContext[] = [];
     world.currentRuntime = { enter: (context) => contexts.push(context), exit: vi.fn() };
+    vi.mocked(getSceneRuntime).mockReturnValue(world.currentRuntime);
     world.handleSceneTransition({ toSceneId: 'S9', sceneKey: 'building', fromSceneId: 'S8' });
     expect(world.airParticles).toBe(particles);
     expect(snapshot(world)).toEqual(before);

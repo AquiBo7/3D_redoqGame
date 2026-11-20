@@ -73,6 +73,27 @@ describe('createInitialStoryState', () => {
   });
 });
 
+describe('序列条件', () => {
+  it('精确匹配顺序和长度，不改变记录', () => {
+    const state = { ...createInitialStoryState(), yuanKeys: ['fact', 'empathy', 'company'] };
+    expect(evaluateCondition({ key: 'yuanKeys', matches: ['fact', 'empathy', 'company'] }, state, 'bystander')).toBe(true);
+    expect(evaluateCondition({ key: 'yuanKeys', matches: ['empathy', 'fact', 'company'] }, state, 'bystander')).toBe(false);
+    expect(evaluateCondition({ key: 'yuanKeys', matches: ['fact', 'empathy'] }, state, 'bystander')).toBe(false);
+    expect(state.yuanKeys).toEqual(['fact', 'empathy', 'company']);
+  });
+
+  it('集合条件允许重复正向类型，拒绝夹杂逼迫或干扰', () => {
+    const condition: Condition = { key: 'yuanKeys', only: ['fact', 'empathy', 'company'] };
+    for (const keys of [['fact', 'fact', 'company'], ['empathy', 'company']]) {
+      expect(evaluateCondition(condition, { ...createInitialStoryState(), yuanKeys: keys }, 'bystander')).toBe(true);
+    }
+    for (const keys of [['fact', 'force', 'company'], ['noise', 'fact', 'company']]) {
+      expect(evaluateCondition(condition, { ...createInitialStoryState(), yuanKeys: keys }, 'bystander')).toBe(false);
+    }
+    expect(evaluateCondition({ key: 'clues', matches: [] }, createInitialStoryState(), 'bystander')).toBe(true);
+  });
+});
+
 describe('变量数组隔离', () => {
   it('每次创建状态与元数据都生成独立数组', () => {
     const first = createInitialStoryState();

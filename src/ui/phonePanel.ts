@@ -46,6 +46,7 @@ export class PhonePanelView {
   private readonly answeredSections = new Set<string>();
   private readonly outgoing = new Map<string, string>();
   private shortcutCooldownUntil = 0;
+  private statsFrames = new Set<number>();
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (!this.isOpen()) return;
@@ -141,6 +142,7 @@ export class PhonePanelView {
   }
 
   hide(): void {
+    this.cancelStatsAnimation();
     this.closePhoto(false);
     this.refreshShortcutCooldown();
     this.root.hidden = true;
@@ -170,7 +172,13 @@ export class PhonePanelView {
     this.callbacks.onAction(panel.id, 'close');
   }
 
+  private cancelStatsAnimation(): void {
+    for (const frame of this.statsFrames) cancelAnimationFrame(frame);
+    this.statsFrames.clear();
+  }
+
   private render(scrollToEnd = false): void {
+    this.cancelStatsAnimation();
     const panel = this.panel;
     if (!panel) return;
 
@@ -386,7 +394,7 @@ export class PhonePanelView {
     );
     if (section.deleted) {
       card.className += ' phone__post--deleted';
-      card.append(createElement('p', 'phone__post-placeholder', '该帖子已删除'));
+      card.append(createElement('p', 'phone__post-placeholder', '该内容已删除'));
       return card;
     }
 
@@ -397,7 +405,24 @@ export class PhonePanelView {
       image.draggable = false;
     }
     if (section.assetIds.length > 0) card.append(images);
-    card.append(createElement('p', 'phone__post-stats', `浏览 ${section.views} · 评论 ${section.commentCount}`));
+    const stats = createElement('p', 'phone__post-stats', `浏览 ${section.views} · 评论 ${section.commentCount}`);
+    card.append(stats);
+    if (section.previousStats && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const previous = section.previousStats;
+      const start = performance.now();
+      let frame = 0;
+      const animate = (now: number): void => {
+        this.statsFrames.delete(frame);
+        const progress = Math.min(1, Math.max(0, (now - start) / 1800));
+        const eased = 1 - Math.pow(1 - progress, 3);
+        stats.textContent = `浏览 ${Math.round(previous.views + (section.views - previous.views) * eased)} · 评论 ${Math.round(previous.commentCount + (section.commentCount - previous.commentCount) * eased)}`;
+        if (progress < 1) {
+          frame = requestAnimationFrame(animate);
+          this.statsFrames.add(frame);
+        }
+      };
+      animate(start);
+    }
 
     const comments = createElement('ol', 'phone__post-comments');
     comments.setAttribute('aria-label', '跟评');

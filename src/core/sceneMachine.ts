@@ -331,6 +331,18 @@ export class SceneMachine {
       if (step.kind !== 'wait') this.applyInto(changed, step.effects);
       this.emitStateChanged(changed);
 
+      const interactionIds = (scene.triggers ?? []).filter((trigger) =>
+        trigger.event === 'scene:interact' && trigger.target &&
+        (!this.firedTriggers.has(trigger.id) || trigger.once === false) &&
+        evaluateCondition(trigger.when, this.state, this.role),
+      ).map((trigger) => trigger.target!);
+      if (step.kind === 'wait' && 'interactId' in step.waitFor) interactionIds.push(step.waitFor.interactId);
+      if (step.kind === 'choice' && step.allowMovement) {
+        for (const option of step.options) {
+          if (option.interactId && evaluateCondition(option.when, this.state, this.role)) interactionIds.push(option.interactId);
+        }
+      }
+      this.bus.emit('scene:interactionOptions', { sceneId: this.sceneId, ids: interactionIds });
       this.bus.emit('ui:worldBlocked', {
         blocked: !['system', 'goto', 'wait', 'caption'].includes(step.kind) && !(step.kind === 'choice' && step.allowMovement === true),
       });

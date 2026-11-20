@@ -14,13 +14,21 @@ import { createStreetDefinition, streetRuntime } from './street';
 
 let canteen: typeof import('./canteen') | null = null;
 let canteenLoad: Promise<void> | null = null;
+let interior: typeof import('./schoolInterior') | null = null;
+let interiorLoad: Promise<void> | null = null;
+const INTERIOR_SCENES: readonly SceneId[] = ['C2', 'C4', 'C5', 'C6', 'D1', 'D6'];
 
 export function isSceneModuleReady(sceneId: SceneId): boolean {
+  if (INTERIOR_SCENES.includes(sceneId)) return interior !== null;
   return !['S12', 'S13'].includes(sceneId) || canteen !== null;
 }
 
 export function prepareSceneModule(sceneId: SceneId): Promise<void> {
   if (isSceneModuleReady(sceneId)) return Promise.resolve();
+  if (INTERIOR_SCENES.includes(sceneId)) {
+    interiorLoad ??= import('./schoolInterior').then((module) => { interior = module; });
+    return interiorLoad;
+  }
   canteenLoad ??= import('./canteen').then((module) => { canteen = module; });
   return canteenLoad;
 }
@@ -28,6 +36,10 @@ export function prepareSceneModule(sceneId: SceneId): Promise<void> {
 const buildNarrativeStage: WorldSceneDefinition['build'] = () => ({ occluders: [] });
 
 export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
+  if (INTERIOR_SCENES.includes(sceneId)) {
+    if (!interior) throw new Error('教学楼室内模块尚未加载');
+    return interior.createSchoolInteriorDefinition(sceneId);
+  }
   switch (sceneId) {
     case 'S1':
     case 'S2':
@@ -58,6 +70,7 @@ export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
 
 /** 运行时装（震动 / 演出 / 跟随 / 药袋隐藏）；同一 sceneKey 共享同一实例 */
 export function getSceneRuntime(sceneId: SceneId): SceneRuntime | null {
+  if (INTERIOR_SCENES.includes(sceneId)) return interior?.schoolInteriorRuntime ?? null;
   switch (sceneId) {
     case 'S12':
     case 'S13':

@@ -126,6 +126,7 @@ export class CutscenePlayer {
         this.playRun(seconds);
         break;
       case 'school-gate-panorama':
+      case 'platform-approach':
         this.playPanorama(seconds, payload.skippable);
         break;
       default:
@@ -329,7 +330,7 @@ export class CutscenePlayer {
       this.camera.position.y = this.runBaseY;
       this.runBaseY = null;
     }
-    if (key === 'school-gate-panorama') {
+    if (key === 'school-gate-panorama' || key === 'platform-approach') {
       this.camera.fov = this.getBaseFov();
       this.camera.updateProjectionMatrix();
     }

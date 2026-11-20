@@ -111,6 +111,7 @@ export interface SceneRuntimeContext {
   sceneId: SceneId;
   bus: EventBus;
   actors: Record<string, THREE.Object3D>;
+  storyFlags?: Readonly<{ noticedTyper: boolean; joined: boolean }>;
   /** 按 id 显示 / 隐藏交互光点（如捡起药袋后隐藏药袋光点） */
   setInteractableVisible: (id: string, visible: boolean) => void;
   getPlayerFeet?: (target: THREE.Vector3) => THREE.Vector3;

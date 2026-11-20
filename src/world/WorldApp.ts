@@ -244,6 +244,8 @@ export class WorldApp {
 
   private currentSceneId: SceneId;
   private currentDefinition: WorldSceneDefinition;
+  private interactionOptions: { sceneId: SceneId; ids: string[] } | null = null;
+  private storyFlags = { noticedTyper: false, joined: false };
   private currentRuntime: SceneRuntime | null = null;
   private pendingDefinition: WorldSceneDefinition | null = null;
   private pendingSceneId: SceneId | null = null;
@@ -377,6 +379,13 @@ export class WorldApp {
 
     this.unsubscribers.push(
       this.bus.on('scene:transition', (payload) => this.handleSceneTransition(payload)),
+      this.bus.on('state:changed', ({ state }) => {
+        this.storyFlags = { noticedTyper: state.noticedTyper, joined: state.joined };
+      }),
+      this.bus.on('scene:interactionOptions', (payload) => {
+        this.interactionOptions = payload;
+        this.applyInteractionOptions();
+      }),
     );
 
     // 首屏淡入：有过场时黑幕交给过场（s1-wake 从黑屏开始），否则挂载完成后自行淡入
@@ -515,8 +524,6 @@ export class WorldApp {
         if (this.disposed || token !== this.transitionToken || this.currentSceneId !== sceneId) return;
         this.currentDefinition = getSceneDefinition(sceneId);
         this.mountInitialScene();
-        this.controller.setTransitionLocked(false);
-        this.tryInitialFade();
       });
       return;
     }
@@ -524,6 +531,8 @@ export class WorldApp {
     const ids = definition.requiredModels ?? [];
     if (ids.length === 0) {
       this.mountDefinition(definition, this.currentSceneId);
+      this.controller.setTransitionLocked(false);
+      this.tryInitialFade();
       return;
     }
 
@@ -571,6 +580,7 @@ export class WorldApp {
 
     this.currentRuntime = getSceneRuntime(sceneId);
     this.currentRuntime?.enter(this.createRuntimeContext(sceneId));
+    this.applyInteractionOptions();
     if (sceneId === 'S4') this.bus.emit('ui:showObjective', { sceneId });
     this.syncHudHints();
     this.initialMounted = true;
@@ -607,8 +617,11 @@ export class WorldApp {
     this.runtimeContextToken += 1;
     this.resetMotionAudio();
     this.currentSceneId = payload.toSceneId;
+    const token = ++this.transitionToken;
+    this.pendingDefinition = null;
+    this.pendingSceneId = null;
+    gsap.killTweensOf(this.fadeEl);
     if (!isSceneModuleReady(payload.toSceneId)) {
-      const token = ++this.transitionToken;
       this.controller.setTransitionLocked(true);
       this.currentRuntime?.exit();
       void prepareSceneModule(payload.toSceneId).then(() => {
@@ -620,6 +633,8 @@ export class WorldApp {
     const definition = getSceneDefinition(payload.toSceneId);
 
     if (definition.sceneKey === this.currentDefinition.sceneKey) {
+      this.controller.setTransitionLocked(false);
+      this.fadeEl.style.opacity = '0';
       if (payload.fromSceneId === null && definition.sceneKey === 'building') {
         this.currentRuntime?.exit();
         this.mountDefinition(definition, payload.toSceneId);
@@ -632,10 +647,17 @@ export class WorldApp {
         this.atmosphereProgress = 0;
         this.applyFog(definition);
       }
+      if (definition.sceneKey === 'interior') {
+        this.controller.setNavigation(definition.nav);
+        this.controller.setSpawn(definition.spawn);
+        this.applyFog(definition);
+      }
       this.applyInteraction(definition);
       this.debugOverlay?.setDefinition(definition);
+      this.currentRuntime = getSceneRuntime(payload.toSceneId);
       // 共享 runtime 按 sceneId 自行判断是否重启演出（如 gate 只在 S5 播放）
       this.currentRuntime?.enter(this.createRuntimeContext(payload.toSceneId));
+      this.applyInteractionOptions();
       this.syncHudHints();
       return;
     }
@@ -874,6 +896,14 @@ export class WorldApp {
     });
   }
 
+  private applyInteractionOptions(): void {
+    const options = this.interactionOptions;
+    if (!options || options.sceneId !== this.currentSceneId) return;
+    for (const item of this.currentDefinition.interactables ?? []) {
+      this.interaction.setItemVisible(item.id, options.ids.includes(item.id));
+    }
+  }
+
   /** 切换 sceneKey 时更新雾；无 fog 的场景清除上一场景残留 */
   private applyFog(definition: WorldSceneDefinition): void {
     this.baseHaze.setHex(definition.fog?.color ?? DEFAULT_HAZE_COLOR).lerp(HAZE_TINT, 0.36);
@@ -970,6 +1000,7 @@ export class WorldApp {
     const level = this.actors;
     return {
       sceneId,
+      storyFlags: this.storyFlags,
       bus: this.bus,
       actors: level,
       setInteractableVisible: (id, visible) => this.interaction.setItemVisible(id, visible),

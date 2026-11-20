@@ -208,6 +208,11 @@ export function evaluateCondition(
       : condition.role.includes(role);
   }
 
+  if ('matches' in condition) {
+    const actual = state[condition.key];
+    return actual.length === condition.matches.length && actual.every((value, index) => value === condition.matches[index]);
+  }
+  if ('only' in condition) return state[condition.key].every((value) => condition.only.includes(value));
   if ('equals' in condition) return state[condition.key] === condition.equals;
 
   const actual = state[condition.key];

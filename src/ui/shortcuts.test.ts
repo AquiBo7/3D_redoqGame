@@ -122,6 +122,9 @@ class FakeElement extends FakeNode {
   private readonly attributes = new Map<string, string>();
 
   constructor(readonly tagName: string) { super(); }
+  get ownerDocument(): FakeDocument { return fakeDocument; }
+  readonly dataset: Record<string, string> = {};
+  get isConnected(): boolean { return fakeDocument.body.contains(this); }
   get hidden(): boolean { return this.attributes.has('hidden'); }
   set hidden(value: boolean) {
     if (value) this.attributes.set('hidden', '');

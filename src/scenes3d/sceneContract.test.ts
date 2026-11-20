@@ -19,7 +19,7 @@ function sceneOf(sceneId: SceneId) {
 }
 
 /** 过场播放器支持的 key（与 CutscenePlayer 的 switch 分支保持一致） */
-const SUPPORTED_CUTSCENE_KEYS = new Set(['s1-wake', 's3-run', 'school-gate-panorama']);
+const SUPPORTED_CUTSCENE_KEYS = new Set(['s1-wake', 's3-run', 'school-gate-panorama', 'platform-approach']);
 
 const EXPECTED_SCENE_KEYS: Partial<Record<SceneId, SceneKey>> = {
   S1: 'room',
@@ -33,6 +33,8 @@ const EXPECTED_SCENE_KEYS: Partial<Record<SceneId, SceneKey>> = {
   S9: 'building',
   S10: 'stage2d', S11: 'stage2d', S12: 'canteen', S13: 'canteen',
   S14: 'stage2d', C1: 'stage2d', E1: 'stage2d',
+  C2: 'interior', C3: 'stage2d', C4: 'interior', C5: 'interior', C6: 'interior',
+  D1: 'interior', D2: 'stage2d', D3: 'stage2d', D4: 'stage2d', D5: 'stage2d', D6: 'interior',
 };
 
 beforeAll(async () => {
