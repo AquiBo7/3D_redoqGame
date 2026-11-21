@@ -188,13 +188,18 @@ export function playUiClick(): void {
 
 function getNoiseBuffer(ctx: AudioContext): AudioBuffer {
   if (noiseBuffer && noiseBufferOwner === ctx) return noiseBuffer;
-  const length = Math.max(1, Math.floor(ctx.sampleRate * 0.12));
+  const length = Math.max(1, Math.floor(ctx.sampleRate * 0.11));
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
   const data = buffer.getChannelData(0);
+  // 模拟木地板“脚跟轻触 + 前掌微落”的双段短促瞬态，并做一阶平滑去除刺耳白噪
+  let smoothed = 0;
   for (let i = 0; i < length; i += 1) {
-    // 简单衰减噪声，听感接近布料/鞋底摩擦，不用任何外部素材
-    const decay = 1 - i / length;
-    data[i] = (Math.random() * 2 - 1) * decay * decay;
+    const t = i / ctx.sampleRate;
+    const heel = Math.exp(-t * 62);
+    const ball = t > 0.022 ? 0.34 * Math.exp(-(t - 0.022) * 70) : 0;
+    const raw = (Math.random() * 2 - 1) * (heel + ball);
+    smoothed = smoothed * 0.58 + raw * 0.42;
+    data[i] = smoothed;
   }
   noiseBuffer = buffer;
   noiseBufferOwner = ctx;
@@ -210,9 +215,9 @@ function playFootstepSound(
   try {
     const startAt = ctx.currentTime + 0.005;
     const wood = surface === 'wood';
-    const pitch = rightFoot ? 1.035 : 0.965;
-    const level = rightFoot ? 0.96 : 1;
-    const duration = wood ? 0.105 : 0.08;
+    const pitch = rightFoot ? 1.032 : 0.968;
+    const level = rightFoot ? 0.95 : 1;
+    const duration = wood ? 0.088 : 0.068;
     const master = ctx.createGain();
     master.gain.setValueAtTime(gain, startAt);
     master.connect(ctx.destination);
@@ -221,11 +226,13 @@ function playFootstepSound(
     source.buffer = getNoiseBuffer(ctx);
     source.playbackRate.setValueAtTime(pitch, startAt);
     const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime((wood ? 850 : 1500) * pitch, startAt);
+    // 木地板采用暖中低频带通共鸣，石面偏清脆短促；音量整体克制轻柔
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime((wood ? 340 : 620) * pitch, startAt);
+    if (filter.Q) filter.Q.setValueAtTime(wood ? 2.4 : 1.5, startAt);
     const envelope = ctx.createGain();
     envelope.gain.setValueAtTime(0.0001, startAt);
-    envelope.gain.exponentialRampToValueAtTime((wood ? 0.085 : 0.065) * level, startAt + 0.008);
+    envelope.gain.exponentialRampToValueAtTime((wood ? 0.036 : 0.024) * level, startAt + 0.006);
     envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
     source.connect(filter);
     filter.connect(envelope);
@@ -235,11 +242,11 @@ function playFootstepSound(
 
     const thud = ctx.createOscillator();
     const thudEnvelope = ctx.createGain();
-    thud.type = 'sine';
-    thud.frequency.setValueAtTime((wood ? 108 : 142) * pitch, startAt);
-    thud.frequency.exponentialRampToValueAtTime((wood ? 60 : 85) * pitch, startAt + duration);
+    thud.type = 'triangle';
+    thud.frequency.setValueAtTime((wood ? 148 : 185) * pitch, startAt);
+    thud.frequency.exponentialRampToValueAtTime((wood ? 74 : 102) * pitch, startAt + duration);
     thudEnvelope.gain.setValueAtTime(0.0001, startAt);
-    thudEnvelope.gain.exponentialRampToValueAtTime((wood ? 0.05 : 0.038) * level, startAt + 0.006);
+    thudEnvelope.gain.exponentialRampToValueAtTime((wood ? 0.028 : 0.021) * level, startAt + 0.005);
     thudEnvelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
     thud.connect(thudEnvelope);
     thudEnvelope.connect(master);

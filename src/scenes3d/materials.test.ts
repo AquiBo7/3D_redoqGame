@@ -4,7 +4,9 @@ import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHARED_RESOURCE_FLAG } from '../world/resources';
 import {
-  disposeMaterialCache, getFabricMaterial, getPlasterMaterial,
+  disposeMaterialCache, getFabricMaterial, getFacadeBrickMaterial,
+  getFacadeConcreteMaterial, getFacadeTileMaterial, getFacadeWindowMaterial,
+  getPlasterMaterial, getStoreInteriorMaterial,
   getWarmLampGlowMaterial, getWoodFloorMaterial, isGroundedActor,
 } from './materials';
 
@@ -218,5 +220,37 @@ describe('卧室程序化 PBR 纹理与所有权', () => {
     expect(materialDispose).toHaveBeenCalledTimes(1);
     expect(textureDispose).toHaveBeenCalledTimes(1);
     expect(getWarmLampGlowMaterial()).not.toBe(glow);
+  });
+
+  it('街道外墙与橱窗程序化材质带共享标记、独立贴图且随全局缓存释放一次', () => {
+    const tile = getFacadeTileMaterial({ repeatX: 3, repeatY: 2 });
+    const concrete = getFacadeConcreteMaterial({ repeatX: 2, repeatY: 3 });
+    const brick = getFacadeBrickMaterial({ repeatX: 3, repeatY: 2 });
+    const win = getFacadeWindowMaterial();
+    const interior = getStoreInteriorMaterial();
+
+    expect(getFacadeTileMaterial({ repeatX: 3, repeatY: 2 })).toBe(tile);
+    expect(tile.roughnessMap).toBeInstanceOf(THREE.CanvasTexture);
+    expect(tile.roughnessMap!.colorSpace).toBe(THREE.NoColorSpace);
+    expect(concrete.roughness).toBeGreaterThanOrEqual(0.85);
+    expect(brick.roughness).toBeGreaterThanOrEqual(0.88);
+    expect(win.roughness).toBeLessThan(0.3);
+    expect(interior.emissiveMap).toBe(interior.map);
+    expect(interior.emissiveIntensity).toBeLessThanOrEqual(0.4);
+
+    const resources = [
+      tile, tile.map!, tile.roughnessMap!,
+      concrete, concrete.map!,
+      brick, brick.map!,
+      win, win.map!,
+      interior, interior.map!,
+    ];
+    const spies = resources.map((resource) => {
+      expect(resource.userData[SHARED_RESOURCE_FLAG]).toBe(true);
+      return vi.spyOn(resource, 'dispose');
+    });
+    disposeMaterialCache();
+    disposeMaterialCache();
+    spies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
   });
 });

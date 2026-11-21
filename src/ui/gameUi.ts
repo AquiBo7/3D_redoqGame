@@ -37,13 +37,17 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   const host = document.querySelector<HTMLElement>('#ui-root') ?? document.body;
   const root = createElement('div', 'game-ui');
   host.append(root);
+  // 手机弹窗 / 看图放大 / 黑幕过场要压在静音按钮与各全屏页之上，
+  // 而 #ui-root 与 .game-ui 都会封闭内部 z-index，所以单独挂到 body 顶层模态层。
+  const modalLayer = createElement('div', 'ui-modal-layer');
+  document.body.append(modalLayer);
 
   const lock = createUiLockCoordinator(options.getControls);
   const disposeObjective = initObjectivePrompt(root, bus);
   const disposeVignette = initVignette(host, bus);
   const stage = new Stage2D(host, bus);
   let artStepId: string | null = null;
-  const art = new ArtView(root, (stepId) => {
+  const art = new ArtView(modalLayer, (stepId) => {
     closeArt();
     bus.emit('ui:dialogueEnd', { stepId });
   });
@@ -57,7 +61,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   let choicesBlockerId: string | null = null;
   let vibrationBlockerId: string | null = null;
 
-  const phone = new PhonePanelView(root, {
+  const phone = new PhonePanelView(modalLayer, {
     onAction: (panelId, action, optionId) => {
       playUiClick();
       if (action === 'close') {
@@ -69,7 +73,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     },
   });
 
-  const intertitle = new IntertitleView(root, (stepId) => {
+  const intertitle = new IntertitleView(modalLayer, (stepId) => {
     closeIntertitle();
     bus.emit('ui:dialogueEnd', { stepId });
   });
@@ -321,6 +325,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       vibration.dispose();
       disposeObjective();
       root.remove();
+      modalLayer.remove();
     },
   };
 }

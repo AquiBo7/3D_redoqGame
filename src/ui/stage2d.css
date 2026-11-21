@@ -43,8 +43,9 @@
   bottom: calc(48px + env(safe-area-inset-bottom));
   width: min(34vw, 390px);
   height: 80%;
-  opacity: .65;
-  filter: saturate(.35) brightness(.65);
+  /* 真实彩色立绘接入后只压暗不褪色，保留插画本身的色相；兜底 SVG 立绘同样受益。 */
+  opacity: .92;
+  filter: saturate(.88) brightness(.95);
   mask-image: linear-gradient(#000 62%, transparent 99%);
 }
 

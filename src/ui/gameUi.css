@@ -7,6 +7,16 @@
   pointer-events: none;
 }
 
+/* 顶层模态层：挂到 body，专门承载手机弹窗、看图放大与黑幕过场。
+   #ui-root(10) 与 .game-ui(12) 都是封闭堆叠上下文，会把内部 z-index 压在
+   静音按钮与各全屏页之下，因此这三层必须移出。
+   本层刻意保持 position: static —— 不新建堆叠上下文，
+   子级 z-index 直接参与根上下文比较，同时不成为 backdrop-filter 的 backdrop root，
+   保住手机弹窗对 3D 背景的虚化压暗。 */
+.ui-modal-layer {
+  pointer-events: none;
+}
+
 .game-ui [hidden] {
   display: none !important;
 }

@@ -267,6 +267,8 @@ export class WorldApp {
   /** 首屏黑幕是否已开始淡入（保证只执行一次） */
   private initialFadeDone = false;
   private disposed = false;
+  /** 当前 2D 模态界面是否阻塞控制（同步 ui:worldBlocked / lockControls） */
+  private modalBlocked = false;
   /** 构造函数同步触发的初始 scene:transition（由 mountInitialScene 接管，避免同帧 EventBus Set 遍历重入） */
   private inConstructorEmit = false;
   private rafId = 0;
@@ -402,6 +404,9 @@ export class WorldApp {
       this.bus.on('scene:interactionOptions', (payload) => {
         this.interactionOptions = payload;
         this.applyInteractionOptions();
+      }),
+      this.bus.on('ui:worldBlocked', ({ blocked }) => {
+        this.modalBlocked = blocked;
       }),
     );
 
@@ -1041,6 +1046,7 @@ export class WorldApp {
       bus: this.bus,
       actors: level,
       setInteractableVisible: (id, visible) => this.interaction.setItemVisible(id, visible),
+      isModalBlocked: () => this.modalBlocked,
       getPlayerFeet: (target) => {
         const feet = this.controller.getFeetPosition();
         return target.set(feet.x, feet.y, feet.z);
@@ -1170,7 +1176,7 @@ export class WorldApp {
       });
     };
     sample('player', this.camera.position,
-      this.controller.isEnabled() || (this.currentSceneId === 'S3' && this.cutscenePlayer.isPlaying()), 0.85);
+      this.controller.isEnabled() || (this.currentSceneId === 'S3' && this.cutscenePlayer.isPlaying()), 0.5);
     for (const id of this.currentDefinition.footstepActors ?? []) {
       const actor = this.actors[id];
       if (!actor) continue;
@@ -1182,17 +1188,19 @@ export class WorldApp {
       }
       const position = actor.getWorldPosition(this.scratchWorldPos);
       const distance = position.distanceTo(this.camera.position);
-      const gain = 0.48 * Math.max(0, 1 - distance / 8) ** 2;
+      const gain = 0.3 * Math.max(0, 1 - distance / 8) ** 2;
       sample(id, position, visible && gain > 0, gain);
     }
   }
 
   /** 供 2D 阻塞式界面调用：锁定输入并主动退出 PointerLock */
   lockControls(): void {
+    this.modalBlocked = true;
     this.controller.lockControls();
   }
 
   unlockControls(): void {
+    this.modalBlocked = false;
     this.controller.unlockControls();
   }
 

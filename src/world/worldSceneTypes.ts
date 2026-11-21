@@ -114,6 +114,8 @@ export interface SceneRuntimeContext {
   storyFlags?: Readonly<{ noticedTyper: boolean; joined: boolean }>;
   /** 按 id 显示 / 隐藏交互光点（如捡起药袋后隐藏药袋光点） */
   setInteractableVisible: (id: string, visible: boolean) => void;
+  /** 当前 2D 阻塞式界面（对话 / 选项 / 手机）是否打开，供场景演出等待对话结束后再启动 */
+  isModalBlocked?: () => boolean;
   getPlayerFeet?: (target: THREE.Vector3) => THREE.Vector3;
   setAtmosphereProgress?: (progress: number) => void;
 }

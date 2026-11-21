@@ -187,6 +187,95 @@ function campusInstances(
   return mesh;
 }
 
+/** 低多边形蝴蝶单侧翼片（沿 x=0 铰接，前翼大、后翼收窄，绕 Z 轴扇动自然轻盈） */
+function createButterflyWingGeometry(side: -1 | 1): THREE.BufferGeometry {
+  const s = side;
+  const vertices = new Float32Array([
+    // 前翼三角
+    0, 0, 0.015,
+    s * 0.082, 0.008, 0.068,
+    s * 0.072, 0, -0.008,
+    // 后翼三角
+    0, 0, 0.005,
+    s * 0.062, -0.004, -0.008,
+    s * 0.036, 0, -0.064,
+    // 翼根衔接
+    0, 0, 0.005,
+    s * 0.036, 0, -0.064,
+    0, 0, -0.042,
+  ]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+interface ButterflySpec {
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  ampX: number;
+  ampY: number;
+  ampZ: number;
+  orbitSpeed: number;
+  flapSpeed: number;
+  phase: number;
+  scale: number;
+  color: number;
+}
+
+interface ButterflyFlockState {
+  leftWings: THREE.InstancedMesh;
+  rightWings: THREE.InstancedMesh;
+  specs: readonly ButterflySpec[];
+  time: number;
+}
+
+const BUTTERFLY_SPECS: readonly ButterflySpec[] = [
+  { baseX: -2.45, baseY: 1.05, baseZ: -4.2, ampX: 0.38, ampY: 0.24, ampZ: 0.68, orbitSpeed: 0.62, flapSpeed: 13.5, phase: 0.2, scale: 1.48, color: 0xffe48a },
+  { baseX: 2.55, baseY: 1.22, baseZ: -6.8, ampX: 0.36, ampY: 0.22, ampZ: 0.65, orbitSpeed: 0.56, flapSpeed: 14.2, phase: 1.1, scale: 1.38, color: 0xcceaf8 },
+  { baseX: -3.9, baseY: 1.44, baseZ: -11.5, ampX: 0.42, ampY: 0.28, ampZ: 0.78, orbitSpeed: 0.51, flapSpeed: 12.8, phase: 2.0, scale: 1.52, color: 0xf7c996 },
+  { baseX: 2.65, baseY: 1.08, baseZ: -14.2, ampX: 0.38, ampY: 0.25, ampZ: 0.68, orbitSpeed: 0.68, flapSpeed: 15.0, phase: 2.8, scale: 1.44, color: 0xffe99a },
+  { baseX: -2.55, baseY: 1.28, baseZ: -18.8, ampX: 0.36, ampY: 0.22, ampZ: 0.7, orbitSpeed: 0.59, flapSpeed: 13.9, phase: 3.6, scale: 1.34, color: 0xf7c8be },
+  { baseX: 4.1, baseY: 1.52, baseZ: -21.2, ampX: 0.44, ampY: 0.26, ampZ: 0.74, orbitSpeed: 0.48, flapSpeed: 12.6, phase: 4.3, scale: 1.48, color: 0xd0eaf6 },
+  { baseX: -2.65, baseY: 1.06, baseZ: -24.5, ampX: 0.38, ampY: 0.24, ampZ: 0.66, orbitSpeed: 0.65, flapSpeed: 14.6, phase: 5.1, scale: 1.45, color: 0xfde286 },
+  { baseX: 2.7, baseY: 1.34, baseZ: -28.0, ampX: 0.38, ampY: 0.26, ampZ: 0.72, orbitSpeed: 0.54, flapSpeed: 13.2, phase: 0.8, scale: 1.38, color: 0xf5c994 },
+  { baseX: -4.2, baseY: 1.5, baseZ: -31.8, ampX: 0.42, ampY: 0.24, ampZ: 0.75, orbitSpeed: 0.58, flapSpeed: 14.0, phase: 1.9, scale: 1.46, color: 0xf0f2b6 },
+  { baseX: 2.75, baseY: 1.12, baseZ: -34.4, ampX: 0.38, ampY: 0.22, ampZ: 0.68, orbitSpeed: 0.64, flapSpeed: 14.8, phase: 3.1, scale: 1.42, color: 0xffe48c },
+  { baseX: -2.6, baseY: 1.24, baseZ: -38.5, ampX: 0.36, ampY: 0.25, ampZ: 0.64, orbitSpeed: 0.52, flapSpeed: 13.4, phase: 4.5, scale: 1.36, color: 0xcce8f6 },
+  { baseX: 3.8, baseY: 1.42, baseZ: -41.0, ampX: 0.4, ampY: 0.22, ampZ: 0.62, orbitSpeed: 0.6, flapSpeed: 13.8, phase: 5.7, scale: 1.45, color: 0xf7cbc0 },
+];
+
+const butterflyTransform = new THREE.Object3D();
+
+function updateButterflyFlock(flock: ButterflyFlockState, dtSeconds: number): void {
+  flock.time += dtSeconds;
+  const t = flock.time;
+  for (let i = 0; i < flock.specs.length; i += 1) {
+    const spec = flock.specs[i];
+    const orbit = t * spec.orbitSpeed + spec.phase;
+    const x = spec.baseX + Math.sin(orbit) * spec.ampX;
+    const y = spec.baseY + Math.sin(orbit * 1.7 + 0.5) * spec.ampY;
+    const z = spec.baseZ + Math.cos(orbit * 0.85) * spec.ampZ;
+    const vx = Math.cos(orbit) * spec.ampX * spec.orbitSpeed;
+    const vz = -Math.sin(orbit * 0.85) * spec.ampZ * spec.orbitSpeed * 0.85;
+    const yaw = Math.atan2(vx, vz);
+    const flap = Math.sin(t * spec.flapSpeed + spec.phase * 2.1) * 0.92 + 0.14;
+
+    butterflyTransform.position.set(x, y, z);
+    butterflyTransform.scale.setScalar(spec.scale);
+    butterflyTransform.rotation.set(0.14, yaw, -flap);
+    butterflyTransform.updateMatrix();
+    flock.leftWings.setMatrixAt(i, butterflyTransform.matrix);
+
+    butterflyTransform.rotation.set(0.14, yaw, flap);
+    butterflyTransform.updateMatrix();
+    flock.rightWings.setMatrixAt(i, butterflyTransform.matrix);
+  }
+  flock.leftWings.instanceMatrix.needsUpdate = true;
+  flock.rightWings.instanceMatrix.needsUpdate = true;
+}
+
 /** 共用的八边低多边形山丘：有体积的山肩、偏心峰顶与封闭山脚，共 32 个三角形。 */
 function campusHorizonGeometry(): THREE.BufferGeometry {
   const foot: CampusTuple[] = [];
@@ -591,6 +680,78 @@ function buildBuilding(parent: THREE.Object3D): {
       detailBox(paper, [-8.2 + side * 0.155, 0.917, -14.15 + line * 0.062], [0.18, 0.003, 0.006], 0xb4a48b);
     }
   }
+
+  for (const [index, tree] of TREES.entries()) {
+    // 沿街行道树树池：交替采用八边形圆形砖石围栏与带角柱方形砖石树池，全部复用漫染材质（0 额外 DrawCall）
+    if (index % 2 === 0) {
+      const segments = 8;
+      const radius = 0.66;
+      for (let seg = 0; seg < segments; seg += 1) {
+        const angle = (seg * Math.PI * 2) / segments + Math.PI / 8;
+        const wx = tree.x + Math.cos(angle) * radius;
+        const wz = tree.z + Math.sin(angle) * radius;
+        detailBox(planterBrick, [wx, 0.15, wz], [0.56, 0.3, 0.14], undefined, [0, -angle + Math.PI / 2, 0]);
+        detailBox(planterStone, [wx, 0.33, wz], [0.64, 0.06, 0.2], undefined, [0, -angle + Math.PI / 2, 0]);
+      }
+      detailBox(planterBrick, [tree.x, 0.13, tree.z], [1.02, 0.12, 1.02], 0x514637);
+    } else {
+      const half = 0.66;
+      detailBox(planterBrick, [tree.x, 0.15, tree.z - half], [1.44, 0.3, 0.14]);
+      detailBox(planterBrick, [tree.x, 0.15, tree.z + half], [1.44, 0.3, 0.14]);
+      detailBox(planterBrick, [tree.x - half, 0.15, tree.z], [0.14, 0.3, 1.44]);
+      detailBox(planterBrick, [tree.x + half, 0.15, tree.z], [0.14, 0.3, 1.44]);
+      detailBox(planterCap, [tree.x, 0.33, tree.z - half], [1.56, 0.06, 0.2]);
+      detailBox(planterCap, [tree.x, 0.33, tree.z + half], [1.56, 0.06, 0.2]);
+      detailBox(planterCap, [tree.x - half, 0.33, tree.z], [0.2, 0.06, 1.56]);
+      detailBox(planterCap, [tree.x + half, 0.33, tree.z], [0.2, 0.06, 1.56]);
+      for (const cx of [-half, half]) {
+        for (const cz of [-half, half]) {
+          detailBox(planterStone, [tree.x + cx, 0.19, tree.z + cz], [0.22, 0.38, 0.22]);
+        }
+      }
+      detailBox(planterBrick, [tree.x, 0.13, tree.z], [1.16, 0.12, 1.16], 0x514637);
+    }
+  }
+
+  // 林荫道花坛与树池间翩飞的蝴蝶群（左右翼 2 个 InstancedMesh，共 2 DrawCall，飞行轨迹严格位于 |x|>2）
+  const butterflyWingMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.7,
+    metalness: 0.04,
+    side: THREE.DoubleSide,
+  });
+  const butterflyInitParts: CampusPart[] = BUTTERFLY_SPECS.map((spec) => ({
+    p: [spec.baseX, spec.baseY, spec.baseZ],
+    s: [spec.scale, spec.scale, spec.scale],
+    color: spec.color,
+  }));
+  const butterflyLeft = detailInstances(
+    'building-butterflies-left-wings',
+    createButterflyWingGeometry(-1),
+    butterflyWingMaterial,
+    butterflyInitParts,
+    false,
+  );
+  const butterflyRight = detailInstances(
+    'building-butterflies-right-wings',
+    createButterflyWingGeometry(1),
+    butterflyWingMaterial,
+    butterflyInitParts,
+    false,
+  );
+  for (const wingMesh of [butterflyLeft, butterflyRight]) {
+    wingMesh.receiveShadow = false;
+    wingMesh.raycast = () => {};
+    wingMesh.frustumCulled = false;
+  }
+  const butterflyFlock: ButterflyFlockState = {
+    leftWings: butterflyLeft,
+    rightWings: butterflyRight,
+    specs: BUTTERFLY_SPECS,
+    time: 0,
+  };
+  updateButterflyFlock(butterflyFlock, 0);
+  bloomEnvironment.userData.butterflies = butterflyFlock;
 
   const planters = [
     { x: -7.3, z: -4.5, length: 5.2 }, { x: 7.4, z: -5.8, length: 4.6 },
@@ -1207,7 +1368,7 @@ function buildBuilding(parent: THREE.Object3D): {
   linxia.position.set(LINXIA_ROUTE[0].x, 0, LINXIA_ROUTE[0].z);
   parent.add(linxia);
 
-  const campusReader = createCharacterActor('studentFemale', 1.65, 0x9da689, { yaw: Math.PI, leanRad: 0.12 });
+  const campusReader = createCharacterActor('studentFemale', 1.65, 0x9da689, { yaw: Math.PI, leanRad: 0.04 });
   campusReader.position.set(-8.2, 0, -12.98);
   campusReader.name = 'building-campus-reader';
   campusReader.userData.campusIdleClip = 'idle';
@@ -1229,12 +1390,14 @@ function buildBuilding(parent: THREE.Object3D): {
 let campusIdleActors: THREE.Object3D[] = [];
 const campusIdleAnimations = new Map<THREE.Object3D, CharacterAnimationController>();
 const campusIdleThrottle = new Map<THREE.Object3D, { accum: number; tick: number }>();
+const campusIdleCycles = new Map<THREE.Object3D, { clips: string[]; index: number; timer: number; switchSec: number }>();
 let campusIdleDisposers: Array<() => void> = [];
 
 function disposeCampusIdle(): void {
   for (const idleAnimation of campusIdleAnimations.values()) idleAnimation.dispose();
   campusIdleAnimations.clear();
   campusIdleThrottle.clear();
+  campusIdleCycles.clear();
   for (const dispose of campusIdleDisposers) dispose();
   campusIdleDisposers = [];
   campusIdleActors = [];
@@ -1250,14 +1413,33 @@ function tickCampusIdle(dtSeconds: number): void {
       idleAnimation = createActorAnimation(actor) ?? undefined;
       if (idleAnimation) {
         actor.traverse((object) => { object.userData.campusDetail = true; });
-        const preferred = actor.userData.campusIdleClip === 'fold_arms' ? 'fold_arms' : 'idle';
-        const clips = preferred === 'idle' ? ['read', 'reading', 'idle', 'fold_arms'] : ['fold_arms', 'idle'];
-        const clip = clips.find((name) => idleAnimation!.hasAnimation(name));
-        if (clip) idleAnimation.play(clip, { timeScale: 0.5, fadeIn: 0.3 });
+        const isMale = actor.userData.campusIdleClip === 'fold_arms';
+        const candidates = isMale
+          ? ['make_a_call_02', 'agree', 'greet_04', 'fold_arms', 'complain_01']
+          : ['wait', 'agree', 'greet_04', 'idle'];
+        const available = candidates.filter((name) => idleAnimation!.hasAnimation(name));
+        if (available.length > 0) {
+          idleAnimation.play(available[0], { timeScale: 0.85, fadeIn: 0.35 });
+          campusIdleCycles.set(actor, {
+            clips: available,
+            index: 0,
+            timer: 0,
+            switchSec: isMale ? 8.2 : 7.4,
+          });
+        }
         campusIdleAnimations.set(actor, idleAnimation);
       }
     }
     if (!idleAnimation) continue;
+    const cycle = campusIdleCycles.get(actor);
+    if (cycle && cycle.clips.length > 1 && dtSeconds > 0) {
+      cycle.timer += dtSeconds;
+      if (cycle.timer >= cycle.switchSec) {
+        cycle.timer = 0;
+        cycle.index = (cycle.index + 1) % cycle.clips.length;
+        idleAnimation.play(cycle.clips[cycle.index], { timeScale: 0.85, fadeIn: 0.5 });
+      }
+    }
     let updateDt = dtSeconds;
     if (canThrottle && initializedBefore) {
       const dx = actor.position.x - playerFeet.x;
@@ -1303,8 +1485,23 @@ let linxiaThrottleAccum = 0;
 let linxiaThrottleTick = 0;
 let bloomContext: SceneRuntimeContext | null = null;
 let activeBloomUniforms: ColorBloomUniforms | null = null;
+let activeButterflies: ButterflyFlockState | null = null;
+let walkWaitingForDialogue = false;
+let buildingBusSubscriptions: Array<() => void> = [];
 const playerFeet = new THREE.Vector3();
 const companionFeet = new THREE.Vector3();
+
+function clearBuildingBusSubscriptions(): void {
+  for (const unsub of buildingBusSubscriptions) unsub();
+  buildingBusSubscriptions = [];
+}
+
+function beginLinxiaWalk(): void {
+  if (!walkWaitingForDialogue || !walkTween || walkArrived) return;
+  walkWaitingForDialogue = false;
+  walkTween.resume();
+  linxiaAnimation?.play('walk', { timeScale: WALK_TIME_SCALE, fadeIn: 0.35 });
+}
 
 function tickColorBloom(dtSeconds: number): void {
   if (!bloomContext || !activeBloomUniforms) return;
@@ -1323,11 +1520,12 @@ function disposeLinxiaAnimation(): void {
   linxiaAnimation = null;
 }
 
-/** S8 运行时装：林夏沿路线慢步；S9（同 sceneKey）不重启行走，但爸爸呼吸持续 */
+/** S8 运行时装：待开场对话与选项结束后再触发林夏同行；S9（同 sceneKey）不重启行走 */
 export const buildingRuntime: SceneRuntime = {
   enter(context: SceneRuntimeContext): void {
     bloomContext = context;
     activeBloomUniforms = context.actors.bloomEnvironment?.userData.colorBloomUniforms ?? null;
+    activeButterflies = (context.actors.bloomEnvironment?.userData.butterflies as ButterflyFlockState | undefined) ?? null;
     tickColorBloom(0);
     enterCampusIdle(context.actors);
     if (phonePanPose) phonePanPose.rotation.y = 0;
@@ -1350,12 +1548,14 @@ export const buildingRuntime: SceneRuntime = {
     }
 
     if (context.sceneId !== 'S8') return;
+    clearBuildingBusSubscriptions();
     if (walkTween) {
       walkTween.kill();
       walkTween = null;
     }
     disposeLinxiaAnimation();
     walkArrived = false;
+    walkWaitingForDialogue = Boolean(context.isModalBlocked?.());
 
     const linxia = context.actors.linxia;
     walkingLinxia = linxia;
@@ -1365,9 +1565,13 @@ export const buildingRuntime: SceneRuntime = {
     let facing = Math.atan2(directionAlongRoute(0).x, directionAlongRoute(0).z);
     linxia.rotation.y = facing;
 
-    // 真实骨骼走路：按路线速度标定 timeScale，纵向起伏与摆胯全部交给动画
+    // 真实骨骼走路：若开场对话/选项正在进行，先让林夏原地站定等待，待主角说完话再启程同行
     linxiaAnimation = createActorAnimation(linxia);
-    linxiaAnimation?.play('walk', { timeScale: WALK_TIME_SCALE, fadeIn: 0.2 });
+    if (walkWaitingForDialogue) {
+      linxiaAnimation?.play('afraid', { timeScale: 0.35, fadeIn: 0.25 });
+    } else {
+      linxiaAnimation?.play('walk', { timeScale: WALK_TIME_SCALE, fadeIn: 0.2 });
+    }
 
     const progress = { value: 0 };
     walkTween = gsap.to(progress, {
@@ -1387,12 +1591,39 @@ export const buildingRuntime: SceneRuntime = {
         }
       },
     });
+    if (walkWaitingForDialogue) {
+      walkTween.pause();
+    }
+
+    const pauseBeforeWalk = (): void => {
+      if (!walkArrived && walkTween && walkTween.progress() < 0.01) {
+        walkWaitingForDialogue = true;
+        walkTween.pause();
+        linxiaAnimation?.play('afraid', { timeScale: 0.35, fadeIn: 0.25 });
+      }
+    };
+    buildingBusSubscriptions.push(
+      context.bus.on('ui:showDialogue', pauseBeforeWalk),
+      context.bus.on('ui:showChoices', pauseBeforeWalk),
+      context.bus.on('ui:chooseOption', ({ stepId }) => {
+        if (stepId === 's8-walk') beginLinxiaWalk();
+      }),
+      context.bus.on('ui:worldBlocked', ({ blocked }) => {
+        if (!blocked) beginLinxiaWalk();
+      }),
+    );
   },
 
   tick(dtSeconds: number): void {
     buildingWindTime.value += dtSeconds;
     tickColorBloom(dtSeconds);
     tickCampusIdle(dtSeconds);
+    if (activeButterflies && dtSeconds > 0) {
+      updateButterflyFlock(activeButterflies, dtSeconds);
+    }
+    if (walkWaitingForDialogue && !bloomContext?.isModalBlocked?.()) {
+      beginLinxiaWalk();
+    }
     if (phonePanPose) {
       // 十秒小幅扫过林荫道与 A 栋；经过的两人自然入画，不追踪玩家、不抢占主镜头。
       phonePanTime = (phonePanTime + dtSeconds) % 10;
@@ -1402,7 +1633,10 @@ export const buildingRuntime: SceneRuntime = {
       const initializedBefore = Boolean(linxiaAnimation);
       if (!linxiaAnimation) {
         linxiaAnimation = createActorAnimation(walkingLinxia);
-        linxiaAnimation?.play(walkArrived ? 'afraid' : 'walk', { timeScale: walkArrived ? 0.3 : WALK_TIME_SCALE });
+        linxiaAnimation?.play(
+          walkArrived || walkWaitingForDialogue ? 'afraid' : 'walk',
+          { timeScale: walkArrived || walkWaitingForDialogue ? 0.3 : WALK_TIME_SCALE },
+        );
       }
       if (linxiaAnimation) {
         let updateDt = dtSeconds;
@@ -1431,6 +1665,9 @@ export const buildingRuntime: SceneRuntime = {
   },
 
   exit(): void {
+    clearBuildingBusSubscriptions();
+    walkWaitingForDialogue = false;
+    activeButterflies = null;
     linxiaThrottleAccum = 0;
     linxiaThrottleTick = 0;
     bloomContext?.setAtmosphereProgress?.(0);

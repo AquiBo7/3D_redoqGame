@@ -1,4 +1,11 @@
 {
+  "portrait_linxia_casual": "./art/portraits/linxia_casual.png",
+  "portrait_father": "./art/portraits/father.png",
+  "portrait_xiaochen": "./art/portraits/xiaochen.png",
+  "portrait_ayuan": "./art/portraits/ayuan.png",
+  "portrait_teacher": "./art/portraits/teacher.png",
+  "portrait_volunteer": "./art/portraits/volunteer.png",
+  "portrait_protagonist": "./art/portraits/protagonist.png",
   "cg_s6_gate_panorama": "./art/cg/s6_gate_panorama.png",
   "cg_s11_post_crop": "./art/cg/s11_post_crop.png",
   "cg_s13_walk_together": "./art/cg/s13_walk_together.png"

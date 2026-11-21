@@ -1,10 +1,11 @@
 /* 调试面板（仅 ?debug=1 时挂载） */
+/* 层级始终高于顶层模态层（手机弹窗 40 / 看图与黑幕 50），保证调试时状态可查。 */
 
 .debug-toggle {
   position: fixed;
   top: calc(12px + env(safe-area-inset-top, 0px));
   right: calc(12px + env(safe-area-inset-right, 0px));
-  z-index: 30;
+  z-index: 60;
   min-width: 64px;
   min-height: 44px;
   padding: 0 14px;
@@ -27,7 +28,7 @@
   /* 从静音按钮（顶部 12 + 44）下方展开，保证右上角控件互不遮挡 */
   top: calc(64px + env(safe-area-inset-top, 0px));
   right: calc(12px + env(safe-area-inset-right, 0px));
-  z-index: 31;
+  z-index: 61;
   display: flex;
   flex-direction: column;
   width: min(380px, calc(100vw - 24px));

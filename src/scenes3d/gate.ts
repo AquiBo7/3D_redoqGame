@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { gsap } from 'gsap';
 import type { SceneId } from '../data/storySchema';
 import { sampleGroundHeight } from '../world/navMath';
+import { hasCharacterModel } from '../world/resources';
 import type { GroundSurface } from '../world/navMath';
 import type {
   HotspotConfig,
@@ -834,17 +835,14 @@ function buildGate(parent: THREE.Object3D): {
   parent.add(typer);
   occluders.push(typer);
 
-  // 合体：爸爸背林夏，两人都面向 -Z；爸爸微前倾，林夏上移并向 +Z 错开 0.3m 避免穿模
+  // 合体：双骨架一体模型（父女+提袋+下背放袋），面向 -Z；仅在未加载真实 GLB 回退胶囊体时显示占位 carryLinxia
   const carryGroup = new THREE.Group();
   const carryFather = createCharacterActor('fatherCarry', 1.78, 0x8f8578, {
     yaw: Math.PI,
-    props: [
-      { kind: 'bag', color: 0x9b8f78, side: 'left' },
-      { kind: 'bag', color: 0x9b8f78, side: 'right' },
-    ],
   });
   const carryLinxia = createCharacterActor('linxia', 1.62, 0xe8d9a8, { yaw: Math.PI });
   carryLinxia.position.set(0, 0.45, 0.3);
+  carryLinxia.visible = !hasCharacterModel('fatherCarry');
   carryGroup.add(carryFather, carryLinxia);
   carryGroup.position.set(CARRY_START.x, gateGround(CARRY_START), CARRY_START.z);
   parent.add(carryGroup);
@@ -858,20 +856,19 @@ function buildGate(parent: THREE.Object3D): {
   fatherSolo.position.set(SPLIT_POS.father.x, gateGround(SPLIT_POS.father), SPLIT_POS.father.z);
   fatherSolo.visible = false;
 
-  // 爸爸手提的两只袋子：与 createCharacterProp 的袋子同高同距（袋顶≈0.81m，贴手侧自然下垂），
-  // 组原点回到地面 y=0，避免旧版 y=0.55 + 内层 0.5 造成箱子漂在胸口的穿帮
+  // 爸爸手提的两只帆布袋（放置在双侧身体外缘，避免穿模）
   const bagsSolo = new THREE.Group();
   gateBoxes(
     bagsSolo,
     'gate-bags-body',
-    [-1, 1].map((side) => [side * 0.2, 0.6, 0, 0.3, 0.42, 0.24]),
+    [-1, 1].map((side) => [side * 0.24, 0.46, 0, 0.18, 0.38, 0.28]),
     new THREE.MeshStandardMaterial({ color: 0x9b8f78, roughness: 0.9 }),
     true,
   );
   gateBoxes(
     bagsSolo,
     'gate-bags-handle',
-    [-1, 1].map((side) => [side * 0.2, 0.84, 0, 0.16, 0.035, 0.04]),
+    [-1, 1].map((side) => [side * 0.24, 0.69, 0, 0.12, 0.035, 0.04]),
     new THREE.MeshStandardMaterial({ color: 0x7e7464, roughness: 0.9 }),
     false,
   );
@@ -911,8 +908,16 @@ const walkerStates = new Map<string, { delay: number; arrived: boolean }>();
 const actorThrottleState = new Map<string, { accum: number; tick: number }>();
 const gatePlayerFeet = new THREE.Vector3();
 let gatePlayerFeetGetter: ((target: THREE.Vector3) => THREE.Vector3) | undefined;
+let gateIsModalBlocked: (() => boolean) | undefined;
+let gateBusSubscriptions: Array<() => void> = [];
+let carryPhase: 'walk' | 'wait' | 'dismount' | 'setdown' | 'split' = 'walk';
 let linxiaWalking = false;
 let passengerPosed = false;
+
+function clearGateBusSubscriptions(): void {
+  for (const unsub of gateBusSubscriptions) unsub();
+  gateBusSubscriptions = [];
+}
 
 function consumeActorAnimationDt(
   id: string,
@@ -967,11 +972,13 @@ function resetPerformanceState(actors: Record<string, THREE.Object3D>): void {
   const father = actors.fatherSolo;
   const bags = actors.bagsSolo;
 
+  carryPhase = 'walk';
   carry.visible = true;
   carry.position.set(CARRY_START.x, gateGround(CARRY_START), CARRY_START.z);
   carry.rotation.set(0, 0, 0);
   carryFather.rotation.set(0, Math.PI, 0);
   carryLinxia.rotation.set(0, Math.PI, 0);
+  carryLinxia.visible = !hasCharacterModel('fatherCarry');
   linxia.visible = false;
   linxia.position.set(SPLIT_POS.linxia.x, gateGround(SPLIT_POS.linxia), SPLIT_POS.linxia.z);
   linxia.rotation.set(0, Math.PI, 0);
@@ -996,18 +1003,38 @@ function playPerformance(actors: Record<string, THREE.Object3D>, onReady: () => 
 
   const timeline = gsap.timeline();
 
-  // 0–7s：沿台阶缓步上行（y 随台阶升到 0.42），整体与双人各自的重心左右摇晃
+  // 0–7s：沿台阶缓步上行（双骨架原生 CarryBags_Walk_Loop 驱动父女与提袋）
   timeline.to(carry.position, { x: HANDOFF_POINT.x, z: HANDOFF_POINT.z, duration: 7, ease: 'none' }, 0);
-  timeline.to(carry.rotation, { z: 0.04, yoyo: true, repeat: 5, duration: 1.05, ease: 'sine.inOut' }, 0);
-  timeline.to(carryFather.rotation, { z: 0.03, yoyo: true, repeat: 5, duration: 1.05, ease: 'sine.inOut' }, 0);
-  timeline.to(carryLinxia.rotation, { z: -0.022, yoyo: true, repeat: 6, duration: 0.95, ease: 'sine.inOut' }, 0.2);
-  // 肩部朝向微摆：幅度控制在 ±4°，不破坏“面向校门”的整体姿态
-  timeline.to(carryFather.rotation, { y: Math.PI + 0.06, yoyo: true, repeat: 4, duration: 1.4, ease: 'sine.inOut' }, 0);
-  timeline.to(carryLinxia.rotation, { y: Math.PI - 0.05, yoyo: true, repeat: 4, duration: 1.35, ease: 'sine.inOut' }, 0.3);
+  // 胶囊体回退态保留轻微晃动，真实双骨架模型保持稳定不与骨骼位移叠冲
+  if (!hasCharacterModel('fatherCarry')) {
+    timeline.to(carry.rotation, { z: 0.04, yoyo: true, repeat: 5, duration: 1.05, ease: 'sine.inOut' }, 0);
+    timeline.to(carryFather.rotation, { z: 0.03, yoyo: true, repeat: 5, duration: 1.05, ease: 'sine.inOut' }, 0);
+    timeline.to(carryLinxia.rotation, { z: -0.022, yoyo: true, repeat: 6, duration: 0.95, ease: 'sine.inOut' }, 0.2);
+  }
 
-
-  // 9.6s：放下她 —— 合体拆分，袋子随爸爸；林夏落地的同时开始真实骨骼走路
+  // 7.0s：登顶平地——若开场台阶对话尚未结束，先原地停步等待，对话关闭后立刻播放下背与放袋
   timeline.add(() => {
+    if (gateIsModalBlocked?.()) {
+      carryPhase = 'wait';
+      timeline.pause();
+    } else {
+      carryPhase = 'dismount';
+    }
+  }, 7.0);
+
+  // 7.05–9.22s（2.17s）：原生下背动作 CarryBags_Dismount
+  timeline.add(() => {
+    carryPhase = 'dismount';
+  }, 7.05);
+
+  // 9.22–11.48s（2.27s）：原生放袋动作 CarryBags_SetDown
+  timeline.add(() => {
+    carryPhase = 'setdown';
+  }, 9.22);
+
+  // 11.48s：合体拆分，林夏落地开始走路，爸爸提袋跟在后方半步
+  timeline.add(() => {
+    carryPhase = 'split';
     carry.visible = false;
     linxia.visible = true;
     father.visible = true;
@@ -1016,25 +1043,23 @@ function playPerformance(actors: Record<string, THREE.Object3D>, onReady: () => 
     linxiaAnimation?.play('walk', { timeScale: 0.8, fadeIn: 0.2 });
     linxiaWalking = true;
     actorAnimations.get('carryFather')?.stop();
-  }, 9.6);
+  }, 11.48);
 
-  // 9.6–12.05s：林夏跛行慢走（0.8 倍速步态约 0.84m/s，2.04m 路程≈2.45s，脚不打滑），
-  // 爸爸落后半步跟在后面，袋子换到另一侧
-  timeline.to(linxia.position, { x: 0.15, z: 0.5, duration: 2.45, ease: 'none' }, 9.6);
-  timeline.to(father.position, { x: -0.35, z: 1.15, duration: 4.4, ease: 'none' }, 9.9);
-  timeline.to(bags.position, { x: -0.05, z: 1.25, duration: 4.2, ease: 'none' }, 9.9);
-  // 拆分后的行走重心：林夏轻微跛行侧倾，爸爸幅度更小（纵向起伏交给走路骨骼动画）
-  timeline.to(linxia.rotation, { z: 0.028, yoyo: true, repeat: 4, duration: 0.5, ease: 'sine.inOut' }, 9.6);
-  timeline.to(linxia.rotation, { y: Math.PI + 0.045, yoyo: true, repeat: 2, duration: 1, ease: 'sine.inOut' }, 9.6);
-  timeline.to(father.rotation, { z: -0.016, yoyo: true, repeat: 6, duration: 0.62, ease: 'sine.inOut' }, 9.9);
-  timeline.to(father.rotation, { y: Math.PI - 0.03, yoyo: true, repeat: 3, duration: 1.2, ease: 'sine.inOut' }, 9.9);
+  // 11.48–13.93s：林夏慢走（0.8 倍速步态约 0.84m/s，2.04m 路程≈2.45s），爸爸落后半步跟上
+  timeline.to(linxia.position, { x: 0.15, z: 0.5, duration: 2.45, ease: 'none' }, 11.48);
+  timeline.to(father.position, { x: -0.35, z: 1.15, duration: 4.4, ease: 'none' }, 11.78);
+  timeline.to(bags.position, { x: -0.05, z: 1.25, duration: 4.2, ease: 'none' }, 11.78);
+  timeline.to(linxia.rotation, { z: 0.028, yoyo: true, repeat: 4, duration: 0.5, ease: 'sine.inOut' }, 11.48);
+  timeline.to(linxia.rotation, { y: Math.PI + 0.045, yoyo: true, repeat: 2, duration: 1, ease: 'sine.inOut' }, 11.48);
+  timeline.to(father.rotation, { z: -0.016, yoyo: true, repeat: 6, duration: 0.62, ease: 'sine.inOut' }, 11.78);
+  timeline.to(father.rotation, { y: Math.PI - 0.03, yoyo: true, repeat: 3, duration: 1.2, ease: 'sine.inOut' }, 11.78);
 
-  // 12.05s：走完最后一步，交叉淡入到低速“站定”待机（拘谨），避免停在机械绑定姿势
+  // 13.93s：走完最后一步，交叉淡入到低速“站定”待机（拘谨）
   timeline.add(() => {
     linxiaWalking = false;
     linxiaAnimation?.play('afraid', { timeScale: 0.25, fadeIn: 0.7 });
     onReady();
-  }, 12.05);
+  }, 13.93);
 
   performanceTimeline = timeline;
 }
@@ -1067,6 +1092,7 @@ export const gateRuntime: SceneRuntime = {
   enter(context: SceneRuntimeContext): void {
     gateActors = context.actors;
     gatePlayerFeetGetter = context.getPlayerFeet;
+    gateIsModalBlocked = context.isModalBlocked;
     for (const path of GATE_WALKERS) {
       if (context.actors[path.id] && !walkerStates.has(path.id)) {
         walkerStates.set(path.id, { delay: path.delay, arrived: false });
@@ -1077,10 +1103,25 @@ export const gateRuntime: SceneRuntime = {
     startGateIdleMotions(context.actors);
 
     if (context.sceneId !== 'S5') return;
+    clearGateBusSubscriptions();
     if (performanceTimeline) {
       performanceTimeline.kill();
       performanceTimeline = null;
     }
+    const resumeIfWaiting = (): void => {
+      if (carryPhase === 'wait' && performanceTimeline?.paused()) {
+        carryPhase = 'dismount';
+        performanceTimeline.resume();
+      }
+    };
+    gateBusSubscriptions.push(
+      context.bus.on('ui:dialogueEnd', ({ stepId }) => {
+        if (stepId === 's5-stairs-dialogue') resumeIfWaiting();
+      }),
+      context.bus.on('ui:worldBlocked', ({ blocked }) => {
+        if (!blocked) resumeIfWaiting();
+      }),
+    );
     playPerformance(context.actors, () => {
       context.bus.emit('ui:showObjective', { sceneId: 'S5' });
     });
@@ -1089,17 +1130,33 @@ export const gateRuntime: SceneRuntime = {
   tick(dtSeconds: number): void {
     gateWindTime.value += dtSeconds;
     gatePlayerFeetGetter?.(gatePlayerFeet);
-    if (!passengerPosed && gateActors.carryLinxia) {
-      passengerPosed = posePiggybackPassenger(gateActors.carryLinxia);
+    const hasDualRig = hasCharacterModel('fatherCarry');
+    if (gateActors.carryLinxia) {
+      gateActors.carryLinxia.visible = !hasDualRig;
+      if (!hasDualRig && !passengerPosed) {
+        passengerPosed = posePiggybackPassenger(gateActors.carryLinxia);
+      }
+    }
+    if (carryPhase === 'wait' && performanceTimeline?.paused() && !gateIsModalBlocked?.()) {
+      carryPhase = 'dismount';
+      performanceTimeline.resume();
     }
     for (const id of ['carryGroup', 'linxiaSolo', 'fatherSolo', 'bagsSolo']) {
       const actor = gateActors[id];
       if (actor) actor.position.y = gateGround(actor.position);
     }
-    const clips: Array<[string, string, number, boolean]> = [
-      ['carryFather', 'Piggyback_Walk_Loop', 0.85, false],
-      ['crowd-1', 'idle', 0.7, true],
-      ['crowd-3', 'fold_arms', 0.65, true],
+    const carryClip: { clip: string; timeScale: number; loop: boolean; fadeIn: number } =
+      carryPhase === 'dismount'
+        ? { clip: 'CarryBags_Dismount', timeScale: 1, loop: false, fadeIn: 0.18 }
+        : carryPhase === 'setdown'
+          ? { clip: 'CarryBags_SetDown', timeScale: 1, loop: false, fadeIn: 0.15 }
+          : carryPhase === 'wait'
+            ? { clip: 'CarryBags_Walk_Loop', timeScale: 0, loop: true, fadeIn: 0.2 }
+            : { clip: 'CarryBags_Walk_Loop', timeScale: 0.9, loop: true, fadeIn: 0.25 };
+    const clips: Array<[string, string, number, boolean, boolean, number]> = [
+      ['carryFather', carryClip.clip, carryClip.timeScale, false, carryClip.loop, carryClip.fadeIn],
+      ['crowd-1', 'idle', 0.7, true, true, 0.25],
+      ['crowd-3', 'fold_arms', 0.65, true, true, 0.25],
     ];
     for (const path of GATE_WALKERS) {
       const actor = gateActors[path.id];
@@ -1115,9 +1172,11 @@ export const gateRuntime: SceneRuntime = {
         state.arrived || state.delay > 0 ? path.arrivedClip : 'walk',
         state.arrived ? 0.65 : 0.82,
         state.arrived,
+        true,
+        0.25,
       ]);
     }
-    for (const [id, clip, timeScale, throttleWhenFar] of clips) {
+    for (const [id, clip, timeScale, throttleWhenFar, loop, fadeIn] of clips) {
       const actor = gateActors[id];
       if (!actor || (id === 'carryFather' && !gateActors.carryGroup?.visible)) continue;
       const updateDt = consumeActorAnimationDt(id, actor, dtSeconds, throttleWhenFar);
@@ -1127,7 +1186,7 @@ export const gateRuntime: SceneRuntime = {
         animation = createActorAnimation(actor) ?? undefined;
         if (animation) actorAnimations.set(id, animation);
       }
-      animation?.play(clip, { timeScale, fadeIn: 0.25 });
+      animation?.play(clip, { timeScale, fadeIn, loop });
       animation?.update(updateDt);
     }
     if (gateActors.linxiaSolo?.visible) {
@@ -1140,9 +1199,12 @@ export const gateRuntime: SceneRuntime = {
   },
 
   exit(): void {
+    clearGateBusSubscriptions();
     walkerStates.clear();
     actorThrottleState.clear();
     gatePlayerFeetGetter = undefined;
+    gateIsModalBlocked = undefined;
+    carryPhase = 'walk';
     for (const animation of actorAnimations.values()) animation.dispose();
     actorAnimations.clear();
     gateActors = {};

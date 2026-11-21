@@ -122,7 +122,7 @@ export const chapter4Scenes: Partial<Record<SceneId, SceneDef>> = {
         ] },
         { kind: 'post', id: 'd4-repost', title: '校园见闻 · 搬运帖', publishedAt: '今天 16:42',
           assetIds: ['cg_s11_post_crop', 'cg_s13_walk_together'], views: 52680, commentCount: 218,
-          text: '原帖删了，截图仍在流传。转发 326 次。', comments: [
+          text: '【搬运】刚才那条怎么秒删了？还好提前截了图，大家自己看吧…（转发 326 次）', comments: [
             { id: 'd4-comment-1', author: '路过的同学', text: '原来是脚崴了？可是我还是觉得……', likes: 37 },
             { id: 'd4-comment-2', author: '匿名同学', text: '删了就想没事？', likes: 64 },
           ] },

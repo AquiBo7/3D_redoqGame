@@ -2,6 +2,7 @@
 // 纯展示：台词与说话人姓名均来自 core 事件；结束通过回调交给 gameUi。
 
 import type { GameEvents } from '../core/eventBus';
+import { READY_EXTERNAL_ASSETS } from '../data/assetManifest';
 import type { SpeakerId } from '../data/storySchema';
 import { createElement } from './uiDom';
 import './dialogueBox.css';
@@ -11,15 +12,16 @@ type DialoguePayload = GameEvents['ui:showDialogue'];
 const TYPE_INTERVAL_MS = 26;
 
 /**
- * 可选头像 / 立绘 URL 配置：未配置或加载失败时自动降级为首字细线徽章。
- * 美术把图片放入 public/images/portrait_<id>.png 后，取消对应行注释即可接入；
- * 默认全部留空，避免图片尚未到位时产生 404。
+ * 说话人左侧立绘 URL 配置：直接绑定经 sync:art 校验就绪的外部透明立绘；
+ * 未配置或加载失败时自动隐藏左侧立绘并降级为首字细线圆标，避免 404。
  */
 export const SPEAKER_PORTRAIT_URLS: Partial<Record<SpeakerId, string>> = {
-  // linxia: './images/portrait_linxia.png',
-  // father: './images/portrait_father.png',
-  // volunteer: './images/portrait_volunteer.png',
-  // mom: './images/portrait_mom.png',
+  ...(READY_EXTERNAL_ASSETS.portrait_linxia_casual ? { linxia: READY_EXTERNAL_ASSETS.portrait_linxia_casual } : {}),
+  ...(READY_EXTERNAL_ASSETS.portrait_father ? { father: READY_EXTERNAL_ASSETS.portrait_father } : {}),
+  ...(READY_EXTERNAL_ASSETS.portrait_volunteer ? { volunteer: READY_EXTERNAL_ASSETS.portrait_volunteer } : {}),
+  ...(READY_EXTERNAL_ASSETS.portrait_xiaochen ? { xiaochen: READY_EXTERNAL_ASSETS.portrait_xiaochen } : {}),
+  ...(READY_EXTERNAL_ASSETS.portrait_ayuan ? { ayuan: READY_EXTERNAL_ASSETS.portrait_ayuan } : {}),
+  ...(READY_EXTERNAL_ASSETS.portrait_teacher ? { teacher: READY_EXTERNAL_ASSETS.portrait_teacher } : {}),
 };
 
 export interface DialogueBoxOptions {
@@ -35,6 +37,7 @@ function firstCharacter(text: string, fallback: string): string {
 
 export class DialogueBox {
   private readonly root: HTMLElement;
+  private readonly portrait: HTMLDivElement;
   private readonly avatar: HTMLDivElement;
   private readonly name: HTMLSpanElement;
   private readonly text: HTMLParagraphElement;
@@ -51,6 +54,7 @@ export class DialogueBox {
   private active = false;
   private finishing = false;
   private timer = 0;
+  private currentPortraitUrl: string | null = null;
 
   constructor(options: DialogueBoxOptions) {
     this.portraits = options.portraits ?? SPEAKER_PORTRAIT_URLS;
@@ -60,6 +64,12 @@ export class DialogueBox {
     this.root.hidden = true;
     this.root.setAttribute('role', 'dialog');
     this.root.setAttribute('aria-label', '对话');
+
+    const inner = createElement('div', 'dialogue__inner');
+
+    this.portrait = createElement('div', 'dialogue__portrait');
+    this.portrait.hidden = true;
+    this.portrait.setAttribute('aria-hidden', 'true');
 
     const panel = createElement('div', 'dialogue__panel');
 
@@ -77,7 +87,8 @@ export class DialogueBox {
     footer.append(hint, next);
 
     panel.append(speaker, this.text, footer);
-    this.root.append(panel);
+    inner.append(this.portrait, panel);
+    this.root.append(inner);
     options.container.append(this.root);
 
     panel.addEventListener('click', () => this.advance());
@@ -106,12 +117,14 @@ export class DialogueBox {
     this.stopTimer();
     this.lines = [];
     this.stepId = '';
+    this.clearPortrait();
     this.root.hidden = true;
     this.root.classList.remove('is-ready', 'dialogue--narration');
   }
 
   dispose(): void {
     this.stopTimer();
+    this.clearPortrait();
     window.removeEventListener('keydown', this.handleKeyDown);
     this.root.remove();
   }
@@ -136,11 +149,20 @@ export class DialogueBox {
     this.startTyping();
   }
 
+  private clearPortrait(): void {
+    this.currentPortraitUrl = null;
+    this.portrait.replaceChildren();
+    this.portrait.hidden = true;
+    this.portrait.className = 'dialogue__portrait';
+    this.root.classList.remove('dialogue--has-portrait');
+  }
+
   private renderAvatar(speaker: SpeakerId | null, speakerName: string): void {
     this.avatar.replaceChildren();
     this.avatar.hidden = speaker === null;
     if (!speaker) {
       this.avatar.className = 'dialogue__avatar';
+      this.clearPortrait();
       return;
     }
 
@@ -150,14 +172,37 @@ export class DialogueBox {
     );
 
     const portraitUrl = this.portraits[speaker];
-    if (!portraitUrl) return;
+    if (!portraitUrl) {
+      this.clearPortrait();
+      return;
+    }
 
-    const image = createElement('img', 'dialogue__avatar-image');
-    image.alt = '';
+    // 同一说话人连续台词复用已有立绘 DOM，避免逐句闪烁
+    if (this.currentPortraitUrl === portraitUrl && !this.portrait.hidden) {
+      this.root.classList.add('dialogue--has-portrait');
+      return;
+    }
+
+    this.currentPortraitUrl = portraitUrl;
+    this.portrait.replaceChildren();
+    this.portrait.className = `dialogue__portrait dialogue__portrait--${speaker}`;
+    this.portrait.hidden = false;
+    this.root.classList.add('dialogue--has-portrait');
+
+    const image = createElement('img', 'dialogue__portrait-image');
+    image.alt = speakerName;
     image.decoding = 'async';
-    image.addEventListener('error', () => image.remove(), { once: true });
+    image.draggable = false;
+    image.addEventListener(
+      'error',
+      () => {
+        if (this.currentPortraitUrl !== portraitUrl) return;
+        this.clearPortrait();
+      },
+      { once: true },
+    );
     image.src = portraitUrl;
-    this.avatar.append(image);
+    this.portrait.append(image);
   }
 
   private startTyping(): void {

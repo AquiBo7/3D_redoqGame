@@ -349,6 +349,41 @@ function buildWindow(parent: THREE.Object3D, details: RoomDetails): void {
     }
   }
 
+  // 窗外街道远处：1~2 个拖行李箱向校门方向行走的程序化极简剪影（零 GLB、不参与碰撞/注视）。
+  const silhouetteMaterial = createMatteMaterial(0x39404a, 0.98);
+  const addSilhouette = (x: number, z: number, flip: number): void => {
+    const figure = new THREE.Group();
+    figure.position.set(x, -0.05, z);
+    figure.rotation.y = flip > 0 ? 0.16 : -0.16;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.78, 0.14), silhouetteMaterial);
+    body.position.y = 0.62;
+    body.rotation.x = 0.1;
+    body.castShadow = false;
+    figure.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.14, 0.13), silhouetteMaterial);
+    head.position.set(0.01, 1.08, 0);
+    head.castShadow = false;
+    figure.add(head);
+    for (const dx of [-0.07, 0.07]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.08), silhouetteMaterial);
+      leg.position.set(dx, 0.28, dx > 0 ? 0.06 : -0.02);
+      leg.castShadow = false;
+      figure.add(leg);
+    }
+    const caseMesh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.12), silhouetteMaterial);
+    caseMesh.position.set(flip * 0.3, 0.16, -0.28);
+    caseMesh.castShadow = false;
+    figure.add(caseMesh);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.3), silhouetteMaterial);
+    arm.position.set(flip * 0.14, 0.52, -0.15);
+    arm.rotation.x = 0.5;
+    arm.castShadow = false;
+    figure.add(arm);
+    parent.add(figure);
+  };
+  addSilhouette(1.7, -12.6, 1);
+  addSilhouette(2.1, -13.2, -1);
+
   const blinds = new THREE.Group();
   blinds.name = 'room-venetian-blinds';
   parent.add(blinds);
@@ -611,6 +646,11 @@ function buildCeilingLamp(parent: THREE.Object3D): void {
   light.position.y = -0.62;
   light.castShadow = false;
   lamp.add(light);
+
+  // 清晨柔和漫射窗光补光：消除室内偏灰感，保持暖明通透但不改变主吊灯参数
+  const morningFill = new THREE.HemisphereLight(0xfff5e4, 0xcab69b, 0.24);
+  morningFill.name = 'room-morning-window-fill';
+  parent.add(morningFill);
 }
 
 /** 三片硬封皮合成一批，白纸内芯是真实实体而非封面上的白色贴片。 */
@@ -1036,7 +1076,8 @@ export function createRoomDefinition(sceneId: SceneId): WorldSceneDefinition {
     requiredModels: [],
     interactables,
     hotspots,
-    fog: { color: 0xb9c6d2, near: 5, far: 14 },
+    // 拉远并柔化室内雾距，消除近景冷灰雾罩，仅让窗外远景柔和融天
+    fog: { color: 0xe6dfd2, near: 16, far: 44 },
     build: buildRoom,
   };
 }

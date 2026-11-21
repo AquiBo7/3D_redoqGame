@@ -59,8 +59,9 @@ const MAX_BYTES = 2 * 1024 * 1024;
 
 // 平移轨道使用父节点坐标系，而不是目标骨骼自身旋转后的轴。
 // Hip 的父节点 Root 把本地 (X,Y,Z) 映射为世界 (-Z,-X,+Y)。
-const HIP_WALK_MOTION = { clip: 'walk', node: 'Hip', lockAxis: 1, driftAxes: [0], preserveAxis: 2 };
-const CARRY_CLIPS = ['Piggyback_Pickup_And_Walk', 'Piggyback_Walk_Loop'];
+const hipMotion = (clip) => ({ clip, node: 'Hip', lockAxis: 1, driftAxes: [0], preserveAxis: 2 });
+const HIP_WALK_MOTION = hipMotion('walk');
+const CARRY_CLIPS = ['CarryBags_Walk_Loop', 'CarryBags_Dismount', 'CarryBags_SetDown'];
 
 export const MODELS = [
   {
@@ -74,21 +75,51 @@ export const MODELS = [
   },
   { id: 'father', raw: 'art/raw/爸爸3d模型.glb', out: 'public/models/chr_father.glb', name: '爸爸' },
   { id: 'ayuan', raw: 'art/raw/男同学1.glb', out: 'public/models/chr_ayuan.glb', name: '阿远' },
-  { id: 'volunteer', raw: 'art/raw/女同学1.glb', out: 'public/models/chr_volunteer.glb', name: '志愿者' },
+  {
+    id: 'volunteer',
+    raw: 'art/raw/老师3d可动.glb',
+    out: 'public/models/chr_volunteer.glb',
+    name: '女老师（迎新登记）',
+    animated: true,
+    keepAnimations: ['wave_goodbye_02', 'wait', 'agree', 'bow'],
+    rootMotion: [hipMotion('wave_goodbye_02')],
+    textureSize: 768,
+  },
   { id: 'protagonist', raw: 'art/raw/男主3d建模.glb', out: 'public/models/chr_protagonist.glb', name: '主角' },
   {
-    id: 'fatherCarry', raw: 'art/raw/爸爸3D-背人行走.glb', out: 'public/models/chr_father_carry.glb',
-    name: '爸爸（背人）', animated: true, keepAnimations: CARRY_CLIPS,
-    // Root 的父节点 Armature 为单位变换：X/Z 水平，Y 竖直。不能对 Y 去漂移。
-    rootMotion: CARRY_CLIPS.map((clip) => ({ clip, node: 'Root', lockAxis: 0, driftAxes: [2], preserveAxis: 1 })),
+    id: 'fatherCarry',
+    raw: 'art/raw/父女-背行提袋-下背放袋.glb',
+    out: 'public/models/chr_father_carry.glb',
+    name: '父女（背行提袋+下背放袋）',
+    animated: true,
+    keepAnimations: CARRY_CLIPS,
+    // 三个拆分动作（背行循环 / 下背 / 放袋）均已原地化，无需二次去漂移
+    rootMotion: [],
+    targetTris: 24000,
+    textureSize: 768,
+    expectedSkins: 2,
+    allowUnskinnedMeshes: true,
+    prefixArmatureNodes: true,
   },
   {
-    id: 'studentFemale', raw: 'art/raw/女同学2可动.glb', out: 'public/models/chr_student_female.glb',
-    name: '女同学', animated: true, keepAnimations: ['walk', 'idle'], rootMotion: [HIP_WALK_MOTION], textureSize: 768,
+    id: 'studentFemale',
+    raw: 'art/raw/女同学2可动.glb',
+    out: 'public/models/chr_student_female.glb',
+    name: '女同学',
+    animated: true,
+    keepAnimations: ['walk', 'idle', 'wait', 'greet_04', 'agree', 'make_a_call_01'],
+    rootMotion: [HIP_WALK_MOTION, hipMotion('greet_04')],
+    textureSize: 768,
   },
   {
-    id: 'studentMale', raw: 'art/raw/胖男同学可动.glb', out: 'public/models/chr_student_male.glb',
-    name: '男同学', animated: true, keepAnimations: ['walk', 'fold_arms'], rootMotion: [HIP_WALK_MOTION], textureSize: 768,
+    id: 'studentMale',
+    raw: 'art/raw/胖男同学可动.glb',
+    out: 'public/models/chr_student_male.glb',
+    name: '男同学',
+    animated: true,
+    keepAnimations: ['walk', 'fold_arms', 'make_a_call_02', 'greet_04', 'agree', 'complain_01'],
+    rootMotion: [HIP_WALK_MOTION, hipMotion('greet_04')],
+    textureSize: 768,
   },
 ];
 
@@ -280,10 +311,11 @@ function simplifyModel(doc, targetTris) {
   return errors;
 }
 
-/** 统计仍被多个 primitive 同时引用的 accessor（含索引）：压缩后必须为空 */
+/** 统计同一 mesh 内仍被多个 primitive 同时引用的 accessor（含索引）：压缩后必须为空 */
 function findSharedPrimitiveAccessors(doc) {
-  const usage = new Map();
+  const shared = [];
   for (const mesh of doc.getRoot().listMeshes()) {
+    const usage = new Map();
     for (const prim of mesh.listPrimitives()) {
       const accessors = [prim.getIndices()];
       for (const semantic of prim.listSemantics()) accessors.push(prim.getAttribute(semantic));
@@ -292,19 +324,50 @@ function findSharedPrimitiveAccessors(doc) {
         usage.set(accessor, (usage.get(accessor) ?? 0) + 1);
       }
     }
+    for (const entry of usage.entries()) {
+      if (entry[1] > 1) shared.push(entry);
+    }
   }
-  return [...usage.entries()].filter(([, count]) => count > 1);
+  return shared;
 }
 
-/** 骨骼蒙皮检查：所有 mesh primitive 必须有 JOINTS_0 / WEIGHTS_0，文档含 Skin，且无共享顶点缓冲残留 */
-function inspectSkin(doc) {
+/** 为多骨架模型（如 Father_Armature + Linxia_Armature）消歧同名骨骼节点，防止 Three.js AnimationMixer 绑定串轨 */
+function disambiguateArmatureNodes(doc) {
+  const scene = doc.getRoot().listScenes()[0];
+  if (!scene) return 0;
+  let renamed = 0;
+  const walk = (node, prefix) => {
+    const current = node.getName();
+    if (current && !current.startsWith(prefix)) {
+      node.setName(`${prefix}${current}`);
+      renamed += 1;
+    }
+    for (const child of node.listChildren()) walk(child, prefix);
+  };
+  for (const top of scene.listChildren()) {
+    const name = top.getName();
+    if (!name.endsWith('_Armature')) continue;
+    const prefix = `${name.replace(/_Armature$/, '')}_`;
+    for (const child of top.listChildren()) walk(child, prefix);
+  }
+  return renamed;
+}
+
+/** 骨骼蒙皮检查：蒙皮节点对应 mesh 必须有 JOINTS_0 / WEIGHTS_0，文档含预期数量 Skin，且无共享顶点缓冲残留 */
+function inspectSkin(doc, options = {}) {
+  const expectedSkins = options.expectedSkins ?? 1;
+  const allowUnskinnedMeshes = options.allowUnskinnedMeshes ?? false;
+  const skinnedMeshes = new Set(
+    doc.getRoot().listNodes().filter((node) => node.getMesh() && node.getSkin()).map((node) => node.getMesh()),
+  );
   const primitives = [];
   for (const mesh of doc.getRoot().listMeshes()) {
+    const mustBeSkinned = !allowUnskinnedMeshes || skinnedMeshes.has(mesh);
     for (const prim of mesh.listPrimitives()) {
       const hasJoints = Boolean(prim.getAttribute('JOINTS_0'));
       const hasWeights = Boolean(prim.getAttribute('WEIGHTS_0'));
-      if (!hasJoints || !hasWeights) {
-        throw new Error('减面后蒙皮属性丢失：缺少 JOINTS_0 / WEIGHTS_0');
+      if (mustBeSkinned && (!hasJoints || !hasWeights)) {
+        throw new Error(`减面后蒙皮属性丢失：${mesh.getName()} 缺少 JOINTS_0 / WEIGHTS_0`);
       }
       primitives.push({
         material: prim.getMaterial()?.getName() ?? '(无材质)',
@@ -318,7 +381,14 @@ function inspectSkin(doc) {
     throw new Error(`压缩后仍有 ${shared.length} 个 accessor 被多个 primitive 共享，顶点缓冲未拆分`);
   }
   const skins = doc.getRoot().listSkins();
-  if (skins.length === 0) throw new Error('减面后 Skin 丢失');
+  if (skins.length !== expectedSkins) {
+    throw new Error(`Skin 数量不符：期望 ${expectedSkins}，实际 ${skins.length}`);
+  }
+  for (const skin of skins) {
+    if (skin.listJoints().length !== 41) {
+      throw new Error(`Skin 骨骼数不符：期望 41，实际 ${skin.listJoints().length}`);
+    }
+  }
   return {
     skinnedPrimitives: primitives.length,
     skins: skins.length,
@@ -358,8 +428,10 @@ function verifyAnimatedOutput(doc, model, snapshots) {
     }
     return { clip: config.clip, node: config.node, frames, ranges };
   });
-  const skin = inspectSkin(doc);
-  if (skin.skins !== 1 || skin.joints !== 41) throw new Error('输出必须保留单套 41 骨蒙皮');
+  const skin = inspectSkin(doc, {
+    expectedSkins: model.expectedSkins ?? 1,
+    allowUnskinnedMeshes: model.allowUnskinnedMeshes ?? false,
+  });
   return { animations: names, motion, skin };
 }
 
@@ -388,28 +460,30 @@ async function compressModel(model) {
     console.log(`  [动画] 保留 [${model.keepAnimations.join(', ')}]；删除 ${removed.length} 个剪辑`);
     for (const report of stripped) console.log(`  [原地化] ${JSON.stringify(report)}`);
   }
+  if (model.prefixArmatureNodes) {
+    const renamed = disambiguateArmatureNodes(rawDoc);
+    console.log(`  [骨架消歧] 已为双骨架子节点加前缀：${renamed} 个节点`);
+  }
 
-  const errors = simplifyModel(rawDoc, TARGET_TRIS);
-  if (model.id === 'linxia') {
-    for (const mesh of rawDoc.getRoot().listMeshes()) {
-      for (const primitive of mesh.listPrimitives()) {
-        if (primitive.getMaterial()?.getName() !== 'Shoe inner leather') continue;
-        // 平面鞋内衬使用连续投影，避免补丁原有随机 UV 跨越整张皮革贴图。
-        const position = primitive.getAttribute('POSITION');
-        const bounds = [0, 1, 2].map((axis) => {
-          const values = readFloatAttribute(position, 3);
-          const samples = Array.from({ length: position.getCount() }, (_, i) => values[i * 3 + axis]);
-          return { axis, min: Math.min(...samples), span: Math.max(...samples) - Math.min(...samples) };
-        }).sort((a, b) => b.span - a.span);
-        const positions = readFloatAttribute(position, 3);
-        const uv = new Float32Array(position.getCount() * 2);
-        for (let i = 0; i < position.getCount(); i += 1) {
-          for (let axis = 0; axis < 2; axis += 1) {
-            uv[i * 2 + axis] = 0.4 + (positions[i * 3 + bounds[axis].axis] - bounds[axis].min) * 0.5;
-          }
+  const errors = simplifyModel(rawDoc, model.targetTris ?? TARGET_TRIS);
+  for (const mesh of rawDoc.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      if (primitive.getMaterial()?.getName() !== 'Shoe inner leather') continue;
+      // 平面鞋内衬使用连续投影，避免补丁原有随机 UV 跨越整张皮革贴图。
+      const position = primitive.getAttribute('POSITION');
+      const bounds = [0, 1, 2].map((axis) => {
+        const values = readFloatAttribute(position, 3);
+        const samples = Array.from({ length: position.getCount() }, (_, i) => values[i * 3 + axis]);
+        return { axis, min: Math.min(...samples), span: Math.max(...samples) - Math.min(...samples) };
+      }).sort((a, b) => b.span - a.span);
+      const positions = readFloatAttribute(position, 3);
+      const uv = new Float32Array(position.getCount() * 2);
+      for (let i = 0; i < position.getCount(); i += 1) {
+        for (let axis = 0; axis < 2; axis += 1) {
+          uv[i * 2 + axis] = 0.4 + (positions[i * 3 + bounds[axis].axis] - bounds[axis].min) * 0.5;
         }
-        primitive.setAttribute('TEXCOORD_0', rawDoc.createAccessor().setType('VEC2').setArray(uv));
       }
+      primitive.setAttribute('TEXCOORD_0', rawDoc.createAccessor().setType('VEC2').setArray(uv));
     }
   }
   // 沿用可动模型的贴图管线，不改变材质或蒙皮语义。

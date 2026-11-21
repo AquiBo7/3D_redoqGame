@@ -168,13 +168,32 @@ function createCharacterProp(spec: CharacterPropSpec, heightM: number): THREE.Me
     baseZ = 0.2;
   } else {
     mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.34, 0.44, 0.26),
-      createMatteMaterial(spec.color ?? 0x9b8f78),
+      new THREE.BoxGeometry(0.14, 0.34, 0.26),
+      createMatteMaterial(spec.color ?? 0xb6a58a, 0.88),
     );
-    // 袋顶≈0.82m 贴近自然下垂的手部，袋身贴在大腿外侧前方，不落地
-    baseX = sideSign * 0.3;
-    baseY = 0.6;
-    baseZ = 0.12;
+    // 帆布手提袋悬于自然下垂的手掌正下方（内缘 0.34 - 0.07 = 0.27m 避开腿侧不穿模），
+    // 并加装竖向提手织带直连掌心高度（y≈0.74m），消除“悬空方块”感
+    baseX = sideSign * 0.34;
+    baseY = 0.41;
+    baseZ = 0.03;
+    const strapMat = createMatteMaterial(0x6c5e4b, 0.9);
+    const strapTop = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.024, 0.14), strapMat);
+    strapTop.position.set(0, 0.33, 0);
+    strapTop.raycast = NOOP_RAYCAST;
+    const strapFront = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.17, 0.022), strapMat);
+    strapFront.position.set(0, 0.245, 0.062);
+    strapFront.raycast = NOOP_RAYCAST;
+    const strapBack = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.17, 0.022), strapMat);
+    strapBack.position.set(0, 0.245, -0.062);
+    strapBack.raycast = NOOP_RAYCAST;
+    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.148, 0.045, 0.268), strapMat);
+    cuff.position.set(0, 0.145, 0);
+    cuff.raycast = NOOP_RAYCAST;
+    for (const part of [strapTop, strapFront, strapBack, cuff]) {
+      part.castShadow = true;
+      part.receiveShadow = true;
+      mesh.add(part);
+    }
   }
 
   const offset = spec.offset ?? {};
@@ -242,7 +261,9 @@ export function createCharacterActor(
     }
     for (const prop of options.props ?? []) {
       const mesh = createCharacterProp(prop, heightM);
-      mesh.castShadow = castShadow;
+      mesh.traverse((node) => {
+        if (node instanceof THREE.Mesh) node.castShadow = castShadow;
+      });
       propsRoot.add(mesh);
     }
   };

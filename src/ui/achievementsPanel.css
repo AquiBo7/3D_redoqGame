@@ -1,7 +1,7 @@
 .achievements,
 .achievements-toast {
   box-sizing: border-box;
-  font-family: var(--font-body, sans-serif);
+  font-family: var(--yt-font-sans);
   color: #424e49;
 }
 
@@ -55,7 +55,7 @@
 
 .achievements__title {
   margin: 0;
-  font-family: var(--font-title, serif);
+  font-family: var(--yt-font-serif);
   font-size: 24px;
   font-weight: 500;
   letter-spacing: .12em;

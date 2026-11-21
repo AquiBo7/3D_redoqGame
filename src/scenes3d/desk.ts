@@ -605,6 +605,16 @@ let animatedActors: AnimatedActor[] = [];
 let walker: THREE.Object3D | null = null;
 let windTime: WindTime | null = null;
 let deskPlayerFeetGetter: ((target: THREE.Vector3) => THREE.Vector3) | undefined;
+let deskIsModalBlocked: (() => boolean) | undefined;
+let deskWasBlocked = false;
+const VOLUNTEER_IDLE_CLIPS = ['wait', 'agree', 'bow'] as const;
+let volunteerState: {
+  actor: THREE.Object3D;
+  controller: CharacterAnimationController | null;
+  mode: 'greet' | 'idle';
+  timer: number;
+  idleIndex: number;
+} | null = null;
 const deskPlayerFeet = new THREE.Vector3();
 
 function clearRuntime(): void {
@@ -614,9 +624,50 @@ function clearRuntime(): void {
   idleDisposers = [];
   animatedActors.forEach(({ controller }) => controller?.dispose());
   animatedActors = [];
+  volunteerState?.controller?.dispose();
+  volunteerState = null;
   walker = null;
   windTime = null;
   deskPlayerFeetGetter = undefined;
+  deskIsModalBlocked = undefined;
+  deskWasBlocked = false;
+}
+
+function triggerVolunteerGreeting(): void {
+  if (!volunteerState?.controller) return;
+  volunteerState.mode = 'greet';
+  volunteerState.timer = 0;
+  // 进入对话或刚到登记桌时触发女老师挥手打招呼，播完自动过渡到自然待机
+  volunteerState.controller.play('wave_goodbye_02', { fadeIn: 0.25, timeScale: 1, loop: false });
+}
+
+function updateVolunteerAnimation(dt: number): void {
+  if (!volunteerState || !volunteerState.actor.visible) return;
+  if (!volunteerState.controller) {
+    volunteerState.controller = createActorAnimation(volunteerState.actor);
+    if (!volunteerState.controller) return;
+    triggerVolunteerGreeting();
+    volunteerState.controller.update(dt);
+    return;
+  }
+  const blocked = deskIsModalBlocked?.() ?? false;
+  if (!deskWasBlocked && blocked) {
+    triggerVolunteerGreeting();
+  }
+  deskWasBlocked = blocked;
+  volunteerState.timer += dt;
+  if (volunteerState.mode === 'greet' && volunteerState.timer >= 5.6) {
+    volunteerState.mode = 'idle';
+    volunteerState.timer = 0;
+    volunteerState.idleIndex = 0;
+    volunteerState.controller.play(VOLUNTEER_IDLE_CLIPS[0], { fadeIn: 0.45, timeScale: 0.85, loop: true });
+  } else if (volunteerState.mode === 'idle' && volunteerState.timer >= 8.5) {
+    volunteerState.timer = 0;
+    volunteerState.idleIndex = (volunteerState.idleIndex + 1) % VOLUNTEER_IDLE_CLIPS.length;
+    const clip = VOLUNTEER_IDLE_CLIPS[volunteerState.idleIndex];
+    volunteerState.controller.play(clip, { fadeIn: 0.45, timeScale: 0.85, loop: true });
+  }
+  volunteerState.controller.update(dt);
 }
 function updateAnimation(record: AnimatedActor, dt: number): void {
   if (!record.actor.visible) return;
@@ -649,10 +700,22 @@ export const deskRuntime: SceneRuntime = {
     if (context.sceneId !== 'S7') return;
     clearRuntime();
     deskPlayerFeetGetter = context.getPlayerFeet;
+    deskIsModalBlocked = context.isModalBlocked;
+    deskWasBlocked = context.isModalBlocked?.() ?? false;
     windTime = (context.actors.deskEnvironment?.userData.windTime as WindTime | undefined) ?? null;
     for (const [index, id] of ['volunteer', 'linxia', 'father'].entries()) {
       const actor = context.actors[id];
       if (actor) idleDisposers.push(startIdleMotion(actor, { breathAmp: 0.005, swayAmp: 0.004, period: 2.7 + index * 0.3 }));
+    }
+    if (context.actors.volunteer) {
+      volunteerState = {
+        actor: context.actors.volunteer,
+        controller: null,
+        mode: 'greet',
+        timer: 0,
+        idleIndex: 0,
+      };
+      updateVolunteerAnimation(0);
     }
     walker = context.actors.studentWalker ?? null;
     for (const [id, clip, timeScale] of [['linxia', 'afraid', 0.45], ['studentWalker', 'walk', 0.7], ['studentReader', 'fold_arms', 0.8]] as const) {
@@ -693,6 +756,7 @@ export const deskRuntime: SceneRuntime = {
       }
     }
     animatedActors.forEach((record) => updateAnimation(record, dtSeconds));
+    updateVolunteerAnimation(dtSeconds);
   },
   exit: clearRuntime,
 };

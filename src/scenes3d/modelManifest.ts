@@ -30,9 +30,9 @@ export const CHARACTER_MODELS: readonly CharacterModelEntry[] = [
   { id: 'linxia', name: '林夏', path: './models/chr_linxia.glb', heightM: 1.62, frontYawRad: -Math.PI / 2 },
   { id: 'father', name: '爸爸', path: './models/chr_father.glb', heightM: 1.78, frontYawRad: -Math.PI / 2 },
   { id: 'ayuan', name: '阿远', path: './models/chr_ayuan.glb', heightM: 1.68, frontYawRad: -Math.PI / 2 },
-  { id: 'volunteer', name: '志愿者', path: './models/chr_volunteer.glb', heightM: 1.66, frontYawRad: -Math.PI / 2 },
+  { id: 'volunteer', name: '女老师（迎新登记）', path: './models/chr_volunteer.glb', heightM: 1.66, frontYawRad: -Math.PI / 2 },
   { id: 'protagonist', name: '主角', path: './models/chr_protagonist.glb', heightM: 1.74, frontYawRad: -Math.PI / 2 },
-  { id: 'fatherCarry', name: '爸爸（背人）', path: './models/chr_father_carry.glb', heightM: 1.78, frontYawRad: -Math.PI / 2 },
+  { id: 'fatherCarry', name: '父女（背行提袋+下背放袋）', path: './models/chr_father_carry.glb', heightM: 1.78, frontYawRad: -Math.PI / 2 },
   { id: 'studentFemale', name: '女同学', path: './models/chr_student_female.glb', heightM: 1.65, frontYawRad: -Math.PI / 2 },
   { id: 'studentMale', name: '男同学', path: './models/chr_student_male.glb', heightM: 1.7, frontYawRad: -Math.PI / 2 },
 ];

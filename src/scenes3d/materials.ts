@@ -231,6 +231,141 @@ function glassColor(u: number, v: number): [number, number, number] {
   return [168 * shade, 191 * shade, 205 * shade];
 }
 
+/** 米白条形旧瓷砖：错缝长条外墙砖 + 灰勾缝 + 微妙砖面色差与轻度雨水流痕 */
+function facadeTileSample(u: number, v: number): { mortar: boolean; tone: number; stain: number } {
+  const rows = 16;
+  const cols = 4;
+  const row = Math.floor(v * rows);
+  const offset = row % 2 === 0 ? 0 : 0.5;
+  const tiledU = (u * cols + offset) % cols;
+  const col = Math.floor(tiledU);
+  const fx = tiledU - col;
+  const fy = v * rows - row;
+  const mortar = fx < 0.032 || fx > 0.968 || fy < 0.095 || fy > 0.905;
+  const micro = periodicNoise(u, v, 48, 48, 163);
+  const streak = periodicNoise(u, v, 16, 3, 173);
+  const stain = smoothstep01(Math.max(0, (streak - 0.56) * 2.1)) * 0.075;
+  const tone = 0.91 + hash2(col, row, 167) * 0.12 + micro * 0.04 - stain;
+  return { mortar, tone, stain };
+}
+
+function facadeTileColor(u: number, v: number): [number, number, number] {
+  const { mortar, tone } = facadeTileSample(u, v);
+  if (mortar) return [158, 156, 148];
+  return [226 * tone, 221 * tone, 208 * tone];
+}
+
+function facadeTileRoughness(u: number, v: number): [number, number, number] {
+  const { mortar, stain } = facadeTileSample(u, v);
+  const value = (mortar ? 0.96 : 0.54 + stain * 1.4) * 255;
+  return [value, value, value];
+}
+
+/** 浅灰拉毛水泥带分格缝：2×4 大板分格缝 + 细腻拉毛颗粒 + 檐下轻度层次 */
+function facadeConcreteColor(u: number, v: number): [number, number, number] {
+  const cols = 2;
+  const rows = 4;
+  const fx = (u * cols) % 1;
+  const fy = (v * rows) % 1;
+  const joint = fx < 0.016 || fx > 0.984 || fy < 0.022 || fy > 0.978;
+  const grain = periodicNoise(u, v, 96, 96, 181);
+  const blotch = periodicNoise(u, v, 6, 6, 191);
+  const micro = hash2(Math.floor(u * 256), Math.floor(v * 256), 193) - 0.5;
+  if (joint) {
+    const shade = 0.85 + grain * 0.12;
+    return [138 * shade, 144 * shade, 146 * shade];
+  }
+  const panelTone = 0.96 + hash2(Math.floor(u * cols), Math.floor(v * rows), 197) * 0.06;
+  const shade = panelTone * (0.91 + grain * 0.09 + blotch * 0.06) + micro * 0.025;
+  return [192 * shade, 198 * shade, 199 * shade];
+}
+
+/** 暖赭色砖墙：错缝陶土砖 + 浅灰砂浆缝 + 自然烧制色差 */
+function facadeBrickColor(u: number, v: number): [number, number, number] {
+  const rows = 12;
+  const cols = 4;
+  const row = Math.floor(v * rows);
+  const offset = row % 2 === 0 ? 0 : 0.5;
+  const tiledU = (u * cols + offset) % cols;
+  const col = Math.floor(tiledU);
+  const fx = tiledU - col;
+  const fy = v * rows - row;
+  const mortar = fx < 0.036 || fx > 0.964 || fy < 0.105 || fy > 0.895;
+  const grain = periodicNoise(u, v, 64, 64, 211);
+  if (mortar) {
+    const shade = 0.92 + grain * 0.14;
+    return [176 * shade, 171 * shade, 160 * shade];
+  }
+  const variation = hash2(col, row, 223);
+  const shade = 0.8 + variation * 0.28 + grain * 0.08;
+  const warmShift = (variation - 0.5) * 16;
+  return [168 * shade + warmShift, 114 * shade + warmShift * 0.4, 92 * shade];
+}
+
+/** 带窗帘变化与天光斜反光的建筑窗格玻璃（用于街区居民楼多层次窗户） */
+function facadeWindowColor(u: number, v: number): [number, number, number] {
+  const col = Math.floor(u * 2);
+  const row = Math.floor(v * 2);
+  const fx = (u * 2) % 1;
+  const fy = (v * 2) % 1;
+  const mullion = fx < 0.045 || fx > 0.955 || fy < 0.045 || fy > 0.955;
+  if (mullion) return [76, 90, 94];
+
+  // 不同窗格分配窗帘状态：拉帘/百叶/透暗室
+  const style = (col + row * 2) % 3;
+  let r = 82;
+  let g = 104;
+  let b = 114;
+  if (style === 0 && (fx < 0.34 || fx > 0.72)) {
+    const fold = 0.9 + Math.sin(fx * Math.PI * 10) * 0.08;
+    r = 186 * fold;
+    g = 178 * fold;
+    b = 158 * fold;
+  } else if (style === 1 && fy > 0.45) {
+    const slat = 0.92 + Math.sin(fy * Math.PI * 22) * 0.07;
+    r = 158 * slat;
+    g = 169 * slat;
+    b = 172 * slat;
+  } else if (style === 2 && fx > 0.62) {
+    const fold = 0.92 + Math.sin(fx * Math.PI * 8) * 0.06;
+    r = 165 * fold;
+    g = 176 * fold;
+    b = 174 * fold;
+  }
+
+  // 右上至左下斜向冷白晨光反射带
+  const diag = Math.abs(fx * 0.75 + fy * 0.55 - 0.82);
+  const gloss = Math.max(0, 1 - diag * 5.2) * 0.34 + fy * 0.14;
+  return [
+    r * (1 - gloss) + 212 * gloss,
+    g * (1 - gloss) + 228 * gloss,
+    b * (1 - gloss) + 236 * gloss,
+  ];
+}
+
+/** 临街商铺内景剪影底图：暖黄墙面 + 货架层次 + 暖白顶光渐变（供内凹橱窗使用） */
+function storeInteriorColor(u: number, v: number): [number, number, number] {
+  const shelfBand = Math.abs(v - 0.28) < 0.025 || Math.abs(v - 0.54) < 0.025 || Math.abs(v - 0.78) < 0.025;
+  const topGlow = smoothstep01(Math.max(0, (v - 0.72) / 0.28));
+  if (shelfBand) return [126, 98, 72];
+  const slot = Math.floor(u * 10);
+  const row = v < 0.28 ? 0 : v < 0.54 ? 1 : 2;
+  const itemNoise = hash2(slot, row, 251);
+  const inItem = (u * 10) % 1 > 0.14 && (u * 10) % 1 < 0.86 && v < 0.76 && (v * 3.8) % 1 < 0.68;
+  if (inItem && itemNoise > 0.22) {
+    const palette: Array<[number, number, number]> = [
+      [188, 146, 108],
+      [148, 168, 152],
+      [212, 186, 134],
+      [168, 138, 126],
+    ];
+    const [pr, pg, pb] = palette[Math.floor(itemNoise * 12) % palette.length];
+    return [pr * (0.85 + topGlow * 0.2), pg * (0.85 + topGlow * 0.2), pb * (0.85 + topGlow * 0.2)];
+  }
+  const warmth = 0.78 + topGlow * 0.32;
+  return [196 * warmth, 168 * warmth, 130 * warmth];
+}
+
 /* ---------------- 对外材质工厂（同参数共享实例） ---------------- */
 
 export function getAsphaltMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
@@ -317,6 +452,76 @@ export function getFoliageMaterial(options: TiledMaterialOptions = {}): THREE.Me
 
 export function getWindowGlassMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
   return createTiledMaterial('window-glass', 256, glassColor, 0.16, 0.4, options.repeatX ?? 1, options.repeatY ?? 1);
+}
+
+/** 街区建筑外墙：米白条形旧瓷砖（含粗糙度贴图） */
+export function getFacadeTileMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
+  return createTiledMaterial(
+    'facade-tile',
+    256,
+    facadeTileColor,
+    0.78,
+    0.04,
+    options.repeatX ?? 2,
+    options.repeatY ?? 2,
+    facadeTileRoughness,
+  );
+}
+
+/** 街区建筑外墙：浅灰拉毛水泥带分格缝 */
+export function getFacadeConcreteMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
+  return createTiledMaterial(
+    'facade-concrete',
+    256,
+    facadeConcreteColor,
+    0.9,
+    0.02,
+    options.repeatX ?? 2,
+    options.repeatY ?? 2,
+  );
+}
+
+/** 街区建筑外墙：暖赭色砖墙 */
+export function getFacadeBrickMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
+  return createTiledMaterial(
+    'facade-brick',
+    256,
+    facadeBrickColor,
+    0.92,
+    0,
+    options.repeatX ?? 2,
+    options.repeatY ?? 2,
+  );
+}
+
+/** 街区建筑窗格：带窗帘层次与斜向天光反射 */
+export function getFacadeWindowMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
+  return createTiledMaterial(
+    'facade-window',
+    256,
+    facadeWindowColor,
+    0.18,
+    0.34,
+    options.repeatX ?? 1,
+    options.repeatY ?? 1,
+  );
+}
+
+/** 临街商铺内凹橱窗暖光货架底图 */
+export function getStoreInteriorMaterial(options: TiledMaterialOptions = {}): THREE.MeshStandardMaterial {
+  const material = createTiledMaterial(
+    'store-interior',
+    256,
+    storeInteriorColor,
+    0.85,
+    0,
+    options.repeatX ?? 1,
+    options.repeatY ?? 1,
+  );
+  material.emissive.setHex(0xffc987);
+  material.emissiveMap = material.map;
+  material.emissiveIntensity = 0.34;
+  return material;
 }
 
 export function getDocumentLabelMaterial(): THREE.MeshStandardMaterial {
