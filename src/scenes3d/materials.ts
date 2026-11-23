@@ -2,7 +2,8 @@
 // 全部贴图由离屏 Canvas 逐像素生成：噪声晶格按周期取模，四边数学上严格无缝平铺。
 // 缓存的贴图 / 材质 / 几何统一打 SHARED_RESOURCE_FLAG，WorldApp.disposeObjectTree 遇到标记跳过，
 // 只有 disposeMaterialCache()（WorldApp.dispose 时调用）才真正释放；释放后再次取用会自动重建。
-// art/third_party/ 当前为空，本版本不引用任何外部贴图文件。
+// 贴图主体全部离屏 Canvas 逐像素生成；只有卧室亮屏标志与墙上画像叠 public/art/ 下的成品 PNG，
+// 且 PNG 解码只发生在浏览器（见 createPngOverlayTexture）。
 // 注意：模块加载不触碰 DOM，只有工厂函数被调用时才创建 Canvas（Node 单测可安全 import）。
 
 import * as THREE from 'three';
@@ -302,45 +303,36 @@ function facadeBrickColor(u: number, v: number): [number, number, number] {
   return [168 * shade + warmShift, 114 * shade + warmShift * 0.4, 92 * shade];
 }
 
-/** 带窗帘变化与天光斜反光的建筑窗格玻璃（用于街区居民楼多层次窗户） */
+/**
+ * 建筑窗格玻璃（街区居民楼多层次窗户）：灰度窗格。
+ * 三通道相等、只保留"窗帘 / 百叶 / 斜天光"三层明暗结构，色相完全交给 instanceColor——
+ * 原来的青绿底与实例色是相乘关系，六色窗染出来会全部塌成脏灰。
+ * 基线明度取 176：六色加权平均约 0.57，乘回来正好落在原先 82–114 的观感上，S4 中带明度不因此抬升。
+ */
 function facadeWindowColor(u: number, v: number): [number, number, number] {
   const col = Math.floor(u * 2);
   const row = Math.floor(v * 2);
   const fx = (u * 2) % 1;
   const fy = (v * 2) % 1;
   const mullion = fx < 0.045 || fx > 0.955 || fy < 0.045 || fy > 0.955;
-  if (mullion) return [76, 90, 94];
+  if (mullion) return [128, 129, 130];
 
   // 不同窗格分配窗帘状态：拉帘/百叶/透暗室
   const style = (col + row * 2) % 3;
-  let r = 82;
-  let g = 104;
-  let b = 114;
+  let base = 176;
   if (style === 0 && (fx < 0.34 || fx > 0.72)) {
-    const fold = 0.9 + Math.sin(fx * Math.PI * 10) * 0.08;
-    r = 186 * fold;
-    g = 178 * fold;
-    b = 158 * fold;
+    base = 205 * (0.9 + Math.sin(fx * Math.PI * 10) * 0.08);
   } else if (style === 1 && fy > 0.45) {
-    const slat = 0.92 + Math.sin(fy * Math.PI * 22) * 0.07;
-    r = 158 * slat;
-    g = 169 * slat;
-    b = 172 * slat;
+    base = 190 * (0.92 + Math.sin(fy * Math.PI * 22) * 0.07);
   } else if (style === 2 && fx > 0.62) {
-    const fold = 0.92 + Math.sin(fx * Math.PI * 8) * 0.06;
-    r = 165 * fold;
-    g = 176 * fold;
-    b = 174 * fold;
+    base = 186 * (0.92 + Math.sin(fx * Math.PI * 8) * 0.06);
   }
 
-  // 右上至左下斜向冷白晨光反射带
+  // 右上至左下斜向晨光反射带（灰度下只剩亮度，不再带色偏）
   const diag = Math.abs(fx * 0.75 + fy * 0.55 - 0.82);
   const gloss = Math.max(0, 1 - diag * 5.2) * 0.34 + fy * 0.14;
-  return [
-    r * (1 - gloss) + 212 * gloss,
-    g * (1 - gloss) + 228 * gloss,
-    b * (1 - gloss) + 236 * gloss,
-  ];
+  const value = base * (1 - gloss) + 236 * gloss;
+  return [value, value, value];
 }
 
 /** 临街商铺内景剪影底图：暖黄墙面 + 货架层次 + 暖白顶光渐变（供内凹橱窗使用） */
@@ -554,6 +546,122 @@ export function getDocumentLabelMaterial(): THREE.MeshStandardMaterial {
   return material;
 }
 
+/* ---------------- 卧室亮屏与墙上画像：程序化底图 + 浏览器内成品 PNG ---------------- */
+
+type CanvasPainter = (context: CanvasRenderingContext2D) => void;
+type PngPlacer = (context: CanvasRenderingContext2D, image: HTMLImageElement) => void;
+
+/**
+ * 成品 PNG 只在浏览器里解码：Node 单测没有 Image，画布停在程序化底图上，
+ * 网格与材质结构不随运行环境变化，解码完成后异步重绘同一张画布。
+ */
+function createPngOverlayTexture(key: string, width: number, height: number,
+  paintBase: CanvasPainter, url: string, place: PngPlacer): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('当前环境不支持 2D Canvas，无法生成程序化贴图');
+  paintBase(context);
+  canvasCache.set(key, canvas);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  markShared(texture);
+  if (typeof Image === 'function') {
+    const image = new Image();
+    image.onload = () => {
+      place(context, image);
+      texture.needsUpdate = true;
+    };
+    image.src = url;
+  }
+  return texture;
+}
+
+/** 在画布矩形内等比铺放：contain 留白（标志），cover 填满裁切（立绘）。 */
+function drawFitted(context: CanvasRenderingContext2D, image: HTMLImageElement,
+  x: number, y: number, w: number, h: number, mode: 'contain' | 'cover'): void {
+  const fit = mode === 'contain'
+    ? Math.min(w / image.width, h / image.height)
+    : Math.max(w / image.width, h / image.height);
+  const dw = image.width * fit;
+  const dh = image.height * fit;
+  context.save();
+  context.beginPath();
+  context.rect(x, y, w, h);
+  context.clip();
+  context.drawImage(image, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  context.restore();
+}
+
+/** 书桌两台显示器的亮屏标志（白底 + 品牌图案与文字） */
+export type ScreenLogoId = 'qoder' | 'nvidia';
+
+const SCREEN_LOGOS: Record<ScreenLogoId, string> = {
+  qoder: './art/screens/logo_qoder.png',
+  nvidia: './art/screens/logo_nvidia.png',
+};
+
+export function getScreenLogoMaterial(kind: ScreenLogoId): THREE.MeshStandardMaterial {
+  const key = `screen-logo-${kind}`;
+  const cached = materialCache.get(key);
+  if (cached) return cached;
+
+  const texture = createPngOverlayTexture(key, 448, 256, (context) => {
+    context.fillStyle = '#f8f5ef';
+    context.fillRect(0, 0, 448, 256);
+    context.fillStyle = '#e9e4d8';
+    context.fillRect(0, 0, 448, 6);
+    context.fillRect(0, 250, 448, 6);
+  }, SCREEN_LOGOS[kind], (context, image) => {
+    drawFitted(context, image, 74, 84, 300, 92, 'contain');
+  });
+
+  const material = new THREE.MeshStandardMaterial({
+    map: texture,
+    emissive: 0xffffff,
+    emissiveMap: texture,
+    emissiveIntensity: 0.52,
+    roughness: 0.32,
+    metalness: 0.04,
+  });
+  markShared(material);
+  materialCache.set(key, material);
+  return material;
+}
+
+/** 墙上两幅画像：细原木框由几何体承担，这里画暖白卡纸衬边与人物肖像 */
+export type PortraitId = 'her' | 'father';
+
+const PORTRAIT_IMAGES: Record<PortraitId, string> = {
+  her: './art/portraits/linxia_fullbody.png',
+  father: './art/portraits/father_fullbody.png',
+};
+
+export function getPortraitMaterial(kind: PortraitId): THREE.MeshStandardMaterial {
+  const key = `portrait-${kind}`;
+  const cached = materialCache.get(key);
+  if (cached) return cached;
+
+  const texture = createPngOverlayTexture(key, 384, 480, (context) => {
+    context.fillStyle = '#f4eee2';
+    context.fillRect(0, 0, 384, 480);
+    context.fillStyle = '#ddd6c7';
+    context.fillRect(30, 30, 324, 406);
+    context.strokeStyle = '#cfc7b6';
+    context.lineWidth = 2;
+    context.strokeRect(30, 30, 324, 406);
+  }, PORTRAIT_IMAGES[kind], (context, image) => {
+    drawFitted(context, image, 30, 30, 324, 406, 'cover');
+  });
+
+  const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.78, metalness: 0 });
+  markShared(material);
+  materialCache.set(key, material);
+  return material;
+}
+
 /* ---------------- 角色脚底接触阴影（几何 / 贴图 / 材质全局共享） ---------------- */
 
 const CONTACT_SHADOW_LOCAL_Y = 0.015;
@@ -574,8 +682,8 @@ export function isGroundedActor(actor: THREE.Object3D, groundY = 0): boolean {
   return Math.abs(worldPosition.y - groundY) <= 0.08;
 }
 
-/** 新建一个接触阴影圆片实例；几何 / 材质 / 贴图全部共享，disposeObjectTree 不会误删 */
-export function createContactShadowDisc(radius = 0.62): THREE.Mesh {
+/** 接触阴影三件共享资源（贴图 / 几何 / 材质）的懒建，全场景只用一份显存 */
+function ensureContactShadowResources(): void {
   if (!contactShadowTexture) {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -605,8 +713,50 @@ export function createContactShadowDisc(radius = 0.62): THREE.Mesh {
     });
     markShared(contactShadowMaterial);
   }
+}
 
-  const disc = new THREE.Mesh(contactShadowGeometry, contactShadowMaterial);
+/**
+ * 接触阴影批处理：N 个圆片合成 1 个 draw call。
+ * 几何按批次新建（释放钩子挂在批次自己的几何上，不动全局共享件），材质与贴图仍走模块级单例，0 新增显存。
+ */
+export function createContactShadowDiscBatch(
+  name: string,
+  specs: ReadonlyArray<{ x: number; z: number; radius: number; y?: number }>,
+): THREE.InstancedMesh | null {
+  if (specs.length === 0) return null;
+  ensureContactShadowResources();
+  const geometry = new THREE.PlaneGeometry(1, 1);
+  const mesh = new THREE.InstancedMesh(geometry, contactShadowMaterial as THREE.MeshBasicMaterial, specs.length);
+  const transform = new THREE.Object3D();
+  specs.forEach((spec, index) => {
+    transform.position.set(spec.x, spec.y ?? CONTACT_SHADOW_LOCAL_Y, spec.z);
+    transform.rotation.set(-Math.PI / 2, 0, 0);
+    transform.scale.set(spec.radius * 2, spec.radius * 2, 1);
+    transform.updateMatrix();
+    mesh.setMatrixAt(index, transform.matrix);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.name = name;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
+  mesh.raycast = () => {};
+  const release = (): void => {
+    mesh.dispose();
+    geometry.removeEventListener('dispose', release);
+  };
+  geometry.addEventListener('dispose', release);
+  return mesh;
+}
+
+/** 新建一个接触阴影圆片实例；几何 / 材质 / 贴图全部共享，disposeObjectTree 不会误删 */
+export function createContactShadowDisc(radius = 0.62): THREE.Mesh {
+  ensureContactShadowResources();
+  const disc = new THREE.Mesh(
+    contactShadowGeometry as THREE.PlaneGeometry,
+    contactShadowMaterial as THREE.MeshBasicMaterial,
+  );
   disc.name = 'contact-shadow';
   disc.rotation.x = -Math.PI / 2;
   disc.position.y = CONTACT_SHADOW_LOCAL_Y;
@@ -624,6 +774,7 @@ export function disposeMaterialCache(): void {
     const textures = new Set<THREE.Texture>();
     if (material.map) textures.add(material.map);
     if (material.roughnessMap) textures.add(material.roughnessMap);
+    if (material.emissiveMap) textures.add(material.emissiveMap);
     for (const texture of textures) texture.dispose();
     material.dispose();
   }

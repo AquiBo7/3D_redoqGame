@@ -1,0 +1,34 @@
+[
+  {
+    "shot": "feature_y_legal_hint.png",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "mode": "key",
+    "problems": []
+  },
+  {
+    "shot": "feature_y_legal_hint_landscape_844x390.png",
+    "viewport": {
+      "width": 844,
+      "height": 390
+    },
+    "mode": "key",
+    "problems": []
+  },
+  {
+    "shot": "feature_y_legal_hint_portrait.png",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "mode": "tap",
+    "problems": []
+  },
+  {
+    "shot": "ending page",
+    "error": "TimeoutError: page.waitForFunction: Timeout 30000ms exceeded.",
+    "problems": []
+  }
+]

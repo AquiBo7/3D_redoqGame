@@ -98,6 +98,7 @@ if (params.modelViewer) {
         bus: eventBus,
         sceneId: engine.getDebugSnapshot().sceneId,
         debug: params.debug,
+        night: params.night,
       });
       // UI 事件可能先于 3D 创建（如继续存档直达 S2），补上锁定状态
       gameUi.syncControls();

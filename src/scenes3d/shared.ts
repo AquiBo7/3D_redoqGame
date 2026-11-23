@@ -149,8 +149,11 @@ export function yawToward(from: XZ, target: XZ): number {
 /** 禁用高面数角色网格逐三角形 CPU 射线检测（避免转视角视线遮挡检测触发骨骼蒙皮矩阵重算） */
 const NOOP_RAYCAST = (): void => {};
 
+/** 手持道具摆位：chest = 胸前（有手臂骨骼可 IK）；hand = 烘焙手掌握点（无骨骼模型专用） */
+export type PropGrip = 'chest' | 'hand';
+
 /** 按模型身高校准手持道具：手机举在胸前、袋子垂在身侧 */
-function createCharacterProp(spec: CharacterPropSpec, heightM: number): THREE.Mesh {
+function createCharacterProp(spec: CharacterPropSpec, heightM: number, grip: PropGrip): THREE.Mesh {
   const sideSign = spec.side === 'left' ? -1 : 1;
   let mesh: THREE.Mesh;
   let baseX: number;
@@ -162,10 +165,17 @@ function createCharacterProp(spec: CharacterPropSpec, heightM: number): THREE.Me
       new THREE.BoxGeometry(0.084, 0.16, 0.024),
       createMatteMaterial(spec.color ?? 0x9aa2ab, 0.6),
     );
-    // 手机中心≈0.71 身高、贴近胸口前方（左右仅微偏），避免侧后方看出“漂浮”感
-    baseX = sideSign * 0.02;
-    baseY = heightM * 0.71;
-    baseZ = 0.2;
+    if (grip === 'hand') {
+      // 无骨骼模型的手垂在体侧：手机压进掌心，机身中心比手掌重心低 3.5 cm，让上缘被手盖住
+      baseX = -sideSign * PHONE_HAND_GRIP.x;
+      baseY = PHONE_HAND_GRIP.y;
+      baseZ = PHONE_HAND_GRIP.z;
+    } else {
+      // 手机中心≈0.71 身高、贴近胸口前方（左右仅微偏），避免侧后方看出“漂浮”感
+      baseX = sideSign * 0.02;
+      baseY = heightM * 0.71;
+      baseZ = 0.2;
+    }
   } else {
     mesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.14, 0.34, 0.26),
@@ -202,6 +212,19 @@ function createCharacterProp(spec: CharacterPropSpec, heightM: number): THREE.Me
   mesh.receiveShadow = true;
   mesh.raycast = NOOP_RAYCAST;
   return mesh;
+}
+
+/**
+ * 无骨骼 GLB（阿远 / 父亲 / 主角）的手臂是烘焙死的，IK 没有可转的关节，胸前持机会变成"手机悬在胸口、
+ * 两手垂在身侧"。这类模型改为把手机压进烘焙手掌：实测 chr_ayuan.glb 归一化到 1.68 m 后，
+ * 两只手掌顶点重心在 lean 本地 (±0.32, 0.72, 0.00)，指尖到 0.62，所以机身中心取 y 0.685、
+ * 上缘正好被手掌盖住，读起来是"垂手握机"而不是漂浮。右手在 −X（与 poseActor 的 R→−X 同一约定）。
+ */
+const PHONE_HAND_GRIP = { x: 0.315, y: 0.685, z: 0.02 };
+
+/** 角色实例是否带可解算的手臂骨骼；无骨骼模型的手持道具只能走烘焙握点 */
+export function hasArmRig(actor: THREE.Object3D): boolean {
+  return Boolean(actor.getObjectByName('R_Upperarm'));
 }
 
 /** 是否已脱离场景树：向上找到的根必须仍是一个 Scene（被 dispose 的子树根不是 Scene） */
@@ -252,15 +275,17 @@ export function createCharacterActor(
 
   let modelMounted = false;
   let propsHeightM = -1;
-  const applyProps = (heightM: number): void => {
-    if (propsHeightM === heightM) return;
+  let propsGrip: PropGrip = 'chest';
+  const applyProps = (heightM: number, grip: PropGrip): void => {
+    if (propsHeightM === heightM && propsGrip === grip) return;
     propsHeightM = heightM;
+    propsGrip = grip;
     for (const child of [...propsRoot.children]) {
       propsRoot.remove(child);
       disposeLocalTree(child);
     }
     for (const prop of options.props ?? []) {
-      const mesh = createCharacterProp(prop, heightM);
+      const mesh = createCharacterProp(prop, heightM, grip);
       mesh.traverse((node) => {
         if (node instanceof THREE.Mesh) node.castShadow = castShadow;
       });
@@ -284,7 +309,7 @@ export function createCharacterActor(
     });
     pose.add(model);
     lean.add(pose);
-    applyProps(entry.heightM);
+    applyProps(entry.heightM, hasArmRig(outer) ? 'chest' : 'hand');
     modelMounted = true;
   };
 
@@ -300,7 +325,8 @@ export function createCharacterActor(
     });
     fallback.name = 'actor-fallback';
     lean.add(fallback);
-    applyProps(fallbackHeight);
+    // 胶囊体没有手臂，手机放胸口反而最接近"举着手机"的剪影；真实模型到货后再按有无骨骼改握点
+    applyProps(fallbackHeight, 'chest');
 
     // 弱网 / 超时先让剧情可玩，模型就绪后再原地换装
     void loadCharacterModel(modelId)
@@ -338,6 +364,95 @@ export function createActorAnimation(actor: THREE.Object3D): CharacterAnimationC
   const clips = getCharacterAnimations(ref.modelId);
   if (clips.length === 0) return null;
   return createCharacterAnimation(ref.root, clips);
+}
+
+interface PoseRestore {
+  object: THREE.Object3D;
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+}
+
+const chestPhonePoses = new WeakMap<THREE.Object3D, PoseRestore[]>();
+
+/** 把一根骨骼转到指定的世界朝向，只改实例骨骼，不动共享网格与动画剪辑 */
+function aimBone(
+  actor: THREE.Object3D,
+  boneName: string,
+  tipName: string,
+  direction: THREE.Vector3,
+  saved: PoseRestore[],
+): boolean {
+  const bone = actor.getObjectByName(boneName);
+  const tip = actor.getObjectByName(tipName);
+  if (!bone || !tip || !bone.parent) return false;
+  if (!saved.some((entry) => entry.object === bone)) {
+    saved.push({ object: bone, position: bone.position.clone(), quaternion: bone.quaternion.clone() });
+  }
+  actor.updateWorldMatrix(true, true);
+  const current = tip.getWorldPosition(new THREE.Vector3()).sub(bone.getWorldPosition(new THREE.Vector3())).normalize();
+  const rotation = new THREE.Quaternion().setFromUnitVectors(current, direction.clone().normalize())
+    .multiply(bone.getWorldQuaternion(new THREE.Quaternion()));
+  bone.quaternion.copy(bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(rotation));
+  return true;
+}
+
+/**
+ * 胸前双手持机：把两臂骨骼用两段 IK 收到手机下缘两侧，读起来是"捧着手机"而不是"手机飘在胸口"。
+ * 只转骨骼、可重复调用（先把上次改过的骨骼还原再摆），模型异步热替换后在下一拍补摆即可。
+ * 仍在用胶囊体占位、或该角色正由动画剪辑驱动手臂时不要调用（动画每帧会覆盖骨骼四元数）。
+ */
+export function poseHandsOnChestPhone(actor: THREE.Object3D): boolean {
+  const prop = actor.getObjectByName('actor-props')?.children[0];
+  if (!prop || !findActorModelRoot(actor)) return false;
+  const previous = chestPhonePoses.get(actor);
+  if (previous) {
+    for (const entry of previous) {
+      entry.object.position.copy(entry.position);
+      entry.object.quaternion.copy(entry.quaternion);
+    }
+  }
+  const saved: PoseRestore[] = [];
+  chestPhonePoses.set(actor, saved);
+  actor.updateWorldMatrix(true, true);
+  const phone = prop.getWorldPosition(new THREE.Vector3());
+  let posed = 0;
+  // actor 绕 Y 转过后，本地 +X 恰好是角色的左手边
+  for (const [prefix, out] of [['L', 1], ['R', -1]] as const) {
+    const upper = actor.getObjectByName(`${prefix}_Upperarm`);
+    const lower = actor.getObjectByName(`${prefix}_Forearm`);
+    const hand = actor.getObjectByName(`${prefix}_Hand`);
+    if (!upper || !lower || !hand) continue;
+    actor.updateWorldMatrix(true, true);
+    const shoulder = upper.getWorldPosition(new THREE.Vector3());
+    const elbow = lower.getWorldPosition(new THREE.Vector3());
+    const wrist = hand.getWorldPosition(new THREE.Vector3());
+    const lengthA = shoulder.distanceTo(elbow);
+    const lengthB = elbow.distanceTo(wrist);
+    const side = new THREE.Vector3(out, 0, 0).transformDirection(actor.matrixWorld);
+    // 手套有厚度：只偏 5 cm 时两只掌心会压在机身正面互相交叉，把下半屏和领带一起挡住。
+    // 外扩到 6.8 cm、再压低 4.2 cm 并前移 1.2 cm，掌心改捧下缘两角；
+    // 总偏移仍要 < 9 cm（sharedPhonePose.test.ts 的"手腕必须在机身上"红线），所以这里留 0.9 cm 余量。
+    const target = phone.clone().addScaledVector(side, 0.068).add(new THREE.Vector3(0, -0.042, 0.012));
+    const direction = target.clone().sub(shoulder).normalize();
+    const distance = Math.max(0.001, Math.min(shoulder.distanceTo(target), lengthA + lengthB - 0.001));
+    const along = (lengthA * lengthA - lengthB * lengthB + distance * distance) / (2 * distance);
+    // 肘尖朝外下方，避免两臂交叉或肘部反关节
+    const bend = side.clone().add(new THREE.Vector3(0, -0.6, 0)).normalize();
+    bend.addScaledVector(direction, -bend.dot(direction)).normalize();
+    const desiredElbow = shoulder.clone().addScaledVector(direction, along)
+      .addScaledVector(bend, Math.sqrt(Math.max(0, lengthA * lengthA - along * along)));
+    if (!aimBone(actor, `${prefix}_Upperarm`, `${prefix}_Forearm`, desiredElbow.sub(shoulder), saved)) continue;
+    actor.updateWorldMatrix(true, true);
+    if (aimBone(actor, `${prefix}_Forearm`, `${prefix}_Hand`, target.sub(lower.getWorldPosition(new THREE.Vector3())), saved)) {
+      posed += 1;
+    }
+  }
+  const head = actor.getObjectByName('Head');
+  if (head) {
+    saved.push({ object: head, position: head.position.clone(), quaternion: head.quaternion.clone() });
+    head.rotateX(0.1);
+  }
+  return posed === 2;
 }
 
 export interface IdleMotionOptions {
@@ -389,6 +504,11 @@ export function startIdleMotion(
 export interface TextSignOptions {
   background?: string;
   foreground?: string;
+  /** 画布每米像素数，默认 160；玩家 2 m 内会读到的牌面提到 320，笔画才不糊 */
+  resolution?: number;
+  /** 牌面自发光强度：走 emissiveMap（复用同一张画布，不额外占贴图），只在暗处补出笔画 */
+  emissiveIntensity?: number;
+  emissive?: number;
 }
 
 /** 带文字的直立牌 / 横幅（Canvas 纹理），内容一律使用通用称呼 */
@@ -399,7 +519,7 @@ export function createTextSign(
   options: TextSignOptions = {},
 ): THREE.Mesh {
   const canvas = document.createElement('canvas');
-  const ratio = 160;
+  const ratio = options.resolution ?? 160;
   canvas.width = Math.ceil(width * ratio);
   canvas.height = Math.ceil(height * ratio);
 
@@ -422,6 +542,11 @@ export function createTextSign(
   texture.anisotropy = 4;
 
   const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95 });
+  if (options.emissiveIntensity) {
+    material.emissiveMap = texture;
+    material.emissive = new THREE.Color(options.emissive ?? 0xffffff);
+    material.emissiveIntensity = options.emissiveIntensity;
+  }
   material.addEventListener('dispose', () => texture.dispose());
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
   mesh.castShadow = true;

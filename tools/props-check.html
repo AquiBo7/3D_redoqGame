@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>props check</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0e1116;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+      import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+      const DEFAULT_PROPS = [
+        'prop_bed', 'prop_bench', 'prop_canteen_set', 'prop_school_chair', 'prop_school_desk',
+        'prop_stationery', 'prop_street_lamp', 'prop_suitcase', 'prop_trashcan',
+      ];
+      const params = new URLSearchParams(location.search);
+      const PROPS = (params.get('props') || DEFAULT_PROPS.join(',')).split(',').filter(Boolean);
+      const wanted = params.get('prop');
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(720, 720);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xb9c6d2);
+      scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x6b6152, 1.1));
+      const sun = new THREE.DirectionalLight(0xffe6c4, 2.0);
+      sun.position.set(3, 6, 4);
+      scene.add(sun);
+
+      const grid = new THREE.GridHelper(20, 40, 0x8899aa, 0x556677);
+      scene.add(grid);
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20),
+        new THREE.MeshStandardMaterial({ color: 0x8c97a3, roughness: 0.95 }),
+      );
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 200);
+      const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+
+      const report = [];
+      const models = {};
+      for (const id of PROPS) {
+        try {
+          const gltf = await loader.loadAsync(`/models/props/${id}.glb`);
+          const root = gltf.scene;
+          root.position.set(0, 0, 0);
+          let tris = 0;
+          const mats = [];
+          root.traverse((node) => {
+            if (!node.isMesh) return;
+            const geo = node.geometry;
+            tris += (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+            for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+              mats.push({
+                name: material.name,
+                roughness: material.roughness,
+                metalness: material.metalness,
+                transparent: material.transparent,
+                map: material.map ? `${material.map.image.width}x${material.map.image.height}` : null,
+              });
+            }
+          });
+          const box = new THREE.Box3().setFromObject(root);
+          models[id] = root;
+          report.push({
+            id,
+            tris: Math.round(tris),
+            drawCalls: Array.isArray(root.children[0]?.material) ? root.children[0].material.length : new Set(mats.map((m) => m.name)).size,
+            boxMin: box.min.toArray().map((v) => +v.toFixed(4)),
+            boxMax: box.max.toArray().map((v) => +v.toFixed(4)),
+            size: box.max.clone().sub(box.min).toArray().map((v) => +v.toFixed(3)),
+            mats,
+          });
+        } catch (error) {
+          report.push({ id, error: String(error) });
+        }
+      }
+      window.__report = report;
+
+      if (wanted && wanted !== 'all') {
+        const model = models[wanted];
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const radius = Math.max(...box.getSize(new THREE.Vector3).toArray());
+        grid.visible = false;
+        scene.add(model);
+        for (const [angle, tag] of [[0.7, 'a'], [3.0, 'b']]) {
+          camera.position.set(
+            center.x + radius * 1.9 * Math.cos(angle),
+            center.y + radius * 0.75,
+            center.z + radius * 1.9 * Math.sin(angle),
+          );
+          camera.lookAt(center);
+          renderer.render(scene, camera);
+          const shot = document.createElement('img');
+          shot.src = renderer.domElement.toDataURL('image/png');
+          document.title = `${tag}:${shot.src.length}`;
+          window[`__shot_${tag}`] = shot.src;
+        }
+        window.__done = true;
+      } else {
+        // 按件数摊开，再用整体包围盒取景，避免道具多起来后被相机裁掉。
+        const step = Math.max(1.2, 12 / Math.max(PROPS.length - 1, 1));
+        let x = (-step * (PROPS.length - 1)) / 2;
+        const union = new THREE.Box3();
+        for (const id of PROPS) {
+          const model = models[id];
+          if (!model) continue;
+          model.position.set(x, 0, 0);
+          scene.add(model);
+          union.expandByObject(model);
+          x += step;
+        }
+        const center = union.getCenter(new THREE.Vector3());
+        const half = Math.max(union.getSize(new THREE.Vector3).x, center.y) / 2;
+        const distance = half / Math.tan((camera.fov * Math.PI) / 360);
+        camera.position.set(center.x, center.y + half * 0.35, center.z + distance * 1.25);
+        camera.lookAt(center);
+        renderer.render(scene, camera);
+        window.__done = true;
+      }
+    </script>
+  </body>
+</html>

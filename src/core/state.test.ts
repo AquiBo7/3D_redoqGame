@@ -15,6 +15,8 @@ function apply(state: StoryState, effect: StoryEffect): ReturnType<typeof applyS
 describe('createInitialStoryState', () => {
   it('初始化执行总纲 2.1 全部字段及楼梯间访问标记', () => {
     expect(createInitialStoryState()).toEqual({
+      newsSeen: false,
+      helpedPasserby: false,
       momReply: null,
       phoneIgnored: 0,
       seenBag: false,
@@ -60,6 +62,8 @@ describe('createInitialStoryState', () => {
       trust: 0,
       harm: 20,
       ending: null,
+      finalAnswer: null,
+      draftReactions: [],
       log: [],
     });
   });
@@ -176,6 +180,7 @@ describe('applyStoryEffect', () => {
 
   it('set 支持所有非 log 变量，包括数值初始化和数组赋值', () => {
     const set: StoryVariables = {
+      newsSeen: true, helpedPasserby: true,
       momReply: '马上出门。', phoneIgnored: 1, seenBag: true, seenHandoff: true,
       noticedTyper: true, handedPen: true, reasonText: '起晚了', seenCrossedOut: true,
       picked: true, seenFatherWatching: true, noticedPhoneBehind: true, noticedPhoto: true,
@@ -187,12 +192,28 @@ describe('applyStoryEffect', () => {
       route: 'team', postDeleted: true, joined: true, phrase: '一起想办法。',
       stage1Tries: 3, crystalHits: 4, kills: 20, helpedByAyuan: true,
       apologized: true, soloRepair: true, trust: 7, harm: 10, ending: 'best',
+      finalAnswer: 'wrong', draftReactions: ['你先问了我。谢谢。'],
     };
     const result = apply(createInitialStoryState(), { set, add: { yuanScore: 2 } });
     expect(result.state).toEqual({ ...set, yuanScore: 1, log: [] });
     expect(result.changedKeys.sort()).toEqual(Object.keys(set).sort());
     expect(result.state.clues).not.toBe(set.clues);
     expect(result.state.yuanKeys).not.toBe(set.yuanKeys);
+    expect(result.state.draftReactions).not.toBe(set.draftReactions);
+  });
+
+  it('pushDraftReaction 去重保序且隔离数组', () => {
+    const first = apply(createInitialStoryState(), {
+      pushDraftReaction: ['那天，我看到有人点开了我的头像。', '你先问了我。谢谢。', '那天，我看到有人点开了我的头像。'],
+    });
+    expect(first.state.draftReactions).toEqual([
+      '那天，我看到有人点开了我的头像。',
+      '你先问了我。谢谢。',
+    ]);
+    expect(first.changedKeys).toEqual(['draftReactions']);
+    const dup = apply(first.state, { pushDraftReaction: '你先问了我。谢谢。' });
+    expect(dup.state).toBe(first.state);
+    expect(dup.changedKeys).toEqual([]);
   });
 
   it('所有数值均可通过 add 增减，先 set 再 add 且不截断剧情阈值', () => {
@@ -313,6 +334,7 @@ describe('evaluateCondition', () => {
   });
 
   const newBooleans: BooleanStateKey[] = [
+    'newsSeen', 'helpedPasserby',
     'noticedPhoneBehind', 'noticedPhoto', 'likedPhoto', 'pointedOut', 'addedHer', 'listened',
     'evidence', 'teacherTalked', 'visitedStairwell', 'askedAboutFather', 'fatherKnows',
     'postDeleted', 'joined', 'helpedByAyuan', 'apologized', 'soloRepair',
@@ -332,6 +354,7 @@ describe('evaluateCondition', () => {
     { key: 'route', op: '==', value: 'deleteOnly' },
     { key: 'phrase', op: '==', value: '一起想办法。' },
     { key: 'ending', op: '==', value: 'middle' },
+    { key: 'finalAnswer', op: '==', value: 'tired' },
   ];
   it.each(newStrings)('支持新增字符串 / 枚举条件 $key', (condition) => {
     if (!('key' in condition) || !('value' in condition)) throw new Error('应为字符串条件');

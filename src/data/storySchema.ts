@@ -33,6 +33,8 @@ export interface LogSpec {
 
 /** 全五章共享变量；日志由 core 扩展，data 不反向依赖 core。 */
 export interface StoryVariables {
+  newsSeen: boolean;
+  helpedPasserby: boolean;
   momReply: string | null;
   phoneIgnored: number;
   seenBag: boolean;
@@ -78,6 +80,8 @@ export interface StoryVariables {
   trust: number;
   harm: number;
   ending: 'joined' | 'bystander' | 'worst' | 'best' | 'middle' | null;
+  finalAnswer: 'wrong' | 'tired' | 'silent' | null;
+  draftReactions: string[];
 }
 
 type StateKeysOfType<T> = {
@@ -98,6 +102,8 @@ export interface StoryEffect {
   pushClue?: string | string[];
   /** 按选择顺序追加，允许重复类型。 */
   pushYuanKey?: string;
+  /** 去重记录草稿箱里的行为反应陈述，保留首次出现顺序。 */
+  pushDraftReaction?: string | string[];
   log?: LogSpec | LogSpec[];
 }
 
@@ -108,16 +114,19 @@ export type Condition =
   | { any: Condition[] }
   | { not: Condition }
   | { role: Role | Role[] }
-  | { key: 'yuanKeys' | 'clues'; matches: string[] }
-  | { key: 'yuanKeys' | 'clues'; only: string[] }
+  | { key: 'yuanKeys' | 'clues' | 'draftReactions'; matches: string[] }
+  | { key: 'yuanKeys' | 'clues' | 'draftReactions'; only: string[] }
   | { key: BooleanStateKey; equals: boolean }
   | { key: NumericStateKey; op: ComparisonOp; value: number }
   | { [K in StringStateKey]: { key: K; op: '==' | '!='; value: StoryVariables[K] } }[StringStateKey];
+
+export type DialogueEmotion = 'normal' | 'smile' | 'sad' | 'cry' | 'despair';
 
 export interface DialogueLine {
   /** null 表示旁白 / 舞台指示 */
   speaker: SpeakerId | null;
   text: string;
+  emotion?: DialogueEmotion;
 }
 
 export interface PhoneChatMessage {
@@ -154,6 +163,8 @@ export type PhoneSection =
       replyOptions?: PhoneReplyOption[];
       pinned?: boolean;
       attachments?: string[];
+      /** 可选点开对方头像触发的静默行为动作 id */
+      avatarActionId?: string;
     }
   | { kind: 'memo'; id: string; title: string; updatedAt: string; items: string[] }
   | {
@@ -181,7 +192,7 @@ export type PhoneTab = 'messages' | 'wall' | 'notes' | 'me';
 export interface PhonePanel {
   id: string;
   defaultTab?: PhoneTab;
-  profile?: { name: string; account: string; drafts?: Array<{ text: string; unlocked: boolean }> };
+  profile?: { name: string; account: string; drafts?: Array<{ text: string; unlocked: boolean; assetId?: string }> };
   notification?: { title: string; text: string; sectionId?: string };
   likedPhoto?: boolean;
   noticedPhoto?: boolean;
@@ -202,6 +213,14 @@ export interface StoryChoice {
 
 export type WaitTarget = { zoneId: string } | { interactId: string };
 
+export type MomentKind =
+  | 'opening-news'
+  | 'best-hesitation'
+  | 'middle-pause'
+  | 'worst-flood'
+  | 'bystander-cursor'
+  | 'joined-rewind';
+
 export type StoryStep =
   | {
       kind: 'dialogue';
@@ -216,6 +235,19 @@ export type StoryStep =
       when?: Condition;
       text: string;
       durationMs?: number;
+      tone?: 'default' | 'subtle';
+      effects?: StoryEffect;
+    }
+  | {
+      kind: 'moment';
+      id: string;
+      when?: Condition;
+      moment: MomentKind;
+      lines?: string[];
+      onInterrupt?: {
+        effects?: StoryEffect;
+        goto?: string;
+      };
       effects?: StoryEffect;
     }
   | {
@@ -289,7 +321,9 @@ export interface SceneTrigger {
   once?: boolean;
   effects?: StoryEffect;
   /** 客观观察字幕（不占心声字幕名额） */
-  reveal?: { text: string; durationMs?: number; kind?: 'inner' | 'observation' };
+  reveal?: { text: string; durationMs?: number; kind?: 'inner' | 'observation'; tone?: 'default' | 'subtle' };
+  /** 可选同步展示的客观观察描摹（与 reveal 的心声分占上下独立槽位） */
+  observe?: { text: string; durationMs?: number };
 }
 
 export interface TransitionRule {

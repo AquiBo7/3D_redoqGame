@@ -16,7 +16,7 @@ let canteen: typeof import('./canteen') | null = null;
 let canteenLoad: Promise<void> | null = null;
 let interior: typeof import('./schoolInterior') | null = null;
 let interiorLoad: Promise<void> | null = null;
-const INTERIOR_SCENES: readonly SceneId[] = ['C2', 'C4', 'C5', 'C6', 'D1', 'D6'];
+const INTERIOR_SCENES: readonly SceneId[] = ['C2', 'C3', 'C4', 'C5', 'C6', 'D1', 'D6'];
 
 export function isSceneModuleReady(sceneId: SceneId): boolean {
   if (INTERIOR_SCENES.includes(sceneId)) return interior !== null;

@@ -33,7 +33,7 @@ const EXPECTED_SCENE_KEYS: Partial<Record<SceneId, SceneKey>> = {
   S9: 'building',
   S10: 'stage2d', S11: 'stage2d', S12: 'canteen', S13: 'canteen',
   S14: 'stage2d', C1: 'stage2d', E1: 'stage2d',
-  C2: 'interior', C3: 'stage2d', C4: 'interior', C5: 'interior', C6: 'interior',
+  C2: 'interior', C3: 'interior', C4: 'interior', C5: 'interior', C6: 'interior',
   D1: 'interior', D2: 'stage2d', D3: 'stage2d', D4: 'stage2d', D5: 'stage2d', D6: 'interior',
 };
 
@@ -204,7 +204,7 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
     expect(gate.hotspots?.map(({ id, position }) => ({ id, position }))).toEqual([
       { id: 'typer', position: { x: -3.6, y: 1.35, z: 7.95 } },
       { id: 'handoff-moment', position: { x: -0.45, y: 1.45, z: 2.45 } },
-      { id: 'father-bags', position: { x: -0.05, y: 0.6, z: 1.25 } },
+      { id: 'father-bags', position: { x: -0.55, y: 0.6, z: 0.7 } },
     ]);
     expect(gate.panoramaAnchor).toEqual({
       position: { x: 0, y: 3.6, z: 5.6 }, lookAt: { x: 0, y: 1.7, z: 1.4 },
@@ -217,9 +217,9 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
     });
     expect(building.hotspots?.find((hotspot) => hotspot.id === 'phone-behind')).toEqual({
       id: 'phone-behind', position: {
-        x: 6.45 + Math.sin(-2.58) * 0.42,
-        y: -0.055 + 0.9 + 0.63,
-        z: -10 + Math.cos(-2.58) * 0.42,
+        x: 6.45 + Math.sin(-2.58) * 0.3,
+        y: -0.055 + 0.9 + 0.325,
+        z: -10 + Math.cos(-2.58) * 0.3,
       },
       maxDistance: 9, maxAngleDeg: 12, dwellMs: 2000, requireLineOfSight: true,
     });
@@ -258,8 +258,8 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
       expect(getSceneDefinition(sceneId).requiredModels ?? []).toHaveLength(0);
     }
     expect(getSceneDefinition('S4').requiredModels).toEqual(['volunteer', 'ayuan']);
-    expect(getSceneDefinition('S5').requiredModels).toEqual(['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
-    expect(getSceneDefinition('S6').requiredModels).toEqual(['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
+    expect(getSceneDefinition('S5').requiredModels).toEqual(['linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
+    expect(getSceneDefinition('S6').requiredModels).toEqual(['linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S7').requiredModels).toEqual(['volunteer', 'linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S8').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S9').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);

@@ -110,13 +110,21 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: strin
   return node;
 }
 
+export interface BubbleGameCallbacks {
+  /** 每次生成新消息气泡时触发；intensity ∈ [0, 1] 随密集涌入阶段升高 */
+  onSpawn?: (intensity: number) => void;
+}
+
 /** 只负责小游戏呈现与统计；事件总线、剧情结算和控制锁由调用方接入。 */
 export class BubbleGame {
   private session: Session | null = null;
   private disposed = false;
 
-  constructor(private readonly container: HTMLElement,
-    private readonly onEnd: (result: BubbleGameResult) => void) {}
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly onEnd: (result: BubbleGameResult) => void,
+    private readonly callbacks: BubbleGameCallbacks = {},
+  ) {}
 
   show(): void {
     if (this.disposed) return;
@@ -258,12 +266,18 @@ export class BubbleGame {
       s.ripples = s.ripples.filter((ripple) => { ripple.age += seconds; return ripple.age < 0.6; });
       if (s.mode === 'running') {
         // 分帧补步时也保持按住空格的攻击节奏，避免帧率决定玩家表现。
+        const beforeNextId = s.model.nextId;
         let remaining = Math.min(seconds, 25);
         while (remaining > 1e-8 && bubblePhase(s.model) !== 'ended') {
           const step = Math.min(1 / HZ, remaining);
           advanceBubbleModel(s.model, step);
           if (heldSpace) this.attack(s);
           remaining -= step;
+        }
+        if (s.model.nextId > beforeNextId) {
+          const surge = s.model.ticks >= QUIET_TICKS;
+          const pressure = surge ? Math.min(1, (s.model.ticks - QUIET_TICKS) / (END_TICKS - QUIET_TICKS)) : 0;
+          this.callbacks.onSpawn?.(surge ? 0.45 + pressure * 0.55 : 0.14);
         }
         if (bubblePhase(s.model) === 'surge' && root.dataset.phase !== 'surge') {
           root.dataset.phase = 'surge';

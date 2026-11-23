@@ -119,8 +119,10 @@ describe('第四章数据与真实状态机', () => {
             const round = index + 1;
             expect(h.current()?.id).toBe(`d2-round-${round}`);
             const shown = h.choices[h.choices.length - 1];
-            expect(shown.options).toHaveLength(4);
-            expect(new Set(shown.options.map((option) => option.id)).size).toBe(4);
+            // 第一轮多出「理性与法治劝解」这一可选分支。
+            const optionCount = round === 1 ? 5 : 4;
+            expect(shown.options).toHaveLength(optionCount);
+            expect(new Set(shown.options.map((option) => option.id)).size).toBe(optionCount);
             h.machine.onChooseOption(`d2-round-${round}`, `d2-r${round}-${type}`);
             if (type === 'force') {
               expect(h.current()?.id).toBe('d2-breakdown-caption');
@@ -256,7 +258,7 @@ describe('第四章数据与真实状态机', () => {
         h.readThrough();
         expect(h.machine.getState()).toMatchObject({ apologized: false, soloRepair: false, ending: null, harm: 24 });
         const step = joined ? 'd6-team-response' : 'd6-solo-response';
-        expect(h.choices[h.choices.length - 1].options).toHaveLength(joined ? 2 : 3);
+        expect(h.choices[h.choices.length - 1].options).toHaveLength(joined ? 3 : 4);
         h.choose(step, response);
         h.machine.onChooseOption(step, response);
         expect(h.machine.getState()).toMatchObject({
@@ -264,11 +266,60 @@ describe('第四章数据与真实状态机', () => {
         });
         const replies = h.dialogues.filter((event) => event.stepId.startsWith('d6-'));
         expect(replies).toHaveLength(1);
-        expect(replies[0].lines.some((line) => line.text === (joined ? '……我需要时间。' : '嗯。'))).toBe(true);
+        expect(replies[0].lines.some((line) => line.text.includes(joined ? '我需要时间' : '嗯。'))).toBe(true);
         expect(h.intertitles[h.intertitles.length - 1].lines).toEqual(['一个月后']);
         expect(h.machine.getSceneId()).toBe('E1');
         expect(h.machine.isEnded()).toBe(true);
       });
     }
   }
+
+  it('d2-r1-law 走事实路线，只多一条日志，不改变数值口径', () => {
+    const h = harness('D1', { yuanState: 'guarded' });
+    reachRounds(h);
+    const options = h.choices[h.choices.length - 1].options;
+    expect(options.map((option) => option.id)).toEqual(['d2-r1-fact', 'd2-r1-empathy', 'd2-r1-law', 'd2-r1-force', 'd2-r1-noise']);
+    expect(options.find((option) => option.id === 'd2-r1-law')?.text).toContain('名誉权');
+    h.choose('d2-round-1', 'd2-r1-law');
+    expect(h.machine.getState()).toMatchObject({ yuanKeys: ['fact'], yuanScore: 1 });
+    expect(h.machine.getState().log.some((entry) => entry.summary.includes('从事实与名誉权边界劝解阿远'))).toBe(true);
+  });
+
+  it('三条劝解分支与原选项共用同一路线与结局判定', () => {
+    const law = harness('D1', { yuanState: 'guarded' });
+    reachRounds(law);
+    law.choose('d2-round-1', 'd2-r1-law');
+    law.choose('d2-round-2', 'd2-r2-empathy');
+    law.choose('d2-round-3', 'd2-r3-company');
+    expect(law.machine.getState()).toMatchObject({ yuanKeys: ['fact', 'empathy', 'company'], route: 'team', joined: true });
+
+    const plain = harness('D1', { yuanState: 'guarded' });
+    reachRounds(plain);
+    plain.choose('d2-round-1', 'd2-r1-fact');
+    plain.choose('d2-round-2', 'd2-r2-empathy');
+    plain.choose('d2-round-3', 'd2-r3-company');
+    expect(plain.machine.getState()).toMatchObject({ route: 'team', joined: true });
+    expect(law.machine.getState().yuanScore).toBe(plain.machine.getState().yuanScore);
+  });
+
+  it.each([
+    ['team', { route: 'team', joined: true }, 'd6-team-response', 'd6-team-support', 'best'],
+    ['deleteOnly', { route: 'deleteOnly' }, 'd6-solo-response', 'd6-solo-support', 'middle'],
+  ] as const)('%s 路线的维权陪伴分支只留记录，结局判定不变', (route, seed, step, option, ending) => {
+    const h = harness('D6', seed);
+    h.readThrough();
+    expect(h.current()?.id).toBe('d6-approach');
+    h.machine.onEnterZone('D6', 'corridor-linxia');
+    h.readThrough();
+    const shown = h.choices[h.choices.length - 1];
+    expect(shown.options[shown.options.length - 1].id).toBe(option);
+    expect(shown.options[shown.options.length - 1].text).toContain('录屏证据');
+    h.choose(step, option);
+    expect(h.machine.getState()).toMatchObject({
+      ...(route === 'team' ? { apologized: true } : { soloRepair: true }),
+      ending,
+    });
+    expect(h.machine.getState().log.some((entry) => entry.summary.includes('陪她留存证据'))).toBe(true);
+    expect(h.machine.getSceneId()).toBe('E1');
+  });
 });

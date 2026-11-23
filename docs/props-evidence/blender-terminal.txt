@@ -1,0 +1,176 @@
+Blender 5.3.0 | numpy 有 | 输入 D:\千问比赛\美术优化\_repo\3D_redoqGame-master\art\props_raw | 输出 D:\千问比赛\美术优化\_repo\3D_redoqGame-master\public\models\props | 8 件道具
+18:59:52 | INFO: Data are loaded, start creating Blender stuff
+18:59:52 | INFO: Blender create Mesh node Plane.037
+18:59:52 | INFO: glTF import finished in 0.70s
+INFO Draco is available, use library at D:\千问比赛\新建文件夹\blender.shared\bf_intern_draco_bridge.dll
+INFO MeshOptimizer is available, use library at D:\千问比赛\新建文件夹\blender.shared\bf_intern_meshopt_bridge.dll
+18:59:53 | INFO: Starting glTF 2.0 export
+18:59:53 | INFO: Extracting primitive: Plane.001
+18:59:53 | INFO: Primitives created: 1
+18:59:53 | INFO: Finished glTF 2.0 export in 0.14709997177124023 s
+
+[完成] prop_bed：49990 -> 1500 面 / 185.6 KB
+18:59:54 | INFO: Data are loaded, start creating Blender stuff
+18:59:54 | INFO: Blender create Mesh node bench.002
+18:59:54 | INFO: glTF import finished in 0.02s
+18:59:54 | INFO: Starting glTF 2.0 export
+18:59:54 | INFO: Extracting primitive: bench.001
+18:59:54 | INFO: Primitives created: 1
+18:59:54 | INFO: Finished glTF 2.0 export in 0.13280296325683594 s
+
+[完成] prop_bench：630 -> 494 面 / 47.3 KB
+18:59:54 | INFO: Data are loaded, start creating Blender stuff
+18:59:54 | INFO: Blender create Mesh node Mesh
+18:59:54 | INFO: glTF import finished in 0.05s
+18:59:54 | INFO: Starting glTF 2.0 export
+18:59:55 | INFO: Extracting primitive: Mesh.001
+18:59:55 | INFO: Primitives created: 1
+18:59:55 | INFO: Finished glTF 2.0 export in 0.11456751823425293 s
+
+[完成] prop_school_chair：5072 -> 500 面 / 31.7 KB
+18:59:55 | INFO: Data are loaded, start creating Blender stuff
+18:59:55 | INFO: Blender create Mesh node Mesh
+18:59:55 | INFO: glTF import finished in 0.04s
+18:59:55 | INFO: Starting glTF 2.0 export
+18:59:55 | INFO: Extracting primitive: Mesh.001
+18:59:55 | INFO: Primitives created: 1
+18:59:55 | INFO: Finished glTF 2.0 export in 0.11252260208129883 s
+
+[完成] prop_school_desk：4162 -> 500 面 / 45.2 KB
+18:59:55 | INFO: Data are loaded, start creating Blender stuff
+18:59:55 | INFO: Blender create Mesh node Cylinder.099
+18:59:55 | INFO: Blender create Mesh node Cylinder.100
+18:59:55 | INFO: Blender create Mesh node Cube.004
+18:59:55 | INFO: Blender create Mesh node Cylinder.101
+18:59:55 | INFO: Blender create Mesh node Cylinder.104
+18:59:55 | INFO: Blender create Mesh node Cylinder.107
+18:59:55 | INFO: Blender create Mesh node Cylinder.108
+18:59:55 | INFO: Blender create Mesh node Cylinder.109
+18:59:55 | INFO: Blender create Mesh node Circle.035
+18:59:55 | INFO: glTF import finished in 0.08s
+18:59:56 | INFO: Starting glTF 2.0 export
+18:59:56 | INFO: Extracting primitive: Cylinder.001
+18:59:56 | INFO: Primitives created: 1
+18:59:56 | INFO: Finished glTF 2.0 export in 0.1185750961303711 s
+
+[完成] prop_stationery：4412 -> 500 面 / 58.1 KB
+18:59:56 | INFO: Data are loaded, start creating Blender stuff
+18:59:56 | INFO: Blender create Mesh node street_lamp_01_post_mesh
+18:59:56 | INFO: glTF import finished in 0.23s
+18:59:57 | INFO: Starting glTF 2.0 export
+18:59:57 | INFO: Extracting primitive: street_lamp_01_post_mesh.001
+18:59:57 | INFO: Primitives created: 1
+18:59:57 | INFO: Finished glTF 2.0 export in 0.1045982837677002 s
+
+[完成] prop_street_lamp：30610 -> 500 面 / 42.1 KB
+18:59:57 | INFO: Data are loaded, start creating Blender stuff
+18:59:57 | INFO: Blender create Mesh node handle_mount.003
+18:59:57 | INFO: Blender create Mesh node latch.001
+18:59:57 | INFO: Blender create Mesh node Handle.001
+18:59:57 | INFO: Blender create Mesh node hinge_top.001
+18:59:57 | INFO: Blender create Mesh node handle_mount.001
+18:59:57 | INFO: Blender create Mesh node latch.002
+18:59:57 | INFO: Blender create Mesh node Handle.002
+18:59:57 | INFO: Blender create Mesh node hinge_top.002
+18:59:57 | INFO: glTF import finished in 0.19s
+18:59:58 | INFO: Starting glTF 2.0 export
+18:59:58 | INFO: Extracting primitive: handle_mount.002
+18:59:58 | INFO: Primitives created: 2
+18:59:58 | INFO: Finished glTF 2.0 export in 0.22534823417663574 s
+
+[完成] prop_suitcase：16474 -> 499 面 / 81.9 KB
+18:59:58 | INFO: Data are loaded, start creating Blender stuff
+18:59:58 | INFO: Blender create Mesh node Cylinder.003
+18:59:58 | INFO: Blender create Mesh node Cylinder.002
+18:59:58 | INFO: Blender create Mesh node Cylinder
+18:59:58 | INFO: Blender create Mesh node Cylinder.001
+18:59:58 | INFO: Blender create Mesh node Cylinder.005
+18:59:58 | INFO: Blender create Mesh node Cylinder.007
+18:59:58 | INFO: Blender create Mesh node Cylinder.008
+18:59:58 | INFO: Blender create Mesh node Cylinder.006
+18:59:58 | INFO: glTF import finished in 0.15s
+18:59:59 | INFO: Starting glTF 2.0 export
+18:59:59 | INFO: Extracting primitive: Cylinder.004
+18:59:59 | INFO: Primitives created: 1
+18:59:59 | INFO: Finished glTF 2.0 export in 0.13384222984313965 s
+
+[完成] prop_trashcan：13960 -> 498 面 / 76.8 KB
+
+【道具工业化汇总】
+道具               原面数  ->减面后  减面手段       子网格  材质/DC  实测高(表)         缩放   底面Z   复压前KB  状态
+-----------------  ------  --------  -------------  ------  -------  -----------------  -----  ------  --------  ----
+prop_bed           49990   1500      精确坍缩 1:33  1->1    1->1     0.90m/bed          0.749  +0.000  185.6     OK  
+prop_bench         630     494       平面坍缩 0.2   1->1    1->1     0.80m/bench        0.900  +0.000  47.3      OK  
+prop_school_chair  5072    500       精确坍缩 1:10  1->1    1->1     0.85m/chair        0.845  +0.000  31.7      OK  
+prop_school_desk   4162    500       精确坍缩 1:8   1->1    1->1     0.75m/desk         0.850  +0.000  45.2      OK  
+prop_stationery    4412    500       精确坍缩 1:9   9->1    1->1     0.18m/stationery   1.095  +0.000  58.1      OK  
+prop_street_lamp   30610   500       精确坍缩 1:61  1->1    3->2     4.20m/street_lamp  1.085  -0.000  42.1      OK  
+prop_suitcase      16474   499       精确坍缩 1:33  8->1    2->2     0.65m/suitcase     1.145  +0.000  81.9      OK  
+prop_trashcan      13960   498       精确坍缩 1:28  8->1    3->2     0.85m/trashcan     0.938  +0.000  76.8      OK  
+
+【材质处理明细】
+- prop_bed
+    old_bed_frame：Roughness 贴图驱动 -> 0.86
+    old_bed_frame：Metallic 贴图驱动 -> 0.00
+    old_bed_frame：断开法线贴图（<= 500 面挂法线图只会糊）
+    old_bed_frame：底图 old_bed_frame_diff -> 1024px 长边 -> 512px；饱和度指标 0.23
+- prop_bench
+    painted_wooden_bench：Roughness 贴图驱动 -> 0.86
+    painted_wooden_bench：Metallic 贴图驱动 -> 0.00
+    painted_wooden_bench：断开法线贴图（<= 500 面挂法线图只会糊）
+    painted_wooden_bench：底图 painted_wooden_bench_diff -> 1024px 长边 -> 512px；饱和度指标 0.69；降饱和 mix=0.44
+- prop_school_chair
+    SchoolChair_01：Roughness 贴图驱动 -> 0.86
+    SchoolChair_01：Metallic 贴图驱动 -> 0.00
+    SchoolChair_01：断开法线贴图（<= 500 面挂法线图只会糊）
+    SchoolChair_01：底图 SchoolChair_01_diff -> 1024px 长边 -> 512px；饱和度指标 0.28
+- prop_school_desk
+    SchoolDesk_01：Roughness 贴图驱动 -> 0.86
+    SchoolDesk_01：Metallic 贴图驱动 -> 0.00
+    SchoolDesk_01：断开法线贴图（<= 500 面挂法线图只会糊）
+    SchoolDesk_01：底图 SchoolDesk_01_diff -> 1024px 长边 -> 512px；饱和度指标 0.56；降饱和 mix=0.54
+- prop_stationery
+    stationery_supplies：Roughness 贴图驱动 -> 0.86
+    stationery_supplies：Metallic 贴图驱动 -> 0.00
+    stationery_supplies：断开法线贴图（<= 500 面挂法线图只会糊）
+    stationery_supplies：底图 stationery_supplies_diff -> 1024px 长边 -> 512px；饱和度指标 0.67；降饱和 mix=0.44
+- prop_street_lamp
+    street_lamp_01：Roughness 贴图驱动 -> 0.86
+    street_lamp_01：Metallic 贴图驱动 -> 0.00
+    street_lamp_01：断开法线贴图（<= 500 面挂法线图只会糊）
+    street_lamp_01：底图 street_lamp_01_diff -> 1024px 长边 -> 512px；饱和度指标 0.14
+    street_lamp_01_glass：断开透明度链路，统一不透明哑光
+    street_lamp_01_glass：Roughness 贴图驱动 -> 0.86
+    street_lamp_01_glass：Metallic 贴图驱动 -> 0.00
+    street_lamp_01_glass：断开法线贴图（<= 500 面挂法线图只会糊）
+    street_lamp_01_glass：底图 street_lamp_01_diff-street_lamp_01_opacity -> 1024px 长边 -> 512px；饱和度指标 0.14
+    street_lamp_01_bulb：Roughness 贴图驱动 -> 0.86
+    street_lamp_01_bulb：Metallic 贴图驱动 -> 0.00
+    street_lamp_01_bulb：断开法线贴图（<= 500 面挂法线图只会糊）
+    street_lamp_01_bulb：底图 street_lamp_01_diff -> 饱和度指标 0.14
+- prop_suitcase
+    vintage_suitcase_01：Roughness 贴图驱动 -> 0.86
+    vintage_suitcase_01：Metallic 贴图驱动 -> 0.00
+    vintage_suitcase_01：断开法线贴图（<= 500 面挂法线图只会糊）
+    vintage_suitcase_01：底图 vintage_suitcase_01_diff -> 1024px 长边 -> 512px；饱和度指标 0.25
+    vintage_suitcase_02：Roughness 贴图驱动 -> 0.86
+    vintage_suitcase_02：Metallic 贴图驱动 -> 0.00
+    vintage_suitcase_02：断开法线贴图（<= 500 面挂法线图只会糊）
+    vintage_suitcase_02：底图 vintage_suitcase_02_diff -> 1024px 长边 -> 512px；饱和度指标 0.25
+- prop_trashcan
+    metal_trash_can_rust：Roughness 贴图驱动 -> 0.86
+    metal_trash_can_rust：Metallic 贴图驱动 -> 0.00
+    metal_trash_can_rust：断开法线贴图（<= 500 面挂法线图只会糊）
+    metal_trash_can_rust：底图 metal_trash_can_rust_diff -> 1024px 长边 -> 512px；饱和度指标 0.34
+    metal_trash_can：Roughness 贴图驱动 -> 0.86
+    metal_trash_can：Metallic 贴图驱动 -> 0.00
+    metal_trash_can：断开法线贴图（<= 500 面挂法线图只会糊）
+    metal_trash_can：底图 metal_trash_can_diff -> 1024px 长边 -> 512px；饱和度指标 0.16
+    metal_trash_can_rust.001：Roughness 贴图驱动 -> 0.86
+    metal_trash_can_rust.001：Metallic 贴图驱动 -> 0.00
+    metal_trash_can_rust.001：断开法线贴图（<= 500 面挂法线图只会糊）
+    metal_trash_can_rust.001：底图 metal_trash_can_rust_diff -> 饱和度指标 0.34
+
+合计 8 件 / 569 KB | Roughness×13 Metallic×13 断法线×13 | 底图×13（缩放 11、降饱和 3）
+下一步：npx gltf-transform meshopt <in.glb> <out.glb> --level high
+Blender 5.3.0 (hash 02f0899d78e3 built 2026-11-10 01:33:43)

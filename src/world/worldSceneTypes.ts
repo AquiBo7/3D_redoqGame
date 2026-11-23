@@ -17,6 +17,11 @@ export interface Point3 {
 export interface SceneSpawn {
   x: number;
   z: number;
+  /**
+   * 出生脚底高度（米）。多层场景必须填写（如 2F 走廊 3.8）；
+   * 缺省时取该 (x, z) 处采样到的地面高度，单层场景可不填。
+   */
+  y?: number;
   /** 水平朝向（弧度），0 表示面向 -Z */
   yaw?: number;
   /** 初始俯仰角（度），负值为略微俯视 */
@@ -24,11 +29,16 @@ export interface SceneSpawn {
 }
 
 export interface NavigationConfig {
-  /** 单个矩形或多矩形并集（L 型路线等） */
+  /**
+   * 单个矩形或多矩形并集（L 型路线等）。
+   * 多层建筑：给每个矩形填 minY / maxY，即可为 1F 与 2F 定义不同的可行走轮廓；不填表示全高有效。
+   */
   bounds: WalkBounds;
+  /** 障碍物同理可填 minY / maxY，只在玩家身体与该高度带相交时参与碰撞 */
   obstacles: ObstacleAabb[];
   /** 地面高度，默认 0 */
   groundY?: number;
+  /** 可行走表面；height + slopeX / slopeZ 定义平台与坡道，多层场景靠连续高度采样衔接 */
   surfaces?: GroundSurface[];
 }
 
@@ -124,6 +134,8 @@ export interface SceneRuntime {
   enter(context: SceneRuntimeContext): void;
   /** 每帧驱动骨骼动画混合器等逐帧演出（dt 为秒，已夹紧上限） */
   tick?(dtSeconds: number): void;
+  /** ?night=1：室外场景改由路灯等自发光体照明；缺省表示该场景没有夜态 */
+  setNight?(enabled: boolean): void;
   /** 清理 timeline / tween / 定时器 / 订阅；离开场景与销毁时调用 */
   exit(): void;
 }

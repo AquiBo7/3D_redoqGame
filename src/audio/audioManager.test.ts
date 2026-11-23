@@ -360,3 +360,30 @@ describe('脚步合成音色与距离衰减', () => {
       .not.toBe(stepProfile(ctx, 1).noise.gain.exponentialRampToValueAtTime.mock.calls[0][0]);
   });
 });
+
+describe('小游戏消息弹出压迫音效', () => {
+  it('未解锁或静音时不发声；解锁后随压迫强度提高音高并叠加低频短震，55ms 内自动节流防爆音', async () => {
+    const { audio, ctx } = await setupAudio();
+    audio.playMessagePop(0.1);
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(2);
+    const lowFreq = ctx.createOscillator.mock.results[0].value.frequency.setValueAtTime.mock.calls[0][0];
+
+    // 55ms 内重复触发应被节流
+    ctx.currentTime += 0.02;
+    audio.playMessagePop(0.8);
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(2);
+
+    // 超过 55ms 后高压阶段触发（主音 + 泛音 + 低频短震 = 3 个振荡器）
+    ctx.currentTime += 0.06;
+    audio.playMessagePop(0.9);
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(5);
+    const highFreq = ctx.createOscillator.mock.results[2].value.frequency.setValueAtTime.mock.calls[0][0];
+    expect(highFreq).toBeGreaterThan(lowFreq);
+
+    // 静音后静默返回
+    audio.setMuted(true);
+    ctx.currentTime += 0.1;
+    audio.playMessagePop(1);
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(5);
+  });
+});

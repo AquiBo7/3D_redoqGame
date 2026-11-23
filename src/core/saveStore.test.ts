@@ -172,7 +172,8 @@ describe('分层存档', () => {
 
   it('新字段、枚举及全部数组可往返，加载副本与输入存档互不污染', () => {
     const save = createEmptyChapterSave({ sceneId: 'D2', state: {
-      ...createInitialStoryState(), noticedPhoneBehind: true, noticedPhoto: true, likedPhoto: true,
+      ...createInitialStoryState(), newsSeen: true, helpedPasserby: true,
+      noticedPhoneBehind: true, noticedPhoto: true, likedPhoto: true,
       roommateReply: '先看完整。', pointedOut: true, canteenSeen: 3, postChoice: 'explain',
       addedHer: true, listened: true, evidence: true, seat: 'front', teacherTalked: true,
       tellTeacher: 'told', visitedStairwell: true, askedAboutFather: true, fatherKnows: false,
@@ -180,6 +181,7 @@ describe('分层存档', () => {
       yuanScore: 3, yuanKeys: ['fact', 'empathy', 'company'], route: 'team', postDeleted: true,
       joined: true, phrase: '一起想办法。', stage1Tries: 5, crystalHits: 4, kills: 20,
       helpedByAyuan: true, apologized: true, soloRepair: false, ending: 'best',
+      finalAnswer: 'tired', draftReactions: ['你先问了我。谢谢。'],
       log: [{ sceneId: 'D2', timestamp: 2, type: 'choice', summary: '说明事实。' }],
     } });
     saveChapterSave(save, storage);
@@ -188,12 +190,15 @@ describe('分层存档', () => {
     if (!loaded) throw new Error('存档读取失败');
     loaded.state.clues.push('另一条线索');
     loaded.state.yuanKeys.push('noise');
+    loaded.state.draftReactions.push('副本反应');
     loaded.state.log[0].summary = '副本日志';
     expect(loadChapterSave(storage)).toEqual(save);
     expect(save.state.clues).toEqual(['小票', '橙色手机壳']);
+    expect(save.state.draftReactions).toEqual(['你先问了我。谢谢。']);
   });
 
   const invalidFields: Array<[keyof StoryState, unknown]> = [
+    ['newsSeen', 'true'], ['helpedPasserby', 1], ['finalAnswer', 'other'], ['draftReactions', [1]], ['draftReactions', 'bad'],
     ['noticedPhoneBehind', 'true'], ['noticedPhoto', 1], ['likedPhoto', null], ['roommateReply', 3],
     ['pointedOut', 'false'], ['canteenSeen', '3'], ['postChoice', 'other'], ['addedHer', null],
     ['listened', []], ['evidence', 1], ['seat', 'near'], ['teacherTalked', {}], ['tellTeacher', 'later'],

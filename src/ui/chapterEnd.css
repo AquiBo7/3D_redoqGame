@@ -69,12 +69,52 @@
 .chapter-end__drafts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .chapter-end__draft { padding: 20px; border: 1px solid #d9d5c8; background: #f1efe4; }
 .chapter-end__draft p { margin-bottom: 0; font-family: var(--yt-font-serif, serif); }
+.chapter-end__draft-figure { margin: 12px 0 0; }
+.chapter-end__draft-figure img { display: block; width: 100%; border: 1px solid #d8d1c0; }
 .chapter-end__draft--locked { background: transparent; border-style: dashed; color: #687065; }
 .chapter-end__draft--locked .chapter-end__subheading { color: #687065; }
 .chapter-end__actions { counter-reset: action; }
 .chapter-end__action { position: relative; padding: 12px 0 12px 42px; counter-increment: action; }
 .chapter-end__action::before { content: counter(action, decimal-leading-zero); position: absolute; left: 0; color: #667b62; font-size: 13px; }
 .chapter-end__action p { margin-bottom: 0; }
+
+/* 关键节点三视角清单：沿用草稿箱的纸张语言，窄屏自动折成单栏。 */
+.chapter-end__tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+.chapter-end__tab {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #cfd4c6;
+  background: transparent;
+  color: #4a5a4e;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: .04em;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.chapter-end__tab[aria-pressed="true"] { background: #dfe7d6; border-color: #9fae96; color: #2f4436; }
+.chapter-end__node-list { margin-top: 8px; }
+.chapter-end__node { padding: 20px 0; border-bottom: 1px dashed #d7d2c6; }
+.chapter-end__node:last-child { border-bottom: 0; }
+.chapter-end__node-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.chapter-end__node-head .chapter-end__subheading { margin-bottom: 0; font-size: 15px; }
+.chapter-end__stamp {
+  padding: 2px 8px;
+  border: 1px solid #b9a684;
+  color: #7a6444;
+  font-size: 11px;
+  letter-spacing: .12em;
+}
+.chapter-end__node-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.chapter-end__perspective { padding: 14px 16px; border: 1px solid #ded9cb; background: #f2efe4; }
+.chapter-end__perspective-label { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .06em; color: #647160; }
+.chapter-end__perspective p { margin: 0; font-size: 14px; line-height: 1.85; }
+.chapter-end__node-law { margin: 12px 0 0; color: #5a645b; font-size: 12.5px; line-height: 1.8; }
 
 .chapter-end__footer { margin-top: 32px; padding-top: 24px; border-top: 1px solid #d7d2c6; }
 .chapter-end__navigation { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -106,6 +146,8 @@
   .chapter-end__section { margin-top: 26px; }
   .chapter-end__button { flex: 1 1 42%; }
   .chapter-end__retry { width: 100%; }
+  .chapter-end__node-columns { grid-template-columns: 1fr; }
+  .chapter-end__node { padding: 16px 0; }
 }
 @media (max-height: 500px) and (orientation: landscape) {
   .chapter-end { padding-top: 12px; }

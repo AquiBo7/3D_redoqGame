@@ -114,7 +114,9 @@ describe('食堂模块预载与场景数据', () => {
 describe('食堂真实几何与行走', () => {
   it('构建完整室内、六桌二十四椅、四档口、托盘保温台、窗外绿植及九名学生', () => {
     const { root, actors } = build();
-    expect(printed).toEqual(['一号窗口', '二号窗口', '三号窗口', '四号窗口']);
+    // C-36 的悬挑牌与灯箱同名（"三号窗口"），是刻意的重复：竖屏 390 宽时灯箱被横向裁掉，
+    // 玩家靠这块悬挑牌认窗口。除这一处外场景不得再出现别的文字。
+    expect(printed).toEqual(['一号窗口', '二号窗口', '三号窗口', '四号窗口', '三号窗口']);
     expect((mesh(root, 'canteen-tabletops') as THREE.InstancedMesh).count).toBe(6);
     expect((mesh(root, 'canteen-chair-seats-backs') as THREE.InstancedMesh).count).toBe(48);
     expect((mesh(root, 'canteen-tray-stacks') as THREE.InstancedMesh).count).toBe(24);
@@ -215,8 +217,12 @@ describe('食堂真实几何与行走', () => {
     const counterHit = resolveMovement(CANTEEN_LOCATIONS.windowApproach, { x: 0, z: -5 },
       nav.bounds, nav.obstacles, PLAYER_RADIUS);
     expect(counterHit.z).toBeGreaterThanOrEqual(-7.43);
-    const crowdHit = resolveMovement({ x: 0.95, z: 2.4 }, { x: 0, z: -2 }, nav.bounds, nav.obstacles, PLAYER_RADIUS);
-    expect(crowdHit.z).toBeGreaterThanOrEqual(1.01);
+    // C-34 把第二组学生整体移出视线中轴，探针跟着改到新站位 (-1.15, 0.35)：
+    // 占地 z ∈ [0.06, 0.64]，加玩家半径 0.32 → 上限 0.96；步长 2/13=0.1538，
+    // 从 z=1.6 走两步落在 0.9846，第三步落点进入扩展盒被整轴回退。断言语义不变：人是实心障碍。
+    const crowdHit = resolveMovement({ x: -1.15, z: 1.6 }, { x: 0, z: -2 }, nav.bounds, nav.obstacles, PLAYER_RADIUS);
+    expect(crowdHit.z).toBeGreaterThanOrEqual(0.98);
+    expect(crowdHit.z).toBeLessThan(1.1);
   });
 
   it('所有桌椅的实际实例包围盒落在碰撞占地内', () => {
@@ -242,7 +248,10 @@ describe('食堂资源生命周期', () => {
     const second = build('S13');
     const a = resources(first.root);
     const b = resources(second.root);
-    expect(a.textures.size).toBe(5);
+    // 1 张水磨石 DataTexture + 4 张窗口名 CanvasTexture + C-36 三号窗口悬挑牌 = 6。
+    // 该数字是场景内 CanvasTexture 的上限账（全场景贴图预算 25），新增文字牌必须走 createTextSign，
+    // 并且要确认它的 texture 由 material 的 dispose 监听释放，否则这里会漏检而不是变红。
+    expect(a.textures.size).toBe(6);
     const disposed = new Set<unknown>();
     // Three.js 各资源使用不同的 EventDispatcher 泛型，分别注册以保留严格类型。
     a.geometries.forEach((resource) => resource.addEventListener('dispose', () => disposed.add(resource)));

@@ -6,7 +6,6 @@ import { disposeMaterialCache, getFoliageMaterial, getPavingMaterial, getPlaster
 import { EventBus } from '../core/eventBus';
 import type { ColorBloomUniforms } from './colorBloom';
 import { sampleColorBloomReveal } from './colorBloom';
-import { gsap } from 'gsap';
 import { InteractionSystem } from '../world/InteractionSystem';
 import { angleBetweenDeg } from '../world/gazeTracker';
 
@@ -221,7 +220,13 @@ describe('M3 模块6：教学楼真实几何封边', () => {
       const crowns = root.getObjectByName(`building-second-row-crowns-${side}`) as THREE.InstancedMesh;
       const shrubs = root.getObjectByName(`building-second-row-shrubs-${side}`) as THREE.InstancedMesh;
       expect(trunks.count).toBe(7);
-      expect(crowns.count).toBe(35);
+      // 二排树改卡片树：贴图卡片 + alphaTest 硬边，数量随画质档位变，只锁"每棵都有、且不是球冠"
+      expect(crowns.count % 7).toBe(0);
+      expect(crowns.count).toBeGreaterThanOrEqual(28);
+      expect(crowns.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+      expect((crowns.material as THREE.MeshBasicMaterial).alphaTest).toBeGreaterThan(0);
+      expect((crowns.material as THREE.MeshBasicMaterial).transparent).toBe(false);
+      expect(crowns.frustumCulled).toBe(false);
       expect(shrubs.count).toBe(21);
       const trees = parts.filter((part) => part.mesh === trunks);
       expect(Math.min(...trees.map((part) => part.p.z))).toBeLessThan(-53);
@@ -229,7 +234,8 @@ describe('M3 模块6：教学楼真实几何封边', () => {
       expect(new Set(trees.map((part) => part.size.y.toFixed(2))).size).toBeGreaterThanOrEqual(6);
       expect(Math.max(...trees.map((part) => part.size.y)) - Math.min(...trees.map((part) => part.size.y))).toBeGreaterThan(2.5);
       expect(Math.max(...trees.map((part) => Math.abs(part.p.x))) - Math.min(...trees.map((part) => Math.abs(part.p.x)))).toBeGreaterThan(12);
-      expect((crowns.material as THREE.Material).userData.windTime).toBe((shrubs.material as THREE.Material).userData.windTime);
+      // 卡片树与灌木共用同一条风时钟，避免两套相位各摆各的
+      expect(crowns.userData.windTime).toBe((shrubs.material as THREE.Material).userData.windTime);
       const x = side < 0 ? -17.3 : 12.55;
       const z = side < 0 ? -13.5 : -9.7;
       const roof = detailBoxes(parts, 0x657568).filter((part) => Math.abs(part.p.x - x) < 0.01 && Math.abs(part.p.z - z) < 0.01);
@@ -421,7 +427,7 @@ describe('M3 模块6：教学楼真实几何封边', () => {
     plaster.addEventListener('dispose', cacheDisposed);
     const meadows = first.root.children.filter((object) => object.userData.meadow) as THREE.InstancedMesh[];
     const crown = first.root.getObjectByName('building-second-row-crowns-1') as THREE.InstancedMesh;
-    const time = (crown.material as THREE.Material).userData.windTime as { value: number };
+    const time = (crown.userData.windTime as { value: number });
     expect(time).toBe((meadows[0].material as THREE.Material).userData.windTime);
     expect(foliage.userData.windTime).toBeUndefined();
     const previous = time.value;
@@ -454,7 +460,7 @@ describe('M3 模块6：教学楼真实几何封边', () => {
 });
 
 describe('Phase A：S8 路边手机取景伏笔', () => {
-  it('程序化人物双脚贴草坪，举臂握住横屏手机且不增加模型、灯光或通路障碍', () => {
+  it('程序化人物双脚贴草坪，双手把竖屏手机端在胸前且不增加模型、灯光或通路障碍', () => {
     const { root, built, definition } = build();
     const actor = built.actors!.campusPhotographer;
     expect(actor.position.toArray()).toEqual([6.45, -0.055, -10]);
@@ -476,7 +482,7 @@ describe('Phase A：S8 路边手机取景伏笔', () => {
     });
     expect(triangles).toBeLessThan(1200);
     const phone = actor.getObjectByName('building-phone-device') as THREE.Mesh<THREE.BoxGeometry>;
-    expect(phone.geometry.parameters.width).toBeGreaterThan(phone.geometry.parameters.height);
+    expect(phone.geometry.parameters.height).toBeGreaterThan(phone.geometry.parameters.width);
     const phoneBounds = new THREE.Box3().setFromObject(phone);
     const environment = root.children.filter((object) => !Object.values(built.actors!).includes(object));
     for (const side of ['left', 'right']) {
@@ -489,7 +495,10 @@ describe('Phase A：S8 路边手机取景伏笔', () => {
       expect(sole).toBeCloseTo(ground.point.y, 6);
       const hand = actor.getObjectByName(`building-phone-hand-${side}`)!;
       expect(phoneBounds.intersectsBox(new THREE.Box3().setFromObject(hand))).toBe(true);
-      expect(hand.getWorldPosition(new THREE.Vector3()).y).toBeGreaterThan(1.4);
+      const handWorld = hand.getWorldPosition(new THREE.Vector3());
+      // 胸口高度取景：既不低于腰际，也不举到脸前
+      expect(handWorld.y).toBeGreaterThan(1.05);
+      expect(handWorld.y).toBeLessThan(1.3);
       const forearm = actor.getObjectByName(`building-phone-forearm-${side}`) as THREE.Mesh<THREE.CylinderGeometry>;
       const wrist = new THREE.Vector3(0, forearm.geometry.parameters.height / 2, 0).applyMatrix4(forearm.matrixWorld);
       expect(wrist.distanceTo(hand.getWorldPosition(new THREE.Vector3()))).toBeLessThan(1e-6);
@@ -497,6 +506,8 @@ describe('Phase A：S8 路边手机取景伏笔', () => {
       const elbow = new THREE.Vector3(0, sleeve.geometry.parameters.height / 2, 0).applyMatrix4(sleeve.matrixWorld);
       const forearmBase = new THREE.Vector3(0, -forearm.geometry.parameters.height / 2, 0).applyMatrix4(forearm.matrixWorld);
       expect(elbow.distanceTo(forearmBase)).toBeLessThan(1e-6);
+      // 肘部收在肋侧、小臂向上内收，而不是架到肩线以上
+      expect(elbow.y).toBeLessThan(handWorld.y);
     }
     const pose = actor.getObjectByName('building-phone-pose')!;
     for (const yaw of [-0.3, 0, 0.3]) {
@@ -583,18 +594,23 @@ describe('Phase A：S8 路边手机取景伏笔', () => {
     const pose = actor.getObjectByName('building-phone-pose')!;
     const context = { sceneId: 'S8' as const, bus: new EventBus(), actors: built.actors!, setInteractableVisible: () => {} };
     buildingRuntime.enter(context);
-    const walk = gsap.globalTimeline.getChildren().find((animation) => animation.duration() === 26)!;
-    expect(walk).toBeDefined();
+    // 同行改由 tick(dt) 按秒推进：同样时长拆成不同拍数，落点必须一致
+    const walkFor = (seconds: number, steps: number): void => {
+      for (let index = 0; index < steps; index += 1) buildingRuntime.tick!(seconds / steps);
+    };
     const foot = actor.getObjectByName('building-phone-shoe-left')!;
     const startFoot = foot.getWorldPosition(new THREE.Vector3());
-    buildingRuntime.tick!(2.5);
+    expect(built.actors!.linxia.position.toArray()).toEqual([1.3, 0, -1]);
+    walkFor(2.5, 1);
     expect(pose.rotation.y).toBeCloseTo(0.3);
-    buildingRuntime.tick!(5);
+    walkFor(5, 1);
     expect(pose.rotation.y).toBeCloseTo(-0.3);
-    buildingRuntime.tick!(2.5);
+    walkFor(2.5, 1);
     expect(pose.rotation.y).toBeCloseTo(0);
     expect(foot.getWorldPosition(new THREE.Vector3()).distanceTo(startFoot)).toBe(0);
-    walk.progress(10 / 26);
+    // 累计十秒：路线只有起止两点，横向恒定 1.3，纵向按秒线性推进
+    expect(built.actors!.linxia.position.x).toBeCloseTo(1.3, 6);
+    expect(built.actors!.linxia.position.z).toBeCloseTo(-1 - 43 * (10 / 26), 6);
     const phone = actor.getObjectByName('building-phone-device')!;
     const lensDirection = phone.getWorldDirection(new THREE.Vector3());
     const phonePosition = phone.getWorldPosition(new THREE.Vector3());
@@ -602,9 +618,19 @@ describe('Phase A：S8 路边手机取景伏笔', () => {
       new THREE.Vector3(built.actors!.linxia.position.x, 1.4, built.actors!.linxia.position.z),
       new THREE.Vector3(0.2, 1.6, built.actors!.linxia.position.z + 1),
     ]) expect(angleBetweenDeg(lensDirection, subject.sub(phonePosition))).toBeLessThan(25);
-    walk.progress(1);
-    expect(built.actors!.linxia.position.x).toBeCloseTo(-0.1);
+    walkFor(16, 8);
+    expect(built.actors!.linxia.position.x).toBeCloseTo(1.3);
     expect(built.actors!.linxia.position.z).toBeCloseTo(-44);
+    // 全程与路轴平行：既不横向漂移，也不在拐点处转身
+    expect(built.actors!.linxia.rotation.y).toBeCloseTo(Math.PI, 4);
+    const coarse = build();
+    buildingRuntime.enter({ ...context, actors: coarse.built.actors! });
+    walkFor(13, 1);
+    const coarseZ = coarse.built.actors!.linxia.position.z;
+    buildingRuntime.enter({ ...context, actors: coarse.built.actors! });
+    walkFor(13, 13);
+    expect(coarse.built.actors!.linxia.position.z).toBeCloseTo(coarseZ, 6);
+    expect(coarse.built.actors!.linxia.position.x).toBeCloseTo(1.3, 6);
     buildingRuntime.enter({ ...context, sceneId: 'S9' });
     buildingRuntime.tick!(2.5);
     expect(pose.rotation.y).toBe(0);
@@ -687,7 +713,7 @@ describe('M4 模块8：林荫道景观漫染集成', () => {
   it('风场与草花梯度保留，漫染读取扰动后的实例世界位置并保留全部共享引用', () => {
     const { root, built } = build();
     const uniforms = bloomOf(built);
-    for (const name of ['building-meadow-wind-grass', 'building-meadow-wind-flowers', 'building-second-row-crowns-1']) {
+    for (const name of ['building-meadow-wind-grass', 'building-meadow-wind-flowers', 'building-second-row-shrubs-1']) {
       const mesh = root.getObjectByName(name) as THREE.Mesh;
       const material = mesh.material as THREE.MeshLambertMaterial | THREE.MeshStandardMaterial;
       const template = material instanceof THREE.MeshLambertMaterial ? THREE.ShaderLib.lambert : THREE.ShaderLib.standard;

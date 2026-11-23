@@ -41,6 +41,34 @@ export function posePiggybackPassenger(actor: THREE.Object3D): boolean {
   return true;
 }
 
+/**
+ * 生成一份按时间倒放的新剪辑：骨骼资产里只有"放下"类动作，倒放即"拾起"。
+ * 走独立剪辑而不是负 timeScale，是为了让一次性动作的收尾姿态由剪辑首帧唯一确定。
+ */
+export function reverseClip(clip: THREE.AnimationClip, name: string): THREE.AnimationClip {
+  const tracks = clip.tracks.map((track) => {
+    const valueSize = track.getValueSize();
+    const keyCount = track.values.length / valueSize;
+    const times = new Float32Array(keyCount);
+    const values = new Float32Array(track.values.length);
+    for (let index = 0; index < keyCount; index += 1) {
+      const source = keyCount - 1 - index;
+      times[index] = clip.duration - track.times[source];
+      for (let offset = 0; offset < valueSize; offset += 1) {
+        values[index * valueSize + offset] = track.values[source * valueSize + offset];
+      }
+    }
+    const TrackConstructor = track.constructor as new (
+      trackName: string,
+      keyTimes: Float32Array,
+      keyValues: Float32Array,
+      interpolation?: THREE.InterpolationModes,
+    ) => THREE.KeyframeTrack;
+    return new TrackConstructor(track.name, times, values, track.getInterpolation());
+  });
+  return new THREE.AnimationClip(name, clip.duration, tracks);
+}
+
 export interface CharacterAnimationController {
   /** 该角色是否自带动画剪辑 */
   hasAnimation(name: string): boolean;

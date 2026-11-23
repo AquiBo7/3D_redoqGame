@@ -81,9 +81,11 @@ export function buildPhonePresentation(panel: PhonePanel, state: Readonly<StoryS
     }
   }
   if ((state.addedHer || state.postChoice === 'explain') && !activeChats.some((section) => section.title === '林夏')) {
-    add({ kind: 'chat', id: 'archive-linxia', title: '林夏', unread: 0, messages: [
-      { id: 'archive-linxia-hello', from: '林夏', text: state.postChoice === 'explain' ? '……谢谢。我是林夏。' : '嗯。……你不用特意告诉我。' },
-    ] });
+    add({ kind: 'chat', id: 'archive-linxia', title: '林夏', unread: 0,
+      ...(sceneId !== 'E1' ? { avatarActionId: 'view-linxia-avatar' } : {}),
+      messages: [
+        { id: 'archive-linxia-hello', from: '林夏', text: state.postChoice === 'explain' ? '……谢谢。我是林夏。' : '嗯。……你不用特意告诉我。' },
+      ] });
   }
   const currentChat = activeChats.find((section) => section.unread > 0);
   const shareChat = sections.find((section): section is Chat => section.kind === 'chat' && section.id === 'archive-xiaochen');

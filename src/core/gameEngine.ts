@@ -117,6 +117,9 @@ export class GameEngine {
       this.bus.on('ui:dialogueEnd', ({ stepId }) => {
         this.machine.onDialogueEnd(stepId);
       }),
+      this.bus.on('ui:momentEnd', ({ stepId, outcome }) => {
+        this.machine.onMomentEnd(stepId, outcome);
+      }),
     );
   }
 
@@ -159,6 +162,7 @@ export class GameEngine {
     Object.assign(state, preset.state);
     state.clues = [...state.clues];
     state.yuanKeys = [...state.yuanKeys];
+    state.draftReactions = [...state.draftReactions];
     state.log = [{ timestamp: this.now(), sceneId: preset.sceneId, type: 'system', summary: `章节选择预设：${preset.description}` }];
     this.machine.continueFrom({
       version: CHAPTER_SAVE_VERSION, chapterId: 'ch1', savedAt: this.now(),

@@ -1,4 +1,4 @@
-// world/resources.ts —— GLB 角色模型懒加载器：按需加载、缓存、身高标准化、实例化与销毁安全
+// world/resources.ts —— GLB 懒加载器：角色模型与第三方道具，按需加载、缓存、标准化、实例化与销毁安全
 // 边界：只负责 3D 资源加载与标准化，不 import core 剧情状态。
 // 模型 URL 一律相对路径（vite base './'），运行时解析为绝对地址，跟随任意部署子路径。
 // 销毁安全：缓存模板的几何 / 材质打上 userData.sharedResource 标记，
@@ -10,6 +10,8 @@ import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import type { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { CharacterModelId } from '../scenes3d/modelManifest';
 import { getCharacterModel } from '../scenes3d/modelManifest';
+import type { PropModelId } from '../scenes3d/propManifest';
+import { getPropModel } from '../scenes3d/propManifest';
 
 /** 缓存模板：场景母本 + 骨骼动画剪辑（无动画的模型为空数组） */
 export interface CharacterModelAsset {
@@ -193,4 +195,135 @@ export function disposeCharacterModelCache(): void {
   }
   templateCache.clear();
   pendingLoads.clear();
+}
+
+// ——————————————————————————————————————————————————————————————————————————————
+// 第三方道具（docs/道具挂载工单.md · T0）
+// 道具与角色共用同一个 GLTFLoader + MeshoptDecoder 单例，但缓存分开。
+// 流水线成品全部是「单网格 + 单材质 + 底面贴 y=0」，所以除母本 Group 之外，
+// 还额外烘焙出一份「单位=米、XZ 居中、底面 y=0」的几何，供场景直接建 InstancedMesh：
+// meshopt 复压会把道具原点改写进 node.translation / node.scale，
+// 只取 geometry 不取节点变换会得到一件悬空且尺寸错乱的模型。
+// ——————————————————————————————————————————————————————————————————————————————
+
+/** 道具模板：母本 Group + 烘焙后的单件实例几何 + 已覆盖色温的共享材质 */
+export interface PropModelAsset {
+  scene: THREE.Group;
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+  heightM: number;
+}
+
+/** 已标准化道具模板缓存：propId → 母本 + 实例几何（实例与母本共享几何 / 材质） */
+const propTemplateCache = new Map<PropModelId, PropModelAsset>();
+
+/** 进行中的道具加载：同一道具的并发请求合并为同一个 Promise */
+const pendingPropLoads = new Map<PropModelId, Promise<PropModelAsset | null>>();
+
+/**
+ * KHR_mesh_quantization 的整数顶点要先转成 Float32 再烘焙节点变换：
+ * meshopt 解压出来的是 InterleavedBufferAttribute，而 BufferAttribute.applyMatrix4 会把结果
+ * 重新量化写回整数栅格，超出 ±1 的分量会被直接钳位——路灯 4.2 m 的灯杆就是这样被压扁成 2 m 碎块的。
+ * getComponent 自带反归一化，两种属性都能读，所以这里一律摊平成独立的 Float32 缓冲。
+ */
+function toFloatAttribute(
+  attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+): THREE.BufferAttribute | THREE.InterleavedBufferAttribute {
+  if (attribute.array instanceof Float32Array && attribute.normalized !== true) return attribute;
+  const itemSize = attribute.itemSize;
+  const values = new Float32Array(attribute.count * itemSize);
+  for (let index = 0; index < attribute.count; index += 1) {
+    for (let component = 0; component < itemSize; component += 1) {
+      values[index * itemSize + component] = attribute.getComponent(index, component);
+    }
+  }
+  const converted = new THREE.BufferAttribute(values, itemSize);
+  converted.name = attribute.name;
+  return converted;
+}
+
+/** 把道具母本的网格烘焙成米制、贴地、XZ 居中的实例几何（母本自身已按清单高度归一化） */
+function bakePropGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
+  const geometry = mesh.geometry.clone();
+  for (const name of Object.keys(geometry.attributes)) {
+    const attribute = geometry.getAttribute(name);
+    if (attribute) geometry.setAttribute(name, toFloatAttribute(attribute));
+  }
+  mesh.updateWorldMatrix(true, false);
+  geometry.applyMatrix4(mesh.matrixWorld);
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  if (box) geometry.translate(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * 懒加载单件道具：首次调用才发请求，同一 id 的并发请求合并。
+ * 与角色不同，这里失败一律返回 null 而不是 reject —— 场景侧的约定是
+ * 「先照常构建程序化家具 → 成功才热替换」，reject 会变成未捕获异常并把空洞留在场景里。
+ * 多网格 / 多材质成品（行李箱 DC=2）并不出一个 InstancedMesh，同样按 null 处理走程序化回退。
+ */
+export function loadPropModel(id: PropModelId): Promise<PropModelAsset | null> {
+  const cached = propTemplateCache.get(id);
+  if (cached) return Promise.resolve(cached);
+
+  const pending = pendingPropLoads.get(id);
+  if (pending) return pending;
+
+  const entry = getPropModel(id);
+  const loadPromise: Promise<PropModelAsset | null> = getLoader()
+    .then((loader) => loader.loadAsync(resolveModelUrl(entry.path)))
+    .then((gltf): PropModelAsset | null => {
+      const meshes: THREE.Mesh[] = [];
+      gltf.scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) meshes.push(object);
+      });
+      const mesh = meshes[0];
+      if (!mesh || meshes.length > 1) return null;
+      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      if (!material || (Array.isArray(mesh.material) && mesh.material.length > 1)) return null;
+
+      markSharedResources(gltf.scene);
+      normalizeModelToHeight(gltf.scene, entry.heightM);
+
+      // 底图与 material.color 相乘：中性暖色压掉写实旧化，roughness 0.86 / metalness 0 由成品自带
+      if (material instanceof THREE.MeshStandardMaterial) material.color.setHex(entry.tint);
+      const geometry = bakePropGeometry(mesh);
+      geometry.userData[SHARED_RESOURCE_FLAG] = true;
+      material.userData[SHARED_RESOURCE_FLAG] = true;
+
+      const asset: PropModelAsset = { scene: gltf.scene, geometry, material, heightM: entry.heightM };
+      propTemplateCache.set(id, asset);
+      return asset;
+    })
+    .catch(() => null)
+    .finally(() => {
+      pendingPropLoads.delete(id);
+    });
+
+  pendingPropLoads.set(id, loadPromise);
+  return loadPromise;
+}
+
+/** 克隆一件已加载的道具母本（底面贴 y=0、XZ 居中、已按清单高度归一化）；未加载时抛错，调用方须先 await loadPropModel */
+export function instantiatePropModel(id: PropModelId): THREE.Group {
+  const asset = propTemplateCache.get(id);
+  if (!asset) throw new Error(`道具尚未加载，无法实例化：${id}`);
+  // 道具无骨骼，普通深拷贝即可：几何 / 材质仍按引用共享并受共享标记保护
+  return asset.scene.clone(true) as THREE.Group;
+}
+
+/** 清空道具缓存并释放 GPU 资源（退出道具预览台时调用；游戏运行期不调用） */
+export function disposePropCache(): void {
+  for (const asset of propTemplateCache.values()) {
+    asset.geometry.dispose();
+    asset.material.dispose();
+    asset.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh) object.geometry.dispose();
+    });
+  }
+  propTemplateCache.clear();
+  pendingPropLoads.clear();
 }

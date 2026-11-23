@@ -20,7 +20,7 @@ const MOVE_KEYS = new Set([
   'ArrowRight',
 ]);
 const SPRINT_KEYS = new Set(['ShiftLeft', 'ShiftRight']);
-const MOUSE_TAP_MAX_MOVE_PX = 6;
+const MOUSE_TAP_MAX_MOVE_PX = 12;
 const TOUCH_DOUBLE_TAP_MAX_MS = 320;
 const TOUCH_DOUBLE_TAP_MAX_DISTANCE_PX = 48;
 
@@ -70,7 +70,8 @@ export class FirstPersonController {
   private readonly callbacks: FirstPersonCallbacks;
 
   private navigation: FirstPersonNavigation;
-  private groundY: number;
+  /** 当前脚底高度（米）：多层场景下按连续高度采样逐帧推进，不随 XZ 瞬间跳层 */
+  private feetY: number;
   private feet: Vec2;
   private yaw: number;
   private pitch: number;
@@ -119,8 +120,8 @@ export class FirstPersonController {
     this.callbacks = options.callbacks ?? {};
 
     this.navigation = options.navigation;
-    this.groundY = options.navigation.groundY ?? 0;
     this.feet = { x: options.spawn.x, z: options.spawn.z };
+    this.feetY = options.spawn.y ?? this.restingHeight();
     this.yaw = options.spawn.yaw ?? 0;
     this.pitch = THREE.MathUtils.degToRad(options.spawn.pitchDeg ?? -7);
     this.pitchLimit = THREE.MathUtils.degToRad(this.config.pitchLimitDeg);
@@ -232,6 +233,11 @@ export class FirstPersonController {
         this.navigation.bounds,
         this.navigation.obstacles,
         this.config.playerRadius,
+        {
+          currentY: this.feetY,
+          surfaces: this.navigation.surfaces,
+          groundY: this.navigation.groundY,
+        },
       );
 
       const movedDistance = Math.hypot(this.feet.x - beforeX, this.feet.z - beforeZ);
@@ -281,14 +287,29 @@ export class FirstPersonController {
   }
 
   getFeetPosition(): { x: number; y: number; z: number } {
-    return { ...this.feet, y: sampleGroundHeight(this.feet, this.navigation.surfaces, this.navigation.groundY) };
+    return { x: this.feet.x, y: this.feetY, z: this.feet.z };
+  }
+
+  /**
+   * 出生 / 换场景的落位高度：以 nav.groundY 为基准做连续采样。
+   * 单层场景等价于旧的"取该点最高表面"；多层场景的 2F 出生点必须显式填 spawn.y，
+   * 否则 1F 出生点正上方的楼板会把玩家拽上二楼。
+   */
+  private restingHeight(): number {
+    const groundY = this.navigation.groundY ?? 0;
+    return sampleGroundHeight(this.feet, this.navigation.surfaces, groundY, groundY);
   }
 
   private applyCamera(bobY: number, roll: number): void {
-    this.groundY = sampleGroundHeight(this.feet, this.navigation.surfaces, this.navigation.groundY);
+    this.feetY = sampleGroundHeight(
+      this.feet,
+      this.navigation.surfaces,
+      this.navigation.groundY,
+      this.feetY,
+    );
     this.camera.position.set(
       this.feet.x,
-      this.groundY + this.config.eyeHeight + bobY,
+      this.feetY + this.config.eyeHeight + bobY,
       this.feet.z,
     );
     this.camera.rotation.set(this.pitch, this.yaw, roll);
@@ -437,10 +458,16 @@ export class FirstPersonController {
     const hitPoint = intersectGroundRay(
       this.tapRaycaster.ray.origin, this.tapRaycaster.ray.direction,
       this.navigation.surfaces, this.navigation.groundY,
+      this.feetY, this.config.tapMaxHeightDelta,
     );
     if (!hitPoint) return;
 
-    const target = clampToNearestWalkable({ x: hitPoint.x, z: hitPoint.z }, this.navigation.bounds);
+    // 落点须留在当前高度层：楼板下方的地面会被钳回本层轮廓
+    const target = clampToNearestWalkable(
+      { x: hitPoint.x, z: hitPoint.z },
+      this.navigation.bounds,
+      this.feetY,
+    );
     if (distance2D(this.feet, target) <= this.config.autoWalkStopDistance) return;
 
     const now = performance.now();
@@ -609,13 +636,14 @@ export class FirstPersonController {
 
   setNavigation(navigation: FirstPersonNavigation): void {
     this.navigation = navigation;
-    this.groundY = navigation.groundY ?? 0;
     this.feet = clampToNearestWalkable(this.feet, navigation.bounds);
+    this.feetY = this.restingHeight();
     this.applyCamera(0, 0);
   }
 
   setSpawn(spawn: SceneSpawn): void {
     this.feet = { x: spawn.x, z: spawn.z };
+    this.feetY = spawn.y ?? this.restingHeight();
     this.yaw = spawn.yaw ?? 0;
     this.pitch = THREE.MathUtils.clamp(
       THREE.MathUtils.degToRad(spawn.pitchDeg ?? -7),

@@ -16,6 +16,8 @@ export interface DebugPanelDataSource {
 }
 
 const STATE_FIELDS: Array<[keyof StoryState, string]> = [
+  ['newsSeen', 'newsSeen'],
+  ['helpedPasserby', 'helpedPasserby'],
   ['momReply', 'momReply'],
   ['phoneIgnored', 'phoneIgnored'],
   ['seenBag', 'seenBag'],
@@ -26,6 +28,8 @@ const STATE_FIELDS: Array<[keyof StoryState, string]> = [
   ['seenCrossedOut', 'seenCrossedOut'],
   ['picked', 'picked'],
   ['seenFatherWatching', 'seenFatherWatching'],
+  ['finalAnswer', 'finalAnswer'],
+  ['draftReactions', 'draftReactions'],
   ['trust', 'trust'],
   ['harm', 'harm'],
   ['log', 'log'],
@@ -59,6 +63,7 @@ function formatValue(key: keyof StoryState, state: StoryState): string {
   if (key === 'log') return `${state.log.length} 条`;
   const value = state[key];
   if (value === null) return '—';
+  if (Array.isArray(value)) return value.length === 0 ? '[]' : `${value.length} 条`;
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return String(value);
 }

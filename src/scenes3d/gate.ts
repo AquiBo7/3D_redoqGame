@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { gsap } from 'gsap';
 import type { SceneId } from '../data/storySchema';
 import { sampleGroundHeight } from '../world/navMath';
-import { hasCharacterModel } from '../world/resources';
+import { getCharacterAnimations, hasCharacterModel } from '../world/resources';
 import type { GroundSurface } from '../world/navMath';
 import type {
   HotspotConfig,
@@ -18,13 +18,19 @@ import {
   createActorAnimation,
   createCharacterActor,
   createTextSign,
+  findActorModelRoot,
+  hasArmRig,
+  poseHandsOnChestPhone,
   startIdleMotion,
   yawToward,
 } from './shared';
-import { posePiggybackPassenger } from './characterAnimation';
+import { createCharacterAnimation, posePiggybackPassenger, reverseClip } from './characterAnimation';
 import type { CharacterAnimationController } from './characterAnimation';
 import { createCampusMeadow, createFoliageWindMaterial } from './foliageWind';
 import type { MeadowBed, WindTime } from './foliageWind';
+import { createCanopyCardBatch } from './canopy';
+import type { CanopyCardSpec } from './canopy';
+import { canopyBudget, getQualityTier } from '../world/quality';
 import type { XZ, Vec3 } from './shared';
 import {
   getBarkMaterial,
@@ -531,6 +537,39 @@ function buildGateLandscape(parent: THREE.Object3D, occluders: THREE.Object3D[])
   canopyGeometry.addEventListener('dispose', () => crowns.dispose());
   parent.add(crowns);
 
+  // 校门树保留冠团做体积与投影，外面再套一层 alpha 卡片：圆弧轮廓由卡片的镂空边缘破掉，
+  // 卡片按黄金角错开朝向，玩家一走动剪影就跟着变，读得出是一棵树而不是一团绿球。
+  const gateTier = canopyBudget(getQualityTier());
+  const gateGolden = Math.PI * (3 - Math.sqrt(5));
+  const gateCardTints = [0xdfe7d6, 0xe9efe0, 0xd4dec9, 0xeef4e7];
+  const canopyCards: CanopyCardSpec[] = [];
+  for (const [treeIndex, [x, z, scale]] of trees.entries()) {
+    const crownCenterY = 4.55 * scale;
+    for (let card = 0; card < gateTier.cards; card += 1) {
+      const t = (card + 0.5) / gateTier.cards;
+      const angle = card * gateGolden * 2 + treeIndex * 1.37;
+      const ring = 0.95 * scale * (0.35 + 0.65 * Math.sin(Math.PI * t));
+      canopyCards.push({
+        x: x + Math.cos(angle) * ring,
+        y: crownCenterY + (t - 0.5) * 1.7 * scale,
+        z: z + Math.sin(angle) * ring,
+        scale: (2.5 + ((card * 5 + treeIndex) % 3) * 0.16) * scale,
+        yaw: angle + Math.PI / 2,
+        tilt: (card % 3 - 1) * 0.18,
+        tint: gateCardTints[(treeIndex + card) % gateCardTints.length],
+      });
+    }
+  }
+  const leafCards = createCanopyCardBatch(canopyCards, {
+    name: 'gate-canopy-cards',
+    texture: { size: gateTier.textureSize, seed: 5, aniso: gateTier.anisotropy, density: 0.92 },
+    alphaTest: gateTier.alphaTest,
+    time: gateWindTime,
+    sway: 0.035,
+  });
+  leafCards.userData.windTime = gateWindTime;
+  parent.add(leafCards);
+
   const shrubGeometry = new THREE.IcosahedronGeometry(1, 0);
   const shrubs = new THREE.InstancedMesh(shrubGeometry, getFoliageMaterial(), 48);
   for (let i = 0; i < 48; i += 1) {
@@ -703,9 +742,9 @@ const CROWD: Array<{
   /** 面向台阶时的微偏角，避免机械同向排排站 */
   yawBias?: number;
 }> = [
-  { position: { x: -3.6, y: 0, z: 3.4 }, model: 'ayuan', color: 0x8f9aa3, phone: true, yawBias: -0.18 },
+  { position: { x: -3.6, y: 0, z: 3.4 }, model: 'studentMale', color: 0x8f9aa3, phone: true, yawBias: -0.18 },
   { position: { x: 3.8, y: 0, z: 3.0 }, model: 'studentFemale', color: 0x93a0a8, yawBias: -0.65 },
-  { position: { x: 4.4, y: 0, z: 1.4 }, model: 'ayuan', color: 0x8f9aa3, phone: true, yawBias: 0.4 },
+  { position: { x: 4.4, y: 0, z: 1.4 }, model: 'studentFemale', color: 0x8f9aa3, phone: true, yawBias: 0.4 },
   { position: { x: -4.0, y: 0, z: 1.0 }, model: 'studentMale', color: 0x96a3ab, yawBias: 0.95 },
 ];
 
@@ -720,11 +759,20 @@ export const GATE_WALKERS = [
 /** 合体胶囊起始位（台阶下）与拆分点（台阶顶平地） */
 const CARRY_START = { x: 0.9, z: 5.4 } as const;
 const HANDOFF_POINT = { x: -0.45, z: 2.45 } as const;
-const SPLIT_POS = {
-  linxia: { x: -0.45, z: 2.45 },
-  father: { x: -0.85, z: 2.6 },
-  bags: { x: -1.15, z: 2.55 },
-} as const;
+/**
+ * 爸爸提袋跟完半步后的落点：贴到林夏步行线右侧约 0.8m，既跟得上又不挡住她。
+ * 双骨架的袋子挂在身体两侧，father-bags 光点按这个落点摆到他手边。
+ */
+const FOLLOW_STOP = { x: -0.55, z: 0.9 } as const;
+/** 交接后林夏自落脚点往校内偏左前方走的位移与耗时（0.8 倍速步态约 0.78m/s） */
+const GIRL_WALK_RUN = { x: -0.45, z: -2.6 } as const;
+const GIRL_WALK_SECONDS = 3.4;
+
+/**
+ * 下背后把父女整体转向侧面：林夏是被"背"着放下的，落点在爸爸与玩家摄像机之间，
+ * 不转身的话放袋 / 拾袋全程她都会挡住爸爸，看起来像她手里提着两只袋子。
+ */
+const SIDE_YAW_RAD = -Math.PI / 2;
 
 const SPAWN: SceneSpawn = { x: 0, z: 7.6, yaw: 0, pitchDeg: -4 };
 
@@ -769,7 +817,7 @@ const NAV: NavigationConfig = {
 const HOTSPOTS: HotspotConfig[] = [
   { id: 'typer', position: { x: TYPER.position.x, y: 1.35, z: TYPER.position.z }, maxDistance: 18 },
   { id: 'handoff-moment', position: { x: -0.45, y: 1.45, z: 2.45 }, maxDistance: 16 },
-  { id: 'father-bags', position: { x: -0.05, y: 0.6, z: 1.25 }, maxDistance: 15 },
+  { id: 'father-bags', position: { x: -0.55, y: 0.6, z: 0.7 }, maxDistance: 15 },
 ];
 
 function buildGate(parent: THREE.Object3D): {
@@ -847,35 +895,12 @@ function buildGate(parent: THREE.Object3D): {
   carryGroup.position.set(CARRY_START.x, gateGround(CARRY_START), CARRY_START.z);
   parent.add(carryGroup);
 
-  // 拆分后的独立角色（初始隐藏）与爸爸提着的袋子
+  // 交接后独立走路的林夏（初始隐藏，落点在演出里按骨架实时求解）
   const linxiaSolo = createCharacterActor('linxia', 1.62, 0xe8d9a8, { yaw: Math.PI });
-  linxiaSolo.position.set(SPLIT_POS.linxia.x, gateGround(SPLIT_POS.linxia), SPLIT_POS.linxia.z);
+  linxiaSolo.position.set(HANDOFF_POINT.x, gateGround(HANDOFF_POINT), HANDOFF_POINT.z);
   linxiaSolo.visible = false;
 
-  const fatherSolo = createCharacterActor('father', 1.78, 0x8f8578, { yaw: Math.PI });
-  fatherSolo.position.set(SPLIT_POS.father.x, gateGround(SPLIT_POS.father), SPLIT_POS.father.z);
-  fatherSolo.visible = false;
-
-  // 爸爸手提的两只帆布袋（放置在双侧身体外缘，避免穿模）
-  const bagsSolo = new THREE.Group();
-  gateBoxes(
-    bagsSolo,
-    'gate-bags-body',
-    [-1, 1].map((side) => [side * 0.24, 0.46, 0, 0.18, 0.38, 0.28]),
-    new THREE.MeshStandardMaterial({ color: 0x9b8f78, roughness: 0.9 }),
-    true,
-  );
-  gateBoxes(
-    bagsSolo,
-    'gate-bags-handle',
-    [-1, 1].map((side) => [side * 0.24, 0.69, 0, 0.12, 0.035, 0.04]),
-    new THREE.MeshStandardMaterial({ color: 0x7e7464, roughness: 0.9 }),
-    false,
-  );
-  bagsSolo.position.set(SPLIT_POS.bags.x, gateGround(SPLIT_POS.bags), SPLIT_POS.bags.z);
-  bagsSolo.visible = false;
-
-  parent.add(linxiaSolo, fatherSolo, bagsSolo);
+  parent.add(linxiaSolo);
   occluders.push(carryFather, carryLinxia);
   for (const path of GATE_WALKERS) {
     const walker = createCharacterActor(path.model, path.height, path.color, { yaw: Math.PI });
@@ -891,8 +916,6 @@ function buildGate(parent: THREE.Object3D): {
       carryFather,
       carryLinxia,
       linxiaSolo,
-      fatherSolo,
-      bagsSolo,
       typer,
       ...crowdActors,
     },
@@ -900,19 +923,62 @@ function buildGate(parent: THREE.Object3D): {
 }
 
 let performanceTimeline: gsap.core.Timeline | null = null;
-/** 拆分后林夏的骨骼动画控制器：走路 → 站定拘谨，退出场景时彻底释放 */
+/** 交接后林夏的骨骼动画控制器：走路 → 站定拘谨，退出场景时彻底释放 */
 let linxiaAnimation: CharacterAnimationController | null = null;
 let gateActors: Record<string, THREE.Object3D> = {};
 const actorAnimations = new Map<string, CharacterAnimationController>();
 const walkerStates = new Map<string, { delay: number; arrived: boolean }>();
 const actorThrottleState = new Map<string, { accum: number; tick: number }>();
 const gatePlayerFeet = new THREE.Vector3();
+const girlLandingScratch = new THREE.Vector3();
 let gatePlayerFeetGetter: ((target: THREE.Vector3) => THREE.Vector3) | undefined;
 let gateIsModalBlocked: (() => boolean) | undefined;
 let gateBusSubscriptions: Array<() => void> = [];
-let carryPhase: 'walk' | 'wait' | 'dismount' | 'setdown' | 'split' = 'walk';
+let carryPhase: 'walk' | 'wait' | 'dismount' | 'setdown' | 'pickup' | 'follow' | 'stand' = 'walk';
 let linxiaWalking = false;
+/**
+ * 交接后林夏的步行（起点在交接那一刻由骨架实时求解，补间无法预知，故在 tick 里逐帧插值）
+ * 负值表示这一段还没开始或已经走完
+ */
+const girlWalkFrom = new THREE.Vector3();
+const girlWalkTo = new THREE.Vector3();
+let girlWalkElapsed = -1;
 let passengerPosed = false;
+/** 林夏是否还挂在爸爸背上（合体骨架里的她的网格可见性，交接后转由 linxiaSolo 演出） */
+let girlRidesBack = true;
+
+/**
+ * 合体骨架里父女是两套独立骨骼、两张独立网格，只切林夏网格的可见性，
+ * 爸爸继续用同一套骨架走完拾袋、跟走与目送，不再换回无骨骼的静态模型。
+ * 她的蒙皮网格名不带 Linxia_ 前缀（只有骨骼名带），所以按骨架归属判定。
+ */
+function setGirlRidesBack(visible: boolean): void {
+  girlRidesBack = visible;
+  gateActors.carryFather?.traverse((node) => {
+    if (!(node instanceof THREE.SkinnedMesh)) return;
+    if (node.skeleton.bones.some((bone) => bone.name.startsWith('Linxia_'))) node.visible = visible;
+  });
+}
+
+/** 交接瞬间实时求解林夏的落脚点：骨架取她的盆骨，胶囊体回退态取占位角色 */
+function resolveGirlLanding(): THREE.Vector3 {
+  const carrier = gateActors.carryFather?.getObjectByName('Linxia_Pelvis') ?? gateActors.carryLinxia;
+  if (carrier) return carrier.getWorldPosition(girlLandingScratch);
+  return girlLandingScratch.set(HANDOFF_POINT.x, 0, HANDOFF_POINT.z);
+}
+
+/**
+ * 爸爸的动画控制器：在共享剪辑之外补一份"放袋"倒放剪辑，
+ * 用作他重新提起两只袋子的拾袋动作。
+ */
+function createCarryAnimation(actor: THREE.Object3D): CharacterAnimationController | null {
+  const ref = findActorModelRoot(actor);
+  if (!ref) return null;
+  const clips = [...getCharacterAnimations(ref.modelId)];
+  const setDown = clips.find((clip) => clip.name === 'CarryBags_SetDown');
+  if (setDown) clips.push(reverseClip(setDown, 'CarryBags_PickUp'));
+  return createCharacterAnimation(ref.root, clips);
+}
 
 function clearGateBusSubscriptions(): void {
   for (const unsub of gateBusSubscriptions) unsub();
@@ -966,27 +1032,21 @@ function disposeLinxiaAnimation(): void {
 
 function resetPerformanceState(actors: Record<string, THREE.Object3D>): void {
   const carry = actors.carryGroup;
-  const carryFather = actors.carryFather;
   const carryLinxia = actors.carryLinxia;
   const linxia = actors.linxiaSolo;
-  const father = actors.fatherSolo;
-  const bags = actors.bagsSolo;
 
   carryPhase = 'walk';
   carry.visible = true;
   carry.position.set(CARRY_START.x, gateGround(CARRY_START), CARRY_START.z);
   carry.rotation.set(0, 0, 0);
-  carryFather.rotation.set(0, Math.PI, 0);
+  actors.carryFather.rotation.set(0, Math.PI, 0);
   carryLinxia.rotation.set(0, Math.PI, 0);
   carryLinxia.visible = !hasCharacterModel('fatherCarry');
+  setGirlRidesBack(true);
+  girlWalkElapsed = -1;
   linxia.visible = false;
-  linxia.position.set(SPLIT_POS.linxia.x, gateGround(SPLIT_POS.linxia), SPLIT_POS.linxia.z);
+  linxia.position.set(HANDOFF_POINT.x, gateGround(HANDOFF_POINT), HANDOFF_POINT.z);
   linxia.rotation.set(0, Math.PI, 0);
-  father.visible = false;
-  father.position.set(SPLIT_POS.father.x, gateGround(SPLIT_POS.father), SPLIT_POS.father.z);
-  father.rotation.set(0, Math.PI, 0);
-  bags.visible = false;
-  bags.position.set(SPLIT_POS.bags.x, gateGround(SPLIT_POS.bags), SPLIT_POS.bags.z);
 }
 
 function playPerformance(actors: Record<string, THREE.Object3D>, onReady: () => void): void {
@@ -998,8 +1058,6 @@ function playPerformance(actors: Record<string, THREE.Object3D>, onReady: () => 
   const carryFather = actors.carryFather;
   const carryLinxia = actors.carryLinxia;
   const linxia = actors.linxiaSolo;
-  const father = actors.fatherSolo;
-  const bags = actors.bagsSolo;
 
   const timeline = gsap.timeline();
 
@@ -1022,44 +1080,54 @@ function playPerformance(actors: Record<string, THREE.Object3D>, onReady: () => 
     }
   }, 7.0);
 
-  // 7.05–9.22s（2.17s）：原生下背动作 CarryBags_Dismount
+  // 7.05–9.22s（2.17s）：原生下背动作 CarryBags_Dismount，同时把父女转向侧面
   timeline.add(() => {
     carryPhase = 'dismount';
   }, 7.05);
+  timeline.to(carry.rotation, { y: SIDE_YAW_RAD, duration: 2.17, ease: 'sine.inOut' }, 7.05);
 
-  // 9.22–11.48s（2.27s）：原生放袋动作 CarryBags_SetDown
+  // 9.22s：下背动作结束的一刻完成交接——合体骨架里的林夏换成能独立走路的林夏，
+  // 她随即先迈步进校，爸爸才腾出手处理袋子，两人始终拉开距离，画面不会叠成一个身影
   timeline.add(() => {
-    carryPhase = 'setdown';
-  }, 9.22);
-
-  // 11.48s：合体拆分，林夏落地开始走路，爸爸提袋跟在后方半步
-  timeline.add(() => {
-    carryPhase = 'split';
-    carry.visible = false;
+    const landing = resolveGirlLanding();
+    setGirlRidesBack(false);
+    linxia.position.set(landing.x, gateGround(landing), landing.z);
+    girlWalkFrom.set(landing.x, 0, landing.z);
+    girlWalkTo.set(landing.x + GIRL_WALK_RUN.x, 0, landing.z + GIRL_WALK_RUN.z);
+    girlWalkElapsed = 0;
     linxia.visible = true;
-    father.visible = true;
-    bags.visible = true;
     linxiaAnimation = createActorAnimation(linxia);
     linxiaAnimation?.play('walk', { timeScale: 0.8, fadeIn: 0.2 });
     linxiaWalking = true;
-    actorAnimations.get('carryFather')?.stop();
+    carryPhase = 'setdown';
+  }, 9.22);
+
+  // 9.22–11.48s（2.27s）：原生放袋动作 CarryBags_SetDown 把两只袋子放到地上（相位已由交接回调置好）
+  // 11.48–13.75s（2.27s）：把放袋倒放成拾袋，他重新提起两只袋子
+  timeline.add(() => {
+    carryPhase = 'pickup';
   }, 11.48);
 
-  // 11.48–13.93s：林夏慢走（0.8 倍速步态约 0.84m/s，2.04m 路程≈2.45s），爸爸落后半步跟上
-  timeline.to(linxia.position, { x: 0.15, z: 0.5, duration: 2.45, ease: 'none' }, 11.48);
-  timeline.to(father.position, { x: -0.35, z: 1.15, duration: 4.4, ease: 'none' }, 11.78);
-  timeline.to(bags.position, { x: -0.05, z: 1.25, duration: 4.2, ease: 'none' }, 11.78);
-  timeline.to(linxia.rotation, { z: 0.028, yoyo: true, repeat: 4, duration: 0.5, ease: 'sine.inOut' }, 11.48);
-  timeline.to(linxia.rotation, { y: Math.PI + 0.045, yoyo: true, repeat: 2, duration: 1, ease: 'sine.inOut' }, 11.48);
-  timeline.to(father.rotation, { z: -0.016, yoyo: true, repeat: 6, duration: 0.62, ease: 'sine.inOut' }, 11.78);
-  timeline.to(father.rotation, { y: Math.PI - 0.03, yoyo: true, repeat: 3, duration: 1.2, ease: 'sine.inOut' }, 11.78);
+  // 13.75–14.75s：侧身只为让开视线，袋子回到手里后父女转回面向校内
+  timeline.to(carry.rotation, { y: 0, duration: 1, ease: 'sine.inOut' }, 13.75);
 
-  // 13.93s：走完最后一步，交叉淡入到低速“站定”待机（拘谨）
+  // 14.75–16.75s：爸爸提袋跟上半步，停到林夏步行线右侧目送
+  timeline.add(() => {
+    carryPhase = 'follow';
+  }, 14.75);
+  timeline.to(carry.position, { x: FOLLOW_STOP.x, z: FOLLOW_STOP.z, duration: 2, ease: 'none' }, 14.75);
+  if (!hasCharacterModel('fatherCarry')) {
+    timeline.to(carry.rotation, { z: 0.035, yoyo: true, repeat: 3, duration: 0.6, ease: 'sine.inOut' }, 14.75);
+  }
+
+  // 16.95s：林夏站定（拘谨）；爸爸停在校门口提袋目送
   timeline.add(() => {
     linxiaWalking = false;
     linxiaAnimation?.play('afraid', { timeScale: 0.25, fadeIn: 0.7 });
+    carryPhase = 'stand';
+    idleDisposers.push(startIdleMotion(carry, { breathAmp: 0.008, swayAmp: 0.01, period: 3.1 }));
     onReady();
-  }, 13.93);
+  }, 16.95);
 
   performanceTimeline = timeline;
 }
@@ -1084,6 +1152,25 @@ function startGateIdleMotions(actors: Record<string, THREE.Object3D>): void {
         period: 2.6 + index * 0.23,
       }),
     );
+  }
+}
+
+/** 围观人群与台阶旁打字男生：胸前竖屏手机的两位持机者（其余围观者不持机，走动画剪辑） */
+const GATE_PHONE_HOLDERS = ['crowd-0', 'crowd-2', 'typer'];
+/** 已摆好双手的角色；模型异步热替换前摆不上，摆成功后不再重复解算 */
+const gatePhonePosed = new WeakSet<THREE.Object3D>();
+
+function poseGatePhoneHolders(actors: Record<string, THREE.Object3D>): void {
+  for (const id of GATE_PHONE_HOLDERS) {
+    const actor = actors[id];
+    if (!actor || gatePhonePosed.has(actor)) continue;
+    // 阿远这类无骨骼静态网格：手臂烘焙死了，IK 永远摆不上，每拍重试只是白解矩阵。
+    // 道具已由 createCharacterActor 改挂到手掌握点，这里直接认作处理完毕。
+    if (findActorModelRoot(actor) && !hasArmRig(actor)) {
+      gatePhonePosed.add(actor);
+      continue;
+    }
+    if (poseHandsOnChestPhone(actor)) gatePhonePosed.add(actor);
   }
 }
 
@@ -1129,10 +1216,12 @@ export const gateRuntime: SceneRuntime = {
 
   tick(dtSeconds: number): void {
     gateWindTime.value += dtSeconds;
+    // 持机者双手在模型热替换后才长出来，摆成功前每拍重试一次（成功后不再解算）
+    poseGatePhoneHolders(gateActors);
     gatePlayerFeetGetter?.(gatePlayerFeet);
     const hasDualRig = hasCharacterModel('fatherCarry');
     if (gateActors.carryLinxia) {
-      gateActors.carryLinxia.visible = !hasDualRig;
+      gateActors.carryLinxia.visible = !hasDualRig && girlRidesBack;
       if (!hasDualRig && !passengerPosed) {
         passengerPosed = posePiggybackPassenger(gateActors.carryLinxia);
       }
@@ -1141,7 +1230,23 @@ export const gateRuntime: SceneRuntime = {
       carryPhase = 'dismount';
       performanceTimeline.resume();
     }
-    for (const id of ['carryGroup', 'linxiaSolo', 'fatherSolo', 'bagsSolo']) {
+    if (girlWalkElapsed >= 0) {
+      const t = Math.min(1, (girlWalkElapsed += dtSeconds) / GIRL_WALK_SECONDS);
+      const girl = gateActors.linxiaSolo;
+      if (girl) {
+        girl.position.x = girlWalkFrom.x + (girlWalkTo.x - girlWalkFrom.x) * t;
+        girl.position.z = girlWalkFrom.z + (girlWalkTo.z - girlWalkFrom.z) * t;
+      }
+      if (t >= 1) {
+        // 走到台阶前停下等他，脚不能继续空转
+        girlWalkElapsed = -1;
+        if (linxiaWalking) {
+          linxiaWalking = false;
+          linxiaAnimation?.play('afraid', { timeScale: 0.25, fadeIn: 0.5 });
+        }
+      }
+    }
+    for (const id of ['carryGroup', 'linxiaSolo']) {
       const actor = gateActors[id];
       if (actor) actor.position.y = gateGround(actor.position);
     }
@@ -1150,9 +1255,14 @@ export const gateRuntime: SceneRuntime = {
         ? { clip: 'CarryBags_Dismount', timeScale: 1, loop: false, fadeIn: 0.18 }
         : carryPhase === 'setdown'
           ? { clip: 'CarryBags_SetDown', timeScale: 1, loop: false, fadeIn: 0.15 }
-          : carryPhase === 'wait'
-            ? { clip: 'CarryBags_Walk_Loop', timeScale: 0, loop: true, fadeIn: 0.2 }
-            : { clip: 'CarryBags_Walk_Loop', timeScale: 0.9, loop: true, fadeIn: 0.25 };
+          : carryPhase === 'pickup'
+            ? { clip: 'CarryBags_PickUp', timeScale: 1, loop: false, fadeIn: 0.15 }
+            : carryPhase === 'stand'
+              // 冻结在放袋首帧：直立提袋、膝盖微屈的目送站姿，替代无骨骼静态模型的直挺双腿
+              ? { clip: 'CarryBags_SetDown', timeScale: 0, loop: true, fadeIn: 0.4 }
+              : carryPhase === 'wait'
+                ? { clip: 'CarryBags_Walk_Loop', timeScale: 0, loop: true, fadeIn: 0.2 }
+                : { clip: 'CarryBags_Walk_Loop', timeScale: 0.9, loop: true, fadeIn: 0.25 };
     const clips: Array<[string, string, number, boolean, boolean, number]> = [
       ['carryFather', carryClip.clip, carryClip.timeScale, false, carryClip.loop, carryClip.fadeIn],
       ['crowd-1', 'idle', 0.7, true, true, 0.25],
@@ -1183,7 +1293,8 @@ export const gateRuntime: SceneRuntime = {
       if (updateDt === null) continue;
       let animation = actorAnimations.get(id);
       if (!animation) {
-        animation = createActorAnimation(actor) ?? undefined;
+        // 爸爸要额外一份倒放剪辑做拾袋，其余角色直接用资产自带的共享剪辑
+        animation = (id === 'carryFather' ? createCarryAnimation(actor) : createActorAnimation(actor)) ?? undefined;
         if (animation) actorAnimations.set(id, animation);
       }
       animation?.play(clip, { timeScale, fadeIn, loop });
@@ -1209,6 +1320,7 @@ export const gateRuntime: SceneRuntime = {
     actorAnimations.clear();
     gateActors = {};
     linxiaWalking = false;
+    girlWalkElapsed = -1;
     stopIdleMotions();
     disposeLinxiaAnimation();
     if (performanceTimeline) {
@@ -1224,11 +1336,11 @@ export function createGateDefinition(sceneId: SceneId): WorldSceneDefinition {
   return {
     sceneKey: 'gate',
     footstepSurface: 'stone',
-    footstepActors: ['carryGroup', 'linxiaSolo', 'fatherSolo', ...GATE_WALKERS.map((path) => path.id)],
+    footstepActors: ['carryGroup', 'linxiaSolo', ...GATE_WALKERS.map((path) => path.id)],
     spawn: SPAWN,
     nav: NAV,
-    // 围观 / 打字男生 / 爸爸背林夏与拆分演出共 4 位角色
-    requiredModels: ['linxia', 'father', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale'],
+    // 围观 / 打字男生 / 父女合体骨架与交接后的林夏：爸爸全程用同一套骨骼演出，不再装第二份静态模型
+    requiredModels: ['linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale'],
     interactables: [],
     hotspots: isS5 ? HOTSPOTS : [],
     zones: isS5

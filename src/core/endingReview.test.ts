@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ASSET_MANIFEST } from '../data/assetManifest';
-import { ENDING_CONTENT, type EndingId } from '../data/endingContent';
+import { DRAWING_WITHDRAWN_LOG, ENDING_CONTENT, type EndingId } from '../data/endingContent';
 import { createInitialStoryState, type LogEntry, type StoryState } from './state';
 import { createEndingReview } from './endingReview';
 
@@ -184,9 +184,102 @@ describe('结局复盘纯模型', () => {
     const first = createEndingReview(input);
     const snapshot = JSON.stringify(first);
     first.cg.caption = '被改写'; first.drafts[0].text = '被改写'; first.actions[0].title = '被改写';
+    first.nodeGuides[0].title = '被改写'; first.nodeGuides[0].perspectives[0].text = '被改写';
     first.footprints[0].records.push('被改写'); first.retry!.label = '被改写';
     expect(JSON.stringify(createEndingReview(input))).toBe(snapshot);
     expect(input.log).toHaveLength(1);
     expect(input.yuanKeys).toEqual(['fact']);
+  });
+
+  it('六个关键节点全部投影，三视角与法条文本齐全', () => {
+    const { nodeGuides } = createEndingReview(state({ ending: 'middle' }));
+    expect(nodeGuides.map((node) => node.id)).toEqual(['N1', 'N2', 'N3', 'N4', 'N5', 'N6']);
+    for (const node of nodeGuides) {
+      expect(node.experienced).toBe(false);
+      expect(node.title).not.toBe('');
+      expect(node.lawRef).toContain('《');
+      expect(node.lawSummary).not.toBe('');
+      expect(node.perspectives.map((item) => item.key)).toEqual(['victim', 'bystander', 'perpetrator']);
+      for (const perspective of node.perspectives) {
+        expect(perspective.label).not.toBe('');
+        expect(perspective.text).not.toBe('');
+      }
+    }
+  });
+
+  it('experienced 只按日志真实到达的场景标记，不猜玩家选了什么', () => {
+    const input = state({ ending: 'best', log: [entry('D2', '第 1 轮：说明事实。'), entry('D6', '陪她说完。')] });
+    const { nodeGuides } = createEndingReview(input);
+    expect(nodeGuides.map((node) => node.experienced)).toEqual([false, false, false, false, true, true]);
+
+    const early = state({ ending: 'bystander', log: [entry('S14', '选择了玩笑。'), entry('C3', '说出了经过。')] });
+    expect(createEndingReview(early).nodeGuides.map((node) => node.experienced)).toEqual([true, true, true, false, false, false]);
+
+    // 只进入过 C4 时，N2 因关联场景而标记，其余仍为空。
+    const partial = state({ log: [entry('C4', '尊重她的决定。')] });
+    expect(createEndingReview(partial).nodeGuides.map((node) => node.experienced)).toEqual([false, true, false, false, false, false]);
+  });
+
+  it('追加 B/C：开场新闻在旁观结局后日谈与足迹重现，路上扶车进入 arrival 足迹', () => {
+    const bystander = createEndingReview(state({ ending: 'bystander', newsSeen: true, helpedPasserby: true }));
+    expect(bystander.epilogue.join('\n')).toContain('……跟我没关系。');
+    expect(bystander.epilogue.join('\n')).toContain('你曾经说过，这件事跟你没关系。');
+    expect(bystander.footprints.find((item) => item.id === 'arrival')?.lines).toEqual([
+      '清晨起床时看到早间新闻，你心想：“……跟我没关系。”',
+      '你曾经说过，这件事跟你没关系。',
+      '上学路上，你走过去帮忙扶起了摔倒的自行车。',
+    ]);
+
+    const best = createEndingReview(state({ ending: 'best', newsSeen: true }));
+    expect(best.footprints.find((item) => item.id === 'arrival')?.lines).toEqual([
+      '清晨起床时看到早间新闻，你心想：“……跟我没关系。”',
+    ]);
+  });
+
+  it('追加 D：最好结局送画前打断犹豫时，后日谈不声称收到画，画只留在草稿箱', () => {
+    const review = createEndingReview(state({
+      ending: 'best',
+      trust: 7,
+      log: [entry('E1', DRAWING_WITHDRAWN_LOG)],
+    }));
+    expect(review.cg.assetId).not.toBe('cg_ending_best_drawing');
+    expect(review.epilogue[1]).not.toMatch(/夹在笔记本|收到/);
+    expect(review.epilogue[1]).toContain('收回本子里');
+    expect(review.drafts[2]).toMatchObject({
+      id: 'draft-3',
+      unlocked: true,
+      assetId: 'cg_ending_best_drawing',
+    });
+  });
+
+  it('追加 E/F：draftReactions 按顺序去重并过滤敏感字样，finalAnswer 写入足迹和草稿箱最后一条', () => {
+    const review = createEndingReview(state({
+      ending: 'best',
+      trust: 5,
+      draftReactions: [
+        '那天，我看到有人点开了我的头像。',
+        '那天，我看到有人点开了我的头像。',
+        '我不知道是谁，但我猜得到。',
+        '你先问了我。谢谢。',
+        'harm=10',
+      ],
+      finalAnswer: 'tired',
+    }));
+    expect(review.drafts.map((draft) => draft.id)).toEqual([
+      'draft-1', 'draft-2', 'draft-3', 'draft-4',
+      'reaction-1', 'reaction-3', 'reaction-4', 'draft-final',
+    ]);
+    expect(review.drafts[4].text).toBe('那天，我看到有人点开了我的头像。');
+    expect(review.drafts[5].text).toBe('我不知道是谁，但我猜得到。');
+    expect(review.drafts[6].text).toBe('你先问了我。谢谢。');
+    expect(review.drafts[review.drafts.length - 1]).toMatchObject({
+      id: 'draft-final',
+      unlocked: true,
+    });
+    expect(review.drafts[review.drafts.length - 1].text).toContain('撑不住');
+    expect(review.footprints.find((item) => item.id === 'afterwards')?.lines).toContain(
+      '面对林夏最后的提问，你的回应：“你那天看起来很累。”',
+    );
+    expect(JSON.stringify(review)).not.toMatch(/harm|trust|yuanScore|伤害值|分数/);
   });
 });

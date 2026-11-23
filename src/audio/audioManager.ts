@@ -12,6 +12,8 @@ let audioUnlocked = false;
 let mutedCache: boolean | null = null;
 let noiseBuffer: AudioBuffer | null = null;
 let noiseBufferOwner: AudioContext | null = null;
+let lastMessagePopAt = Number.NEGATIVE_INFINITY;
+let lastMessagePopOwner: AudioContext | null = null;
 const footstepSources = new Map<string, { distance: number; rightFoot: boolean }>();
 
 function safeStorage(): Storage | null {
@@ -181,6 +183,54 @@ export function playUiClick(): void {
     const startAt = ctx.currentTime + 0.005;
     softBeep(ctx, startAt, 1046.5, 0.055, 0.022, 'sine');
     softBeep(ctx, startAt + 0.02, 1396.9, 0.045, 0.012, 'sine');
+  } catch {
+    // 静默降级
+  }
+}
+
+/**
+ * 新消息弹出提示音（用于拦截消息气泡小游戏与最差结局通知洪流）：
+ * intensity ∈ [0, 1] 越高，音高略微上扬、节奏更紧促并叠加轻微低频手机短震，增强压迫感。
+ * 内置 55ms 最小间隔节流，防止密集刷怪阶段多声叠加爆音。
+ */
+export function playMessagePop(intensity = 0): void {
+  const ctx = playbackContext();
+  if (!ctx) return;
+
+  try {
+    const now = ctx.currentTime;
+    if (lastMessagePopOwner === ctx && now - lastMessagePopAt < 0.055) return;
+    lastMessagePopOwner = ctx;
+    lastMessagePopAt = now;
+
+    const level = Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : 0;
+    const startAt = now + 0.005;
+    const baseFreq = 740 + level * 220;
+    const peakFreq = 1110 + level * 340;
+    const dur = 0.095 - level * 0.025;
+    const gain = 0.028 + level * 0.022;
+
+    // 第一拍：短促“啵/叮”弹出主音（带轻度音高微挑，贴近即时通讯弹窗感）
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(baseFreq, startAt);
+    osc.frequency.exponentialRampToValueAtTime(peakFreq, startAt + 0.028);
+    env.gain.setValueAtTime(0.0001, startAt);
+    env.gain.exponentialRampToValueAtTime(gain, startAt + 0.008);
+    env.gain.exponentialRampToValueAtTime(0.0001, startAt + dur);
+    osc.connect(env);
+    env.connect(ctx.destination);
+    osc.start(startAt);
+    osc.stop(startAt + dur + 0.02);
+
+    // 第二拍：柔和泛音回弹，形成熟悉的消息提示音双音节
+    softBeep(ctx, startAt + 0.032, peakFreq * 1.12, dur * 0.85, gain * 0.55, 'triangle');
+
+    // 高压阶段叠加微弱低频短震（模拟手机连续震动压迫感）
+    if (level >= 0.35) {
+      softBeep(ctx, startAt, 142 + level * 26, 0.055, 0.012 + level * 0.012, 'triangle');
+    }
   } catch {
     // 静默降级
   }

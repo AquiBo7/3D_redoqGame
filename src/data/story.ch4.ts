@@ -1,4 +1,15 @@
-import type { Condition, SceneDef, SceneId, StoryEffect } from './storySchema';
+import { DRAFT_REACTIONS } from './endingContent';
+import type { Condition, SceneDef, SceneId, SceneTrigger, StoryEffect } from './storySchema';
+
+const viewLinxiaAvatarTrigger: SceneTrigger = {
+  id: 'view-linxia-avatar',
+  event: 'ui:phoneAction',
+  action: 'reply',
+  effects: {
+    pushDraftReaction: DRAFT_REACTIONS.viewedAvatar,
+    log: { type: 'observe', summary: '点开了林夏的头像。' },
+  },
+};
 
 const hasProof: Condition = { any: [
   { key: 'evidence', equals: true },
@@ -28,7 +39,7 @@ export const chapter4Scenes: Partial<Record<SceneId, SceneDef>> = {
     onEnter: { set: {
       yuanKeys: [], yuanScore: 0, route: null, joined: false, postDeleted: false,
       phrase: null, stage1Tries: 0, crystalHits: 0, kills: 0, helpedByAyuan: false,
-      apologized: false, soloRepair: false, ending: null,
+      apologized: false, soloRepair: false, ending: null, finalAnswer: null,
     } },
     stageNotes: ['第三天放学后的侧楼梯平台。阿远握着橙色手机壳的手机，夕阳越过栏杆。'],
     steps: [
@@ -55,6 +66,9 @@ export const chapter4Scenes: Partial<Record<SceneId, SceneDef>> = {
       { kind: 'choice', id: 'd2-round-1', options: [
         { id: 'd2-r1-fact', text: '我知道。后来很多人转了，她的名字也被人翻出来了。', effects: { pushYuanKey: 'fact', add: { yuanScore: 1 } } },
         { id: 'd2-r1-empathy', text: '你发之前，有看到她后来是自己走的吗？', effects: { pushYuanKey: 'empathy', add: { yuanScore: 1 } } },
+        { id: 'd2-r1-law', text: '没写名字、随手发的，传成这样也算侵害名誉权了，现在停下来还来得及。',
+          effects: { pushYuanKey: 'fact', add: { yuanScore: 1 },
+            log: { type: 'choice', summary: '从事实与名誉权边界劝解阿远，提醒他现在停下来还来得及。' } } },
         { id: 'd2-r1-force', text: '我不想闹大，但老师那边已经有人在问了。', effects: breakdown, goto: 'd2-breakdown-caption' },
         { id: 'd2-r1-noise', text: '嗯，一张照片而已。', effects: { pushYuanKey: 'noise', add: { yuanScore: 0 } } },
       ] },
@@ -110,6 +124,7 @@ export const chapter4Scenes: Partial<Record<SceneId, SceneDef>> = {
         { speaker: 'ayuan', text: '我删了。别的，我不管了。' }, { speaker: null, text: '他收起手机，沿着楼梯走开。' },
       ] },
     ],
+    triggers: [viewLinxiaAvatarTrigger],
     transitions: [{ to: 'D4' }],
   },
   D4: {
@@ -140,6 +155,7 @@ export const chapter4Scenes: Partial<Record<SceneId, SceneDef>> = {
         { id: 'd4-solo-start', text: '至少，我能做的我先做。', effects: { set: { phrase: '至少，我能做的我先做。' } } },
       ] },
     ],
+    triggers: [viewLinxiaAvatarTrigger],
     transitions: [{ to: 'D5' }],
   },
   D5: {
@@ -160,11 +176,14 @@ export const chapter4Scenes: Partial<Record<SceneId, SceneDef>> = {
       { kind: 'wait', id: 'd6-approach', waitFor: { zoneId: 'corridor-linxia' } },
       { kind: 'dialogue', id: 'd6-apology', when: team, lines: [
         { speaker: 'ayuan', text: '对不起。我就是随手……' },
-        { speaker: null, text: '林夏沉默了一会儿。' }, { speaker: 'linxia', text: '……我需要时间。' },
+        { speaker: null, text: '林夏靠在窗边，眼圈还是红的，沉默了一会儿。' },
+        { speaker: 'linxia', emotion: 'cry', text: '……帖子删了，可别人截过的话还是收不回来。我现在听到手机震动就心慌……我需要时间。' },
       ] },
       { kind: 'choice', id: 'd6-team-response', when: team, options: [
         { id: 'd6-team-speak', text: '你想说什么就说。' },
         { id: 'd6-team-silent', text: '（不说话）' },
+        { id: 'd6-team-support', text: '后面要是还有人乱转，我陪你把录屏证据留好，一起找周老师或向平台投诉。',
+          effects: { log: { type: 'choice', summary: '告诉林夏，若再有转发会陪她留存证据并通过正规渠道处理。' } } },
       ] },
       { kind: 'system', id: 'd6-team-repair', when: team,
         effects: { set: { apologized: true, soloRepair: false, ending: 'best' }, add: { harm: -10 } } },
@@ -172,8 +191,12 @@ export const chapter4Scenes: Partial<Record<SceneId, SceneDef>> = {
         { id: 'd6-solo-deleted', text: '帖子已经删了。' },
         { id: 'd6-solo-tell-me', text: '之后如果有人再说什么，告诉我。' },
         { id: 'd6-solo-okay', text: '你还好吗？' },
+        { id: 'd6-solo-support', text: '后面要是还有人乱转，我陪你把录屏证据留好，一起找周老师或向平台投诉。',
+          effects: { log: { type: 'choice', summary: '告诉林夏，若再有转发会陪她留存证据并通过正规渠道处理。' } } },
       ] },
-      { kind: 'dialogue', id: 'd6-solo-answer', when: deleteOnly, lines: [{ speaker: 'linxia', text: '嗯。' }] },
+      { kind: 'dialogue', id: 'd6-solo-answer', when: deleteOnly, lines: [
+        { speaker: 'linxia', emotion: 'sad', text: '嗯。谢谢你帮我跑这一趟……只是，好像还是有点怕明天走进教室。' },
+      ] },
       { kind: 'system', id: 'd6-solo-repair', when: deleteOnly,
         effects: { set: { soloRepair: true, apologized: false, ending: 'middle' } } },
       { kind: 'intertitle', id: 'd6-one-month-later', lines: ['一个月后'], lineDurationMs: 2000 },

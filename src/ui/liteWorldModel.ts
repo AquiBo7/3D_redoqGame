@@ -49,15 +49,19 @@ const ZONE_LABELS: Record<string, { label: string; hint: string }> = {
 const INTERACT_LABELS: Record<string, { label: string; hint: string }> = {
   'window-three': { label: '在三号窗口打饭', hint: '端起餐盘' },
   phone: { label: '拿起枕边手机', hint: '看看几点了' },
-  'culture-shirt': { label: '带上文化衫', hint: '椅背上的新生文化衫' },
+  'culture-shirt': { label: '带上文化衫', hint: '衣柜里的新生文化衫' },
   'document-bag': { label: '拿上证件袋', hint: '桌上的证件袋' },
   'medicine-bag': { label: '看看掉在地上的药袋', hint: '林夏掏学生证时掉出来的' },
+  'help-passerby': { label: '走过去帮忙扶起自行车', hint: '路边有人摔了自行车，周围都在拍' },
 };
 
 const HOTSPOT_LABELS: Record<string, { label: string; hint: string }> = {
   window: { label: '看向窗外', hint: '窗帘缝里透进来的光' },
-  'culture-shirt': { label: '看看椅背上的文化衫', hint: '还没拆封的新生文化衫' },
-  suitcase: { label: '看看床边的行李箱', hint: '昨晚回来就没再打开' },
+  'culture-shirt': { label: '看看衣柜里的文化衫', hint: '还没拆封的新生文化衫' },
+  suitcase: { label: '看看门边的行李箱', hint: '昨晚回来就没再打开' },
+  'convenience-scroller': { label: '看看便利店门口刷手机的路人', hint: '他手指随手一划点了转发' },
+  'father-suitcase': { label: '看看路边拎箱子的父子', hint: '爸爸还是帮孩子提着行李箱' },
+  'fallen-bicycle': { label: '看看路边摔倒的自行车', hint: '四五个人举着手机，没人上前' },
   'father-bags': { label: '看看爸爸手里的袋子', hint: '两个大袋子垂在身侧' },
   'handoff-moment': { label: '留意他放下她的那一刻', hint: '他把袋子换到了另一只手' },
   typer: { label: '看看台阶旁低头打字的男生', hint: '手机屏幕的光映在脸上' },

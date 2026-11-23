@@ -69,7 +69,7 @@ describe('第三章剧本与交互合同', () => {
   it('C1–C6 场景类型、步骤和本地跳转完整', () => {
     expect(Object.keys(chapter3Scenes)).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6']);
     for (const scene of Object.values(chapter3Scenes)) {
-      expect(scene.sceneKey).toBe(['C1', 'C3'].includes(scene.id) ? 'stage2d' : 'interior');
+      expect(scene.sceneKey).toBe(scene.id === 'C1' ? 'stage2d' : 'interior');
       const ids = scene.steps.map((step) => step.id);
       expect(new Set(ids).size).toBe(ids.length);
       for (const step of scene.steps) {
@@ -103,6 +103,9 @@ describe('第三章剧本与交互合同', () => {
     h.readThrough();
     h.machine.onInteract('C2', `seat-${seat}`);
     expect(h.machine.getState()).toMatchObject({ seat, trust: seat === 'beside' ? 1 : 0, phoneIgnored: seat === 'far' ? 1 : 0 });
+    expect(h.current()?.id).toBe('c3-find-office');
+    h.machine.onInteract('C3', 'teacher-office-door');
+    h.readThrough();
     expect(h.current()?.id).toBe('c3-response');
   });
 
@@ -123,6 +126,8 @@ describe('第三章剧本与交互合同', () => {
           const h = harness('C2');
           h.readThrough();
           h.choose('c2-seat', `seat-${seat}`);
+          h.machine.onInteract('C3', 'teacher-office-door');
+          h.readThrough();
           h.choose('c3-response', { told: 'c3-told', ask_her: 'c3-ask-her', think: 'c3-think' }[tellTeacher]);
           const eligible = seat === 'far' && tellTeacher === 'think';
           if (eligible) {
@@ -151,6 +156,7 @@ describe('第三章剧本与交互合同', () => {
     expect(h.current()?.id).toBe('c4-father-call');
     expect(h.machine.getState()).toMatchObject({ visitedStairwell: true, fatherKnows: false, askedAboutFather: false });
     h.readThrough();
+    h.choose('c4-comfort', 'c4-comfort-tissue');
     h.choose('c4-father-question', question);
     expect(h.machine.getState()).toMatchObject({ askedAboutFather: true, fatherKnows: false });
   });
@@ -163,6 +169,7 @@ describe('第三章剧本与交互合同', () => {
         const h = harness('C4', { picked, evidence });
         h.machine.onEnterZone('C4', 'stairwell-corner');
         h.readThrough();
+        h.choose('c4-comfort', 'c4-comfort-stay');
         h.choose('c4-father-question', 'c4-father-knows');
         h.machine.onChooseOption('c4-response', response);
         const shouldConsent = picked && !evidence && response !== 'c4-insist';
@@ -175,7 +182,7 @@ describe('第三章剧本与交互合同', () => {
           expect(h.machine.getState().evidence).toBe(false);
         }
         h.readThrough();
-        expect(h.machine.getState()).toMatchObject({ trust, evidence: evidence || shouldConsent, fatherKnows: false });
+        expect(h.machine.getState()).toMatchObject({ trust: trust + 1, evidence: evidence || shouldConsent, fatherKnows: false });
         expect(h.dialogues.some((event) => event.stepId === 'c4-evidence-consent')).toBe(shouldConsent);
         expect(h.dialogues.some((event) => event.stepId === 'c4-insist-reply')).toBe(response === 'c4-insist');
         expect(h.current()?.id).toBe('c5-find-path');
@@ -285,5 +292,26 @@ describe('第三章剧本与交互合同', () => {
     expect(h.machine.getSceneId()).toBe('C6');
     h.machine.onDialogueEnd('c6-orange-phone');
     expect(h.machine.getSceneId()).toBe('D1');
+  });
+
+  it('追加 F：C1 转给室友、点开林夏头像与 C4 先征得同意留证会记入 draftReactions', () => {
+    const h1 = harness('C1', { addedHer: true });
+    h1.machine.onDialogueEnd('c1-morning');
+    expect(h1.current()?.kind).toBe('phone');
+    h1.machine.onPhoneAction('c1-post', 'reply', 'c1-forward-roommate');
+    h1.machine.onPhoneAction('c1-post', 'reply', 'view-linxia-avatar');
+    h1.machine.onPhoneAction('c1-post', 'reply', 'view-linxia-avatar');
+    expect(h1.machine.getState().draftReactions).toEqual([
+      '我不知道是谁，但我猜得到。',
+      '那天，我看到有人点开了我的头像。',
+    ]);
+
+    const h2 = harness('C4', { picked: true, evidence: false });
+    h2.machine.onEnterZone('C4', 'stairwell-corner');
+    h2.readThrough();
+    h2.choose('c4-comfort', 'c4-comfort-stay');
+    h2.choose('c4-father-question', 'c4-father-knows');
+    h2.choose('c4-response', 'c4-respect');
+    expect(h2.machine.getState().draftReactions).toContain('你先问了我。谢谢。');
   });
 });

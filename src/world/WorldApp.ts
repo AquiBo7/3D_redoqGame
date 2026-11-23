@@ -10,6 +10,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { gsap } from 'gsap';
 import { sampleGroundHeight } from './navMath';
+import { getQualityTier } from './quality';
 import type { EventBus } from '../core/eventBus';
 import { eventBus as defaultEventBus } from '../core/eventBus';
 import type { SceneId, SceneKey } from '../data/storySchema';
@@ -48,8 +49,8 @@ const PORTRAIT_MAX_FOV = 90;
 const MOBILE_PIXEL_RATIO = 1.5;
 /** 核显桌面端像素比上限（兼顾清晰度与填充率） */
 const INTEGRATED_GPU_PIXEL_RATIO = 1.25;
-/** 独显桌面端像素比上限 */
-const DESKTOP_PIXEL_RATIO = 2;
+/** 独显桌面端像素比上限（兼顾清晰度与帧率，避免 2x 高分屏填充率过载卡顿） */
+const DESKTOP_PIXEL_RATIO = 1.5;
 /** 核显 / 移动端低功耗 GPU 特征匹配（用于关闭离屏 MSAA 与收紧像素比） */
 const INTEGRATED_GPU_PATTERN = /Radeon\(TM\)\s*610M|Radeon\s*\d{3}M|Intel.*(UHD|Iris|HD Graphics)|Mali|Adreno/i;
 /** 切图黑幕淡出 / 淡入时长（秒） */
@@ -98,6 +99,22 @@ const DAWN_ATMOSPHERE = {
   fog: new THREE.Color(0xe3c6ba),
 };
 const SKY_COLOR_UNIFORMS = ['uZenith', 'uMid', 'uCloud', 'uCloudHighlight', 'uSunHighlight'] as const;
+/** ?night=1 的夜色：天穹压成深蓝灰、地平线留一点冷青，太阳与环境光让位给路灯 */
+const NIGHT_ATMOSPHERE = {
+  uZenith: new THREE.Color(0x0b1226),
+  uMid: new THREE.Color(0x131d33),
+  uHorizon: new THREE.Color(0x25324b),
+  uCloud: new THREE.Color(0.1, 0.13, 0.19),
+  uCloudHighlight: new THREE.Color(0.16, 0.19, 0.25),
+  uSunHighlight: new THREE.Color(0.22, 0.24, 0.3),
+  sun: new THREE.Color(0x8ea6cc),
+  fog: new THREE.Color(0x141d2e),
+};
+const NIGHT_SUN_INTENSITY = 0.24;
+const NIGHT_HEMISPHERE_INTENSITY = 0.2;
+const NIGHT_ENVIRONMENT_INTENSITY = 0.16;
+/** 夜里稍微抬一点曝光，暖光斑与冷夜色才有对比，白墙也不会糊成一片灰 */
+const NIGHT_TONE_EXPOSURE = 1.08;
 const HAZE_TINT = new THREE.Color(0x91b3c2);
 const DEFAULT_DUST = new THREE.Color(0xffdfad);
 const DEFAULT_LEAF = new THREE.Color(0xa6ad79);
@@ -107,6 +124,9 @@ const DAWN_PARTICLE_COLORS = [
   new THREE.Color(0xc5d99c),
 ];
 const SUN_DIRECTION = new THREE.Vector3(-11, 6.5, 9).normalize();
+// 阴影贴图的两轴（与 three 的 lookAt 基一致），用于把跟随量按纹素对齐
+const SUN_SHADOW_RIGHT = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), SUN_DIRECTION).normalize();
+const SUN_SHADOW_UP = new THREE.Vector3().crossVectors(SUN_DIRECTION, SUN_SHADOW_RIGHT).normalize();
 
 export function smoothAtmosphereProgress(progress: number): number {
   const t = Number.isNaN(progress) ? 0 : Math.max(0, Math.min(1, progress));
@@ -192,6 +212,8 @@ export interface WorldAppOptions {
   bus?: EventBus;
   sceneId?: SceneId;
   debug?: boolean;
+  /** ?night=1：夜色氛围（太阳 / 环境光让位给场景自发光体，街道等室外场景由路灯照明） */
+  night?: boolean;
 }
 
 function disposeObjectTree(root: THREE.Object3D): void {
@@ -227,6 +249,9 @@ export class WorldApp {
   private readonly skyDome: THREE.Mesh;
   private readonly skyMaterial: THREE.ShaderMaterial;
   private readonly sun = new THREE.DirectionalLight(0xffd29b, 2.05);
+  /** 夜色开关要同时改半球光，故把建光时的那盏留成字段 */
+  private hemisphereLight: THREE.HemisphereLight | null = null;
+  private readonly nightMode: boolean;
   private readonly baseHaze = new THREE.Color(DEFAULT_HAZE_COLOR);
   private readonly atmosphereHaze = new THREE.Color();
   private readonly atmosphereHorizon = new THREE.Color();
@@ -275,12 +300,15 @@ export class WorldApp {
   private lastFrameTime = 0;
   private readonly motionPositions = new Map<string, THREE.Vector3>();
   private readonly scratchWorldPos = new THREE.Vector3();
+  private readonly scratchShadowFocus = new THREE.Vector3();
+  private readonly scratchShadowAnchor = new THREE.Vector3();
 
   constructor(container: HTMLElement, options: WorldAppOptions = {}) {
     const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
     this.pureTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     this.bus = options.bus ?? defaultEventBus;
     this.currentSceneId = options.sceneId ?? 'S1';
+    this.nightMode = options.night ?? false;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.integratedGpu = this.detectIntegratedGpu();
@@ -344,6 +372,7 @@ export class WorldApp {
       hud: this.hud,
       getSceneId: () => this.currentSceneId,
       isInputEnabled: () => this.controller.isEnabled(),
+      getFeetY: () => this.controller.getFeetPosition().y,
       debug: options.debug ?? false,
     });
 
@@ -418,10 +447,40 @@ export class WorldApp {
       (window as unknown as Record<string, unknown>).__worldApp = {
         getSceneId: () => this.currentSceneId,
         getPlayerPosition: () => ({ feet: this.controller.getFeetPosition(), camera: this.camera.position.toArray(), direction: this.camera.getWorldDirection(new THREE.Vector3()).toArray(), enabled: this.controller.isEnabled() }),
+        /**
+         * 美术验收三件套。renderer.info.render 在后期合成的最后一个全屏 pass 会被重置成 1，
+         * 所以 draw call 用场景遍历统计"可见可绘制对象数"（不含量子化的阴影 pass），三角面按实例数累加。
+         */
+        getRenderInfo: () => {
+          let drawables = 0;
+          let instances = 0;
+          let triangles = 0;
+          this.scene.traverse((object) => {
+            if (!(object instanceof THREE.Mesh || object instanceof THREE.Points || object instanceof THREE.Sprite)) return;
+            if (!object.visible) return;
+            drawables += 1;
+            if (!(object instanceof THREE.Mesh)) return;
+            const geometry = object.geometry;
+            const count = geometry.index ? geometry.index.count : geometry.getAttribute('position').count;
+            const instanceCount = (object as THREE.InstancedMesh).isInstancedMesh
+              ? (object as THREE.InstancedMesh).count
+              : 1;
+            instances += instanceCount;
+            triangles += (count / 3) * instanceCount;
+          });
+          return {
+            drawables,
+            instances,
+            triangles: Math.round(triangles),
+            textures: this.renderer.info.memory.textures,
+            geometries: this.renderer.info.memory.geometries,
+            pixelRatio: this.renderer.getPixelRatio(),
+          };
+        },
         getAirParticles: () => this.airParticles,
-        /** 传送并设定视角（yawDeg=0 面向 -Z，180 面向 +Z） */
-        teleport: (x: number, z: number, yawDeg = 0) => {
-          this.controller.setSpawn({ x, z, yaw: (yawDeg * Math.PI) / 180 });
+        /** 传送并设定视角（yawDeg=0 面向 -Z，180 面向 +Z；pitchDeg 缺省沿用控制器初始值） */
+        teleport: (x: number, z: number, yawDeg = 0, pitchDeg?: number) => {
+          this.controller.setSpawn({ x, z, yaw: (yawDeg * Math.PI) / 180, pitchDeg });
         },
         hasModel: (id: string) => hasCharacterModel(id as CharacterModelId),
         // 无头回归脚本：按当前场景发出与交互系统相同的事件，避免依赖 3D 瞄准
@@ -435,6 +494,32 @@ export class WorldApp {
         getActorPosition: (name: string) => {
           const actor = this.actors[name];
           return actor ? [actor.position.x, actor.position.y, actor.position.z] : null;
+        },
+        /** 无头回归：读取演员某根骨骼的世界位置（判走路剪辑里有没有夹带根位移） */
+        getActorBonePosition: (name: string, boneName: string) => {
+          const bone = this.actors[name]?.getObjectByName(boneName);
+          if (!bone) return null;
+          const world = bone.getWorldPosition(new THREE.Vector3());
+          return [world.x, world.y, world.z];
+        },
+        /** 美术验收：角色手持道具的世界坐标，和 getActorBonePosition 对比即可判断掌心有没有真的落在机身上 */
+        getActorPropPosition: (name: string) => {
+          const propsRoot = this.actors[name]?.getObjectByName('actor-props');
+          const prop = propsRoot?.children[0];
+          if (!propsRoot || !prop || !prop.visible || !propsRoot.visible) return null;
+          const world = prop.getWorldPosition(new THREE.Vector3());
+          return [world.x, world.y, world.z];
+        },
+        /** 美术验收：按名字取对象的世界包围盒，用来量道具有没有穿进身体（只读，不影响剧情） */
+        getWorldBox: (objectName: string) => {
+          let target: THREE.Object3D | null = null;
+          this.scene.traverse((object) => {
+            if (target === null && object.name === objectName) target = object;
+          });
+          if (target === null) return null;
+          const box = new THREE.Box3().setFromObject(target as THREE.Object3D);
+          if (box.isEmpty()) return null;
+          return [box.min.toArray(), box.max.toArray()];
         },
         /** 美术验收：天空跟随 / IBL / 接触阴影挂载情况（只读，不影响剧情） */
         getVisualDiagnostics: () => {
@@ -602,6 +687,7 @@ export class WorldApp {
 
     this.currentRuntime = getSceneRuntime(sceneId);
     this.currentRuntime?.enter(this.createRuntimeContext(sceneId));
+    this.currentRuntime?.setNight?.(this.nightMode);
     this.applyInteractionOptions();
     if (sceneId === 'S4') this.bus.emit('ui:showObjective', { sceneId });
     this.syncHudHints();
@@ -684,6 +770,7 @@ export class WorldApp {
       this.currentRuntime = getSceneRuntime(payload.toSceneId);
       // 共享 runtime 按 sceneId 自行判断是否重启演出（如 gate 只在 S5 播放）
       this.currentRuntime?.enter(this.createRuntimeContext(payload.toSceneId));
+      this.currentRuntime?.setNight?.(this.nightMode);
       this.applyInteractionOptions();
       this.syncHudHints();
       return;
@@ -769,14 +856,15 @@ export class WorldApp {
 
   private setupPostprocessing(): void {
     if (this.pureTouch || window.matchMedia('(pointer: coarse)').matches) return;
+    // 仅高画质且非核显设备开启全屏 Bloom 后处理，其余设备走原生渲染以保证流畅帧率
+    if (this.integratedGpu || getQualityTier() !== 'high') return;
 
-    const samples = this.integratedGpu ? 0 : Math.min(2, this.renderer.capabilities.maxSamples);
     const target = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.HalfFloatType,
       format: THREE.RGBAFormat,
       colorSpace: THREE.LinearSRGBColorSpace,
       depthBuffer: true,
-      samples,
+      samples: 0,
     });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -988,6 +1076,23 @@ export class WorldApp {
       this.atmosphereHorizon.lerpColors(COOL_ATMOSPHERE.uHorizon, DAWN_ATMOSPHERE.uHorizon, blend);
       this.sun.color.lerpColors(COOL_ATMOSPHERE.sun, DAWN_ATMOSPHERE.sun, blend);
     }
+    if (this.nightMode) {
+      // 夜色只改光照与天空，不动场景材质：白天分支的取值与顺序保持原样
+      for (const key of SKY_COLOR_UNIFORMS) {
+        (this.skyMaterial.uniforms[key].value as THREE.Color).copy(NIGHT_ATMOSPHERE[key]);
+      }
+      this.atmosphereHaze.copy(NIGHT_ATMOSPHERE.fog);
+      this.atmosphereHorizon.copy(NIGHT_ATMOSPHERE.uHorizon);
+      this.sun.color.copy(NIGHT_ATMOSPHERE.sun);
+      this.sun.intensity = NIGHT_SUN_INTENSITY;
+      if (this.hemisphereLight) {
+        this.hemisphereLight.color.setHex(0x35496f);
+        this.hemisphereLight.groundColor.setHex(0x121a2b);
+        this.hemisphereLight.intensity = NIGHT_HEMISPHERE_INTENSITY;
+      }
+      this.scene.environmentIntensity = NIGHT_ENVIRONMENT_INTENSITY;
+      this.renderer.toneMappingExposure = NIGHT_TONE_EXPOSURE;
+    }
     this.scene.fog?.color.copy(this.atmosphereHaze);
     this.updateSkyHaze(this.atmosphereHaze, this.atmosphereHorizon);
     this.airParticleShape.value = building ? smoothAtmosphereProgress((this.atmosphereProgress - 0.5) * 2) : 0;
@@ -1062,24 +1167,50 @@ export class WorldApp {
   /** 低角度暖金晨阳 + 冷青蓝环境补光，拉长楼影并保留阴影层次 */
   private buildLights(): void {
     const hemisphere = new THREE.HemisphereLight(0xa9cada, 0x586e68, 0.46);
+    this.hemisphereLight = hemisphere;
     this.scene.add(hemisphere);
 
     const sun = this.sun;
+    const tier = getQualityTier();
     sun.position.copy(SUN_DIRECTION).multiplyScalar(16);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    // 低档不做实时投影（只保留接触阴影贴片），中档维持原尺寸，高档收紧视锥并加倍贴图
+    sun.castShadow = tier !== 'low';
+    const mapSize = tier === 'high' ? 2048 : 1024;
+    const extent = tier === 'high' ? 9 : 11.5;
+    sun.shadow.mapSize.set(mapSize, mapSize);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 40;
-    // 收紧平行光阴影投影包围盒至核心活动视区（±11.5m），提高阴影像素利用率并减少边缘开销
-    sun.shadow.camera.left = -11.5;
-    sun.shadow.camera.right = 11.5;
-    sun.shadow.camera.top = 11.5;
-    sun.shadow.camera.bottom = -11.5;
+    // 视锥以玩家为中心逐帧平移（updateSunShadowAnchor），半径只需覆盖近景；
+    // 固定在原点的 ±11.5 m 让街道两端各 18 m 完全没有投影，是"物件没落地"的主因
+    sun.shadow.camera.left = -extent;
+    sun.shadow.camera.right = extent;
+    sun.shadow.camera.top = extent;
+    sun.shadow.camera.bottom = -extent;
+    // r187 的 LightShadow.updateMatrices 不再重算正交投影矩阵：不调这一步，±11.5 的配置不会生效，
+    // 射程仍是构造函数的默认 ±5 m（这正是街道两端没有投影的真实原因）
+    sun.shadow.camera.updateProjectionMatrix();
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
     sun.shadow.radius = 3;
     this.scene.add(sun);
     this.scene.add(sun.target);
+  }
+
+  /** 阴影包围盒跟随玩家，并把落点按阴影纹素尺寸取整——不平滑的话影子边缘每帧亚纹素漂移，高频抖动 */
+  private updateSunShadowAnchor(): void {
+    const sun = this.sun;
+    if (!sun.castShadow) return;
+    const extent = Math.max(Math.abs(sun.shadow.camera.right), 0.001);
+    const texel = (extent * 2) / sun.shadow.mapSize.x;
+    const focus = this.scratchShadowFocus.set(this.camera.position.x, 0, this.camera.position.z);
+    const u = Math.round(focus.dot(SUN_SHADOW_RIGHT) / texel) * texel;
+    const v = Math.round(focus.dot(SUN_SHADOW_UP) / texel) * texel;
+    const anchor = this.scratchShadowAnchor
+      .copy(SUN_SHADOW_RIGHT)
+      .multiplyScalar(u)
+      .addScaledVector(SUN_SHADOW_UP, v);
+    sun.target.position.copy(anchor);
+    sun.position.copy(anchor).addScaledVector(SUN_DIRECTION, 16);
   }
 
   /** 竖屏时按“保持水平视野”反推垂直 FOV 并设上限，横屏固定 62° */
@@ -1152,6 +1283,7 @@ export class WorldApp {
     this.currentRuntime?.tick?.(dt);
     this.updateMotionAudio(dt);
     this.skyDome.position.copy(this.camera.position);
+    this.updateSunShadowAnchor();
     this.skyMaterial.uniforms.uTime.value += dt;
     this.updateAirParticles(dt);
     if (this.composer) this.composer.render(dt);

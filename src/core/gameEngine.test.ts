@@ -38,6 +38,7 @@ function makeParams(overrides: Partial<UrlParams> = {}): UrlParams {
     lite: false,
     modelViewer: false,
     phonePreview: false,
+    night: false,
     role: 'bystander' as Role,
     scene: null as SceneId | null,
     ...overrides,
@@ -284,6 +285,8 @@ describe('GameEngine URL 直达与隔离调试', () => {
     bus.emit('ui:dialogueEnd', { stepId: 's14-joke-blackout' });
     expect(chapterEnds).toEqual([]);
     bus.emit('ui:dialogueEnd', { stepId: 'e1-joined-close' });
+    expect(chapterEnds).toEqual([]);
+    bus.emit('ui:momentEnd', { stepId: 'e1-joined-rewind' });
     expect(chapterEnds).toEqual(['E1']);
     expect(loadChapterSave(storage)).toMatchObject({
       sceneId: 'E1', completed: true, state: { canteenSeen: 3, postChoice: 'joke', ending: 'joined' },

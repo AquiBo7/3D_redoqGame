@@ -7,10 +7,10 @@ import { describe, expect, it } from 'vitest';
 import { CHARACTER_MODELS, getCharacterModel } from './modelManifest';
 
 describe('CHARACTER_MODELS 清单', () => {
-  it('包含 5 位主角模型与 3 份新动画资源，id 不重复', () => {
-    expect(CHARACTER_MODELS).toHaveLength(8);
+  it('包含 5 位主角模型与 8 份动画角色资源，id 不重复', () => {
+    expect(CHARACTER_MODELS).toHaveLength(13);
     const ids = CHARACTER_MODELS.map((entry) => entry.id);
-    expect(new Set(ids).size).toBe(8);
+    expect(new Set(ids).size).toBe(13);
   });
 
   it('所有模型路径以 ./models/ 开头且为 .glb（禁止写死根路径）', () => {

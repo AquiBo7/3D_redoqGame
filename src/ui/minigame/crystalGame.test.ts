@@ -102,8 +102,6 @@ describe('水晶固定步长模型', () => {
     m.enemies = [enemy('small', 2, 1, 0.9)];
     expect(attackCrystal(m)).toBeNull();
     m.enemies[0].distance = 0.5; m.player = 0;
-    expect(attackCrystal(m)).toBeNull();
-    m.player = 0.4;
     expect(attackCrystal(m)?.id).toBe(2);
   });
 

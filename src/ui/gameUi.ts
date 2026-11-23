@@ -1,7 +1,7 @@
 // ui/gameUi.ts —— 2D 界面总装配
 // 只订阅 core 事件并渲染；所有交互通过事件总线回传，阻塞式界面交由 uiLock 统一锁定控制器。
 
-import { playPhoneChime, playUiClick } from '../audio/audioManager';
+import { playMessagePop, playPhoneChime, playUiClick } from '../audio/audioManager';
 import type { EventBus } from '../core/eventBus';
 import { eventBus as defaultEventBus } from '../core/eventBus';
 import type { SpeakerId } from '../data/storySchema';
@@ -10,6 +10,7 @@ import { initObjectivePrompt } from './objectivePrompt';
 import { ChoicesPanel } from './choicesPanel';
 import { DialogueBox } from './dialogueBox';
 import { IntertitleView } from './intertitle';
+import { MomentView } from './momentView';
 import { Stage2D, ArtView } from './stage2d';
 import { initVignette } from './vignette';
 import { PhonePanelView } from './phonePanel';
@@ -56,6 +57,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   let minigame: { show(): void; dispose(): void } | null = null;
   let minigameGeneration = 0;
   let intertitleBlockerId: string | null = null;
+  let momentBlockerId: string | null = null;
   let phoneBlockerId: string | null = null;
   let dialogueBlockerId: string | null = null;
   let choicesBlockerId: string | null = null;
@@ -78,6 +80,11 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     bus.emit('ui:dialogueEnd', { stepId });
   });
 
+  const moment = new MomentView(modalLayer, (stepId, outcome) => {
+    closeMoment();
+    bus.emit('ui:momentEnd', { stepId, outcome });
+  }, (intensity) => playMessagePop(intensity));
+
   const dialogue = new DialogueBox({
     container: root,
     portraits: options.speakerPortraits,
@@ -89,6 +96,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   });
 
   const choices = new ChoicesPanel(root, {
+    isWorldActive: () => options.getControls() !== null,
     onChoose: (stepId, choiceId) => {
       playUiClick();
       releaseChoicesLock();
@@ -101,7 +109,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     container: root,
     onInnerEnd: (stepId) => {
       bus.emit('ui:dialogueEnd', { stepId });
-      if (stepId === 's1-caption') bus.emit('ui:showObjective', { sceneId: 'S1' });
+      if (stepId === 's1-news-thought-2') bus.emit('ui:showObjective', { sceneId: 'S1' });
     },
   });
 
@@ -163,6 +171,12 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     intertitleBlockerId = null;
   }
 
+  function closeMoment(): void {
+    moment.hide();
+    if (momentBlockerId) lock.release(momentBlockerId);
+    momentBlockerId = null;
+  }
+
   function closePhone(): void {
     phone.hide();
     releasePhoneLock();
@@ -188,6 +202,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
   function cleanupAll(): void {
     closeMinigame();
     closeIntertitle();
+    closeMoment();
     closePhone();
     closeDialogue();
     closeChoices();
@@ -214,7 +229,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
         minigame = new BubbleGame(root, (result) => {
           closeMinigame();
           bus.emit('ui:minigameEnd', { stepId, ...result });
-        });
+        }, { onSpawn: (intensity) => playMessagePop(intensity) });
         minigame.show();
       } else {
         const { CrystalGame } = await import('./minigame/crystalGame');
@@ -222,7 +237,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
         minigame = new CrystalGame(root, (result) => {
           closeMinigame();
           bus.emit('ui:minigameEnd', { stepId, ...result });
-        }, { joined, tries });
+        }, { joined, tries, onSpawn: (intensity) => playMessagePop(intensity) });
         minigame.show();
       }
     }),
@@ -234,9 +249,17 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       intertitle.show(payload);
     }),
 
+    bus.on('ui:showMoment', (payload) => {
+      cleanupAll();
+      momentBlockerId = `moment:${payload.stepId}`;
+      lock.acquire(momentBlockerId);
+      moment.show(payload);
+    }),
+
     bus.on('ui:showPhone', ({ stepId, panel }) => {
       closeMinigame();
       closeIntertitle();
+      closeMoment();
       closePhone();
       closeDialogue();
       closeChoices();
@@ -254,6 +277,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     bus.on('ui:showDialogue', (payload) => {
       closeMinigame();
       closeIntertitle();
+      closeMoment();
       closePhone();
       closeChoices();
       closeDialogue();
@@ -266,6 +290,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
     bus.on('ui:showChoices', (payload) => {
       closeMinigame();
       closeIntertitle();
+      closeMoment();
       closePhone();
       closeDialogue();
       closeChoices();
@@ -290,7 +315,9 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
 
     bus.on('scene:transition', ({ toSceneId }) => {
       cleanupAll();
-      if (toSceneId === 'S3') bus.emit('ui:showObjective', { sceneId: 'S3' });
+      if (['S3', 'S12', 'C2', 'C3', 'C4', 'C5', 'C6', 'D1', 'D6'].includes(toSceneId)) {
+        bus.emit('ui:showObjective', { sceneId: toSceneId });
+      }
     }),
 
     bus.on('game:chapterEnd', () => {
@@ -315,6 +342,7 @@ export function initGameUi(options: GameUiOptions): GameUiHandle {
       lock.sync();
       lock.dispose();
       intertitle.dispose();
+      moment.dispose();
       art.dispose();
       stage.dispose();
       disposeVignette();

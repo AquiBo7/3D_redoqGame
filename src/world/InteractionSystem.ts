@@ -6,10 +6,10 @@ import type { EventBus } from '../core/eventBus';
 import type { SceneId } from '../data/storySchema';
 import { angleBetweenDeg, GazeDwellTracker } from './gazeTracker';
 import type { GazeUpdateResult } from './gazeTracker';
-import { INTERACTION_CONFIG } from './worldConfig';
+import { FIRST_PERSON_CONFIG, INTERACTION_CONFIG } from './worldConfig';
 import type { InteractionConfig } from './worldConfig';
-import { isPointInZone } from './navMath';
-import type { Vec2, ZoneShape } from './navMath';
+import { isPlayerInZone } from './navMath';
+import type { PlayerProbe, ZoneShape } from './navMath';
 import { computeGuidePlacement } from './screenMath';
 import type {
   HotspotConfig,
@@ -50,6 +50,11 @@ export interface InteractionSystemOptions {
   getSceneId: () => SceneId;
   /** 与 controller.isEnabled() 联动；为 false 时暂停瞄准、注视与交互 */
   isInputEnabled: () => boolean;
+  /**
+   * 玩家脚底高度（米），用于触发区的垂直判定。
+   * 缺省按相机高度减去视线高度推算；多层场景应接入控制器的真实脚底高度。
+   */
+  getFeetY?: () => number;
   config?: InteractionConfig;
   debug?: boolean;
 }
@@ -122,6 +127,7 @@ export class InteractionSystem {
   private readonly hud: InteractionHudBridge;
   private readonly getSceneId: () => SceneId;
   private readonly isInputEnabled: () => boolean;
+  private readonly getFeetY: () => number;
   private readonly config: InteractionConfig;
   private readonly debug: boolean;
 
@@ -157,6 +163,7 @@ export class InteractionSystem {
     this.hud = options.hud;
     this.getSceneId = options.getSceneId;
     this.isInputEnabled = options.isInputEnabled;
+    this.getFeetY = options.getFeetY ?? (() => this.camera.position.y - FIRST_PERSON_CONFIG.eyeHeight);
     this.config = options.config ?? INTERACTION_CONFIG;
     this.debug = options.debug ?? false;
 
@@ -234,7 +241,6 @@ export class InteractionSystem {
       });
     }
 
-    const playerPosition: Vec2 = { x: this.camera.position.x, z: this.camera.position.z };
     for (const config of input.zones ?? []) {
       const shape = this.createZoneShape(config);
       this.zones.push({
@@ -242,7 +248,7 @@ export class InteractionSystem {
         shape,
         once: config.once ?? true,
         firedOnce: false,
-        wasInside: isPointInZone(playerPosition, shape),
+        wasInside: isPlayerInZone(this.playerProbe(), shape),
       });
     }
 
@@ -261,6 +267,7 @@ export class InteractionSystem {
         centerX: config.center.x,
         centerZ: config.center.z,
         radius: config.radius,
+        centerY: config.center.y,
       };
     }
     return {
@@ -269,6 +276,8 @@ export class InteractionSystem {
       centerZ: config.center.z,
       halfX: config.size.x / 2,
       halfZ: config.size.z / 2,
+      centerY: config.center.y,
+      halfY: config.size.y / 2,
     };
   }
 
@@ -405,11 +414,16 @@ export class InteractionSystem {
     return undefined;
   }
 
+  /** 触发区判定探针：XZ 取相机位置，垂直取玩家脚底 */
+  private playerProbe(): PlayerProbe {
+    return { x: this.camera.position.x, z: this.camera.position.z, feetY: this.getFeetY() };
+  }
+
   private updateZones(): void {
-    const position: Vec2 = { x: this.camera.position.x, z: this.camera.position.z };
+    const player = this.playerProbe();
 
     for (const zone of this.zones) {
-      const inside = isPointInZone(position, zone.shape);
+      const inside = isPlayerInZone(player, zone.shape);
       if (inside && !zone.wasInside) {
         if (!(zone.once && zone.firedOnce)) {
           this.emitZone(zone.config);

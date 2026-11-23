@@ -1,4 +1,15 @@
-import type { Condition, SceneDef, SceneId } from './storySchema';
+import { DRAFT_REACTIONS } from './endingContent';
+import type { Condition, SceneDef, SceneId, SceneTrigger } from './storySchema';
+
+const viewLinxiaAvatarTrigger: SceneTrigger = {
+  id: 'view-linxia-avatar',
+  event: 'ui:phoneAction',
+  action: 'reply',
+  effects: {
+    pushDraftReaction: DRAFT_REACTIONS.viewedAvatar,
+    log: { type: 'observe', summary: '点开了林夏的头像。' },
+  },
+};
 
 const maySkipStairs: Condition = { all: [
   { key: 'seat', op: '==', value: 'far' },
@@ -19,7 +30,8 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
       { kind: 'intertitle', id: 'c1-morning', lines: ['第二天'], lineDurationMs: 2000 },
       { kind: 'phone', id: 'c1-post', panel: { id: 'c1-post', closeActionId: 'close', sections: [
         { kind: 'post', id: 'c1-wall', title: '校园墙', publishedAt: '昨天 8:52', assetIds: ['cg_s13_walk_together'],
-          views: 48200, commentCount: 1360, previousStats: { views: 4820, commentCount: 136 }, text: '一夜过去，转发和评论还在增加。', comments: [] },
+          views: 48200, commentCount: 1360, previousStats: { views: 4820, commentCount: 136 }, text: '一夜过去，转发和评论还在增加。', comments: [],
+          actions: [{ id: 'c1-forward-roommate', text: '转给室友' }] },
       ] } },
       { kind: 'dialogue', id: 'c1-guilt', when: { key: 'pointedOut', equals: true }, lines: [
         { speaker: 'xiaochen', text: '那个……我好像跟别人提过她是咱班的。' },
@@ -32,6 +44,13 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
         { id: 'c1-go-class', text: '……先去上课吧。', effects: { log: { type: 'choice', summary: '和小陈一起去上课。' } } },
       ] },
     ],
+    triggers: [
+      { id: 'c1-forward-roommate', event: 'ui:phoneAction', target: 'c1-post', action: 'reply',
+        effects: { pushDraftReaction: DRAFT_REACTIONS.forwardedRoommate,
+          log: { type: 'choice', summary: '把校园墙帖子转给了室友。' } },
+        reveal: { text: '你把帖子转给了室友。' } },
+      viewLinxiaAvatarTrigger,
+    ],
     transitions: [{ to: 'C2' }],
   },
   C2: {
@@ -39,7 +58,7 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
     stageNotes: ['走廊里有目光和低语，视野边缘有暗角。林夏在最后一排画窗外，指尖有铅笔灰，笔袋里有一支铅笔。'],
     steps: [
       { kind: 'caption', id: 'c2-whispers', text: '“就是那个……”话音停了。林夏低头画着速写本。' },
-      { kind: 'choice', id: 'c2-seat', allowMovement: true, prompt: '你打算坐在哪里？', options: [
+      { kind: 'choice', id: 'c2-seat', allowMovement: true, prompt: '教室里还有空位，走近你想坐的座位按 E 或点击坐下。', options: [
         { id: 'seat-beside', interactId: 'seat-beside', text: '坐她旁边', effects: {
           set: { seat: 'beside' }, add: { trust: 1 }, log: { type: 'choice', summary: '坐在林夏旁边。' },
         } },
@@ -63,9 +82,10 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
     transitions: [{ to: 'C3' }],
   },
   C3: {
-    id: 'C3', sceneKey: 'stage2d', title: '午后 · 周老师',
-    stageNotes: ['辅导员办公室，午后逆光。'],
+    id: 'C3', sceneKey: 'interior', title: '午后 · 周老师',
+    stageNotes: ['沿着教学楼走廊找到辅导员办公室，推门进入与周老师谈话。'],
     steps: [
+      { kind: 'wait', id: 'c3-find-office', waitFor: { interactId: 'teacher-office-door' } },
       { kind: 'dialogue', id: 'c3-teacher', lines: [
         { speaker: 'teacher', text: '林夏同意吗？' },
         { speaker: 'teacher', text: '我可以联系校园墙管理员下架，也可以提醒班里的同学。联系家长，要先得到她的同意。' },
@@ -100,7 +120,20 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
         { speaker: 'linxia', text: '……嗯。没事。' },
         { speaker: 'linxia', text: '学校挺好的。' },
         { speaker: 'linxia', text: '我自己能走，你别担心。' },
-        { speaker: null, text: '她挂了电话，看见了你。' },
+        { speaker: null, text: '她挂了电话，转过身看见了你。刚才还强撑着的肩膀一下子垮了下来。' },
+      ] },
+      { kind: 'dialogue', id: 'c4-break-down', lines: [
+        { speaker: 'linxia', emotion: 'cry', text: '……他们还在转。' },
+        { speaker: 'linxia', emotion: 'cry', text: '连我怎么走路都要被拍下来……我明明只是脚崴了，为什么要一直解释，好像怎么说都是我的错……' },
+        { speaker: 'linxia', emotion: 'despair', text: '我不敢看手机，可它一直在震……走到哪儿都觉得有人在背后指着我。' },
+      ] },
+      { kind: 'choice', id: 'c4-comfort', prompt: '她低着头，眼泪顺着指缝滴在地上。', options: [
+        { id: 'c4-comfort-tissue', text: '递给她一张纸巾：“先擦擦眼泪，我在这儿。”', effects: { add: { trust: 1 }, log: { type: 'choice', summary: '在楼梯间递纸巾安慰哭泣的林夏。' } } },
+        { id: 'c4-comfort-stay', text: '安静地陪她站了一会儿，等她呼吸缓过来。', effects: { add: { trust: 1 }, log: { type: 'choice', summary: '在楼梯间安静陪着情绪崩溃的林夏。' } } },
+        { id: 'c4-comfort-phone', text: '“先把手机扣过去，别看那些评论了。”', effects: { add: { trust: 1 }, log: { type: 'choice', summary: '劝林夏先别看手机评论，陪她缓和情绪。' } } },
+      ] },
+      { kind: 'dialogue', id: 'c4-after-comfort', lines: [
+        { speaker: 'linxia', emotion: 'sad', text: '……谢谢。我不想让家里人看见我这样。' },
       ] },
       { kind: 'choice', id: 'c4-father-question', options: [
         { id: 'c4-father-witness', text: '要不要让你爸爸出来说一下？他当时在场。', effects: { set: { askedAboutFather: true, fatherKnows: false } } },
@@ -108,9 +141,9 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
         { id: 'c4-father-knows', text: '……你爸爸知道吗？', effects: { set: { askedAboutFather: true, fatherKnows: false } } },
       ] },
       { kind: 'dialogue', id: 'c4-refusal', lines: [
-        { speaker: 'linxia', text: '……不要。' },
+        { speaker: 'linxia', emotion: 'sad', text: '……不要。' },
         { speaker: null, text: '她沉默了一会儿。' },
-        { speaker: 'linxia', text: '他们不会信的。……只会去找他。' },
+        { speaker: 'linxia', emotion: 'despair', text: '他们不会信的。……只会去找他。' },
       ] },
       { kind: 'choice', id: 'c4-response', options: [
         { id: 'c4-respect', text: '好，听你的。', effects: { add: { trust: 2 },
@@ -127,7 +160,9 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
         { speaker: null, text: '你答应：“好，不会擅自发，用之前先问你。”她把照片发了过来。' },
       ] },
       { kind: 'system', id: 'c4-evidence-save', when: canSaveEvidence, effects: {
-        set: { evidence: true }, log: { type: 'choice', summary: '征得林夏同意后留存小票，答应使用前先询问。' },
+        set: { evidence: true },
+        pushDraftReaction: DRAFT_REACTIONS.askedBeforeEvidence,
+        log: { type: 'choice', summary: '征得林夏同意后留存小票，答应使用前先询问。' },
       } },
       { kind: 'goto', id: 'c4-consent-done', target: 'c4-done' },
       { kind: 'dialogue', id: 'c4-insist-reply', lines: [
@@ -162,7 +197,7 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
         { id: 'c5-proceed', text: '先到这里，晚些时候再去看看',
           when: { key: 'foundAyuanWay', op: '!=', value: null }, goto: 'c5-done' },
       ] },
-      { kind: 'choice', id: 'c5-recognize', allowMovement: true, prompt: '靠近观察，再问一句：“请问你是……”', options: [
+      { kind: 'choice', id: 'c5-recognize', allowMovement: true, prompt: '在走廊走近同学，按 E 或点击询问：“请问你是……”', options: [
         { id: 'student-1', interactId: 'student-1', text: '询问靠窗的同学', when: canAskWrong, goto: 'c5-wrong-effect' },
         { id: 'student-2', interactId: 'student-2', text: '询问抱书的同学', when: canAskWrong, goto: 'c5-wrong-effect' },
         { id: 'student-3', interactId: 'student-3', text: '询问背着书包的同学', when: canAskWrong, goto: 'c5-wrong-effect' },
@@ -209,6 +244,7 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
       { kind: 'goto', id: 'c5-shout-return', target: 'c5-find-path' },
       { kind: 'system', id: 'c5-done', effects: {} },
     ],
+    triggers: [viewLinxiaAvatarTrigger],
     transitions: [{ when: { key: 'foundAyuanWay', op: '!=', value: null }, to: 'C6' }],
   },
   C6: {

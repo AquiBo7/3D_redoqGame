@@ -3,6 +3,7 @@ import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/eventBus';
 import { SceneMachine } from '../core/sceneMachine';
 import { ASSET_MANIFEST } from './assetManifest';
+import { DRAWING_WITHDRAWN_LOG } from './endingContent';
 import { chapter1 } from './story.ch1';
 import { chapter2Scenes } from './story.ch2';
 import { chapter3Scenes } from './story.ch3';
@@ -21,6 +22,8 @@ function harness(seed: StateSet = {}, entry: SceneId = 'E1') {
   const order: string[] = [];
   const dialogues: GameEvents['ui:showDialogue'][] = [];
   const intertitles: GameEvents['ui:showIntertitle'][] = [];
+  const moments: GameEvents['ui:showMoment'][] = [];
+  const captions: GameEvents['ui:showCaption'][] = [];
   const arts: GameEvents['ui:showArt'][] = [];
   const choices: GameEvents['ui:showChoices'][] = [];
   const phones: GameEvents['ui:showPhone'][] = [];
@@ -29,10 +32,11 @@ function harness(seed: StateSet = {}, entry: SceneId = 'E1') {
   const completed: string[] = [];
   bus.on('ui:showDialogue', (event) => { dialogues.push(event); order.push(event.stepId); });
   bus.on('ui:showIntertitle', (event) => { intertitles.push(event); order.push(event.stepId); });
+  bus.on('ui:showMoment', (event) => { moments.push(event); order.push(event.stepId); });
   bus.on('ui:showArt', (event) => { arts.push(event); order.push(event.stepId); });
   bus.on('ui:showChoices', (event) => { choices.push(event); order.push(event.stepId); });
   bus.on('ui:showPhone', (event) => { phones.push(event); order.push(event.stepId); });
-  bus.on('ui:showCaption', (event) => order.push(event.stepId));
+  bus.on('ui:showCaption', (event) => { captions.push(event); order.push(event.stepId); });
   bus.on('scene:transition', (event) => transitions.push(event.toSceneId));
   bus.on('game:chapterEnd', (event) => { endings.push(event); order.push('end'); });
   const machine = new SceneMachine({
@@ -46,6 +50,7 @@ function harness(seed: StateSet = {}, entry: SceneId = 'E1') {
       const step = current();
       if (!step) throw new Error('剧情停在不存在的步骤');
       if (step.kind === 'phone') machine.onPhoneAction(step.panel.id, 'close');
+      else if (step.kind === 'moment') machine.onMomentEnd(step.id, 'completed');
       else if (['dialogue', 'caption', 'intertitle', 'cutscene', 'art'].includes(step.kind)) machine.onDialogueEnd(step.id);
       else return;
     }
@@ -56,9 +61,12 @@ function harness(seed: StateSet = {}, entry: SceneId = 'E1') {
     machine.onChooseOption(stepId, optionId);
     readThrough();
   };
-  const finish = () => {
+  const finish = (finalOption: 'final-wrong' | 'final-tired' | 'final-silent' = 'final-wrong') => {
     readThrough();
     if (current()?.id === 'e1-best-response') choose('e1-best-response', 'e1-best-thanks');
+    if (current()?.id === 'e1-best-answer') choose('e1-best-answer', finalOption);
+    if (current()?.id === 'e1-best-low-answer') choose('e1-best-low-answer', finalOption);
+    if (current()?.id === 'e1-middle-answer') choose('e1-middle-answer', finalOption);
     expect(machine.isEnded()).toBe(true);
   };
   const assertEndedOnce = () => {
@@ -70,6 +78,10 @@ function harness(seed: StateSet = {}, entry: SceneId = 'E1') {
     const seen = [...order];
     for (const step of endingScene.steps) {
       machine.onDialogueEnd(step.id);
+      if (step.kind === 'moment') {
+        machine.onMomentEnd(step.id, 'completed');
+        machine.onMomentEnd(step.id, 'interrupted');
+      }
       if (step.kind === 'choice') {
         for (const option of step.options) machine.onChooseOption(step.id, option.id);
       }
@@ -83,7 +95,7 @@ function harness(seed: StateSet = {}, entry: SceneId = 'E1') {
     expect(completed).toEqual(['E1']);
   };
   machine.startNew('S10', 'bystander');
-  return { machine, current, readThrough, choose, finish, assertEndedOnce, order, dialogues, intertitles, arts, choices, phones, endings, transitions };
+  return { machine, current, readThrough, choose, finish, assertEndedOnce, order, dialogues, intertitles, moments, captions, arts, choices, phones, endings, transitions };
 }
 
 const bestSeed: StateSet = { joined: true, apologized: true, postDeleted: true };
@@ -165,16 +177,21 @@ describe('E1 剧情数据与真实 SceneMachine', () => {
     const h = harness({ ...bestSeed, yuanKeys });
     h.finish();
     expect(h.machine.getState().ending).toBe('worst');
-    expect(h.order).toEqual(['e1-worst-close', 'end']);
+    expect(h.order).toEqual(['e1-worst-close', 'e1-worst-flood', 'end']);
     h.assertEndedOnce();
   });
 
-  it.each(['e1-best-thanks', 'e1-best-praise', 'e1-best-keep'])('trust=5：先递画/CG，再三选一 %s，最后首次笑、父亲、消息、定格', (option) => {
+  it.each(['e1-best-thanks', 'e1-best-praise', 'e1-best-keep'])('trust=5：犹豫三次等待完成 → 递画/CG → 三选一 %s → 最后一问 → 微笑、父亲、消息、心声弧线、定格', (option) => {
     const h = harness({ ...bestSeed, trust: 5 });
     expect(h.current()?.id).toBe('e1-best-month');
     h.machine.onDialogueEnd('e1-best-month');
     expect(h.current()?.id).toBe('e1-best-classroom');
     h.machine.onDialogueEnd('e1-best-classroom');
+    expect(h.current()?.id).toBe('e1-best-hesitation');
+    expect(h.moments[0]).toMatchObject({ stepId: 'e1-best-hesitation', moment: 'best-hesitation' });
+    h.machine.onDialogueEnd('e1-best-hesitation');
+    expect(h.current()?.id).toBe('e1-best-hesitation');
+    h.machine.onMomentEnd('e1-best-hesitation', 'completed');
     expect(h.current()?.id).toBe('e1-best-gift');
     expect(h.dialogues[1].lines.map((line) => line.text)).toEqual([
       '她合上本子，又打开，撕下一页，折好放在你桌上。', '……给你。', '我自己画的。',
@@ -196,6 +213,10 @@ describe('E1 剧情数据与真实 SceneMachine', () => {
     expect(h.current()?.id).toBe('e1-best-response');
     expect(h.dialogues.some((event) => event.stepId === 'e1-best-smile')).toBe(false);
     h.machine.onChooseOption('e1-best-response', option);
+    expect(h.current()?.id).toBe('e1-best-question');
+    h.machine.onDialogueEnd('e1-best-question');
+    expect(h.current()?.id).toBe('e1-best-answer');
+    h.machine.onChooseOption('e1-best-answer', 'final-tired');
     expect(h.current()?.id).toBe('e1-best-smile');
     h.machine.onChooseOption('e1-best-response', option);
     expect(h.current()?.id).toBe('e1-best-smile');
@@ -210,90 +231,120 @@ describe('E1 剧情数据与真实 SceneMachine', () => {
     h.machine.onPhoneAction('wrong-phone', 'close');
     expect(h.current()?.id).toBe('e1-best-message');
     h.machine.onPhoneAction('e1-best-phone', 'close');
-    expect(h.current()?.id).toBe('e1-best-freeze');
+    expect(h.current()?.id).toBe('e1-best-arc');
+    expect(h.captions[0]).toMatchObject({ stepId: 'e1-best-arc', text: '……跟我有关系。', kind: 'inner', tone: 'subtle' });
+    h.machine.onDialogueEnd('e1-best-arc');
+    expect(h.current()?.id).toBe('e1-best-freeze-tired');
     expect(h.endings).toHaveLength(0);
     h.machine.onPhoneAction('e1-best-phone', 'close');
-    expect(h.current()?.id).toBe('e1-best-freeze');
-    h.finish();
+    expect(h.current()?.id).toBe('e1-best-freeze-tired');
+    h.finish('final-tired');
     expect(h.order).toEqual([
-      'e1-best-month', 'e1-best-classroom', 'e1-best-gift', 'e1-best-drawing', 'e1-best-response',
-      'e1-best-smile', 'e1-best-father', 'e1-best-message', 'e1-best-freeze', 'end',
+      'e1-best-month', 'e1-best-classroom', 'e1-best-hesitation', 'e1-best-gift', 'e1-best-drawing', 'e1-best-response',
+      'e1-best-question', 'e1-best-answer', 'e1-best-smile', 'e1-best-father', 'e1-best-message',
+      'e1-best-arc', 'e1-best-freeze-tired', 'end',
     ]);
     expect(h.dialogues.find((event) => event.stepId === 'e1-best-smile')?.lines[0].text).toContain('第一次');
     expect(h.dialogues.find((event) => event.stepId === 'e1-best-father')?.lines[0].text).toContain('她自己走向他');
     expect(h.intertitles[1]).toMatchObject({
-      lines: ['已被转发，无法收回。', '外界依然各说各话。但这一幅是完整的。'], skippable: false, lineDurationMs: 2800,
+      lines: ['已被转发，无法收回。', '外界依然各说各话。但有人看见了那天的疲惫。'], skippable: false, lineDurationMs: 2800,
     });
-    expect(h.machine.getState()).toMatchObject({ ...bestSeed, trust: 5, ending: 'best', harm: 20 });
+    expect(h.machine.getState()).toMatchObject({ ...bestSeed, trust: 5, ending: 'best', finalAnswer: 'tired', harm: 20 });
     h.assertEndedOnce();
   });
 
-  it.each([-1, 0, 4])('trust=%s：仅点头离开，不递画、不笑、不发消息，也有最好结局定格', (trust) => {
+  it('trust=5：送画犹豫时急着点击/追问会收回画，不展 CG，记录收回日志并继续最后一问与心声弧线', () => {
+    const h = harness({ ...bestSeed, trust: 5 });
+    h.machine.onDialogueEnd('e1-best-month');
+    h.machine.onDialogueEnd('e1-best-classroom');
+    expect(h.current()?.id).toBe('e1-best-hesitation');
+    h.machine.onMomentEnd('e1-best-hesitation', 'interrupted');
+    expect(h.current()?.id).toBe('e1-best-withdrawn');
+    h.finish('final-silent');
+    expect(h.arts).toHaveLength(0);
+    expect(h.phones).toHaveLength(0);
+    expect(h.captions[0]).toMatchObject({ stepId: 'e1-best-arc', text: '……跟我有关系。' });
+    expect(h.machine.getState().finalAnswer).toBe('silent');
+    expect(h.machine.getState().log.some((entry) => entry.summary === DRAWING_WITHDRAWN_LOG)).toBe(true);
+    expect(h.intertitles[1].lines).toEqual(['已被转发，无法收回。', '外界依然各说各话。但那天的安静里，多了一个人。']);
+    h.assertEndedOnce();
+  });
+
+  it.each([-1, 0, 4])('trust=%s：仅点头离开，不递画、不笑、不发消息，仍有最后一问与心声弧线', (trust) => {
     const h = harness({ ...bestSeed, trust });
-    h.finish();
-    expect(h.order).toEqual(['e1-best-month', 'e1-best-classroom', 'e1-best-nod', 'e1-best-freeze', 'end']);
+    h.finish('final-wrong');
+    expect(h.order).toEqual([
+      'e1-best-month', 'e1-best-classroom', 'e1-best-nod',
+      'e1-best-low-question', 'e1-best-low-answer', 'e1-best-arc', 'e1-best-freeze-wrong', 'end',
+    ]);
     expect(h.dialogues[1].lines[0].text).toBe('她对你点点头，合上速写本，走出教室。');
     expect(h.arts).toHaveLength(0);
-    expect(h.choices).toHaveLength(0);
     expect(h.phones).toHaveLength(0);
-    expect(h.intertitles[1].lines).toEqual(['已被转发，无法收回。', '外界依然各说各话。但这一幅是完整的。']);
-    expect(h.machine.getState()).toMatchObject({ ending: 'best', trust });
+    expect(h.intertitles[1].lines).toEqual(['已被转发，无法收回。', '外界依然各说各话。但有人停下来，说了声不对。']);
+    expect(h.machine.getState()).toMatchObject({ ending: 'best', trust, finalAnswer: 'wrong' });
     h.assertEndedOnce();
   });
 
-  it('中间结局七行字幕 → 未完成速写 CG → 两行定格 → 一次结束', () => {
-    const h = harness({ postDeleted: true, joined: false, trust: 10 });
+  it.each([
+    { seed: { postDeleted: true, joined: false, trust: 10, picked: true }, expectedQuestion: '……那天，你为什么帮我？', answer: 'final-wrong' as const, freeze: '你知道那不对，只是那一天，仍没来得及说完整。' },
+    { seed: { postDeleted: true, joined: false, trust: 0 }, expectedQuestion: '……那天，你为什么没走开？', answer: 'final-silent' as const, freeze: '你没有走开，但也什么都没说出口。' },
+  ])('中间结局七行字幕 → “……没事。”停三秒 → 速写 CG → 最后一问($expectedQuestion) → 对应定格', ({ seed, expectedQuestion, answer, freeze }) => {
+    const h = harness(seed);
     expect(h.intertitles[0].lines).toEqual([
       '一个月后。', '帖子早就删了。', '阿远再也没有发过任何东西。', '林夏的脚好了，走路很稳。',
       '她仍坐在最后一排，话比开学那天更少。', '走廊里遇见，你点点头，她也点点头。', '没有人再提起那天台阶上的事。',
     ]);
     expect(h.arts).toHaveLength(0);
     h.machine.onDialogueEnd('e1-middle-month');
+    expect(h.current()?.id).toBe('e1-middle-approach');
+    h.machine.onDialogueEnd('e1-middle-approach');
+    expect(h.current()?.id).toBe('e1-middle-pause');
+    expect(h.moments[0]).toMatchObject({ stepId: 'e1-middle-pause', moment: 'middle-pause' });
+    h.machine.onMomentEnd('e1-middle-pause', 'completed');
     expect(h.current()?.id).toBe('e1-middle-sketch');
     expect(h.arts).toEqual([{ stepId: 'e1-middle-sketch', assetId: 'cg_ending_middle_sketch' }]);
     h.machine.onDialogueEnd('wrong-art');
     expect(h.current()?.id).toBe('e1-middle-sketch');
     h.machine.onDialogueEnd('e1-middle-sketch');
-    expect(h.current()?.id).toBe('e1-middle-freeze');
+    const questionDialogue = h.dialogues[h.dialogues.length - 1];
+    expect(questionDialogue.lines[0].text).toBe(expectedQuestion);
+    h.finish(answer);
     expect(h.intertitles[1]).toMatchObject({
-      lines: ['已被转发，无法收回。', '没有人，把那一天说完整。'], lineDurationMs: 2800, skippable: false,
+      lines: ['已被转发，无法收回。', freeze], lineDurationMs: 2800, skippable: false,
     });
-    expect(h.endings).toHaveLength(0);
-    h.finish();
-    expect(h.order).toEqual(['e1-middle-month', 'e1-middle-sketch', 'e1-middle-freeze', 'end']);
-    expect(h.choices).toHaveLength(0);
     expect(h.phones).toHaveLength(0);
     h.assertEndedOnce();
   });
 
-  it('真实 S14 玩笑入口保留参与者结局并播放概括收尾', () => {
+  it('真实 S14 玩笑入口保留参与者结局并播放概括收尾与浏览数回放', () => {
     const h = harness({}, 'S14');
     h.choose('s14-choice', 's14-joke');
     expect(h.transitions).toEqual(['S10', 'S14', 'E1']);
     expect(h.machine.getState()).toMatchObject({ postChoice: 'joke', ending: 'joined', joined: false });
-    expect(h.order.slice(-2)).toEqual(['e1-joined-close', 'end']);
+    expect(h.order.slice(-3)).toEqual(['e1-joined-close', 'e1-joined-rewind', 'end']);
     h.assertEndedOnce();
   });
 
-  it('真实 C3 再想想且略过楼梯间，保留旁观结局', () => {
+  it('真实 C3 再想想且略过楼梯间，保留旁观结局并播放旧帖光标演出', () => {
     const h = harness({ seat: 'far' }, 'C3');
+    h.machine.onInteract('C3', 'teacher-office-door');
     h.readThrough();
     h.choose('c3-response', 'c3-think');
     h.choose('c3-stairs', 'c3-skip-stairs');
     expect(h.transitions).toEqual(['S10', 'C3', 'E1']);
     expect(h.machine.getState()).toMatchObject({ ending: 'bystander', seat: 'far', tellTeacher: 'think', visitedStairwell: false });
-    expect(h.order.slice(-2)).toEqual(['e1-bystander-close', 'end']);
+    expect(h.order.slice(-3)).toEqual(['e1-bystander-close', 'e1-bystander-cursor', 'end']);
     h.assertEndedOnce();
   });
 
-  it.each([1, 2, 3])('真实 D2 第 %s 轮逼迫直接进入最差收尾，不再进入 D3', (round) => {
+  it.each([1, 2, 3])('真实 D2 第 %s 轮逼迫直接进入最差收尾与通知收紧演出，不再进入 D3', (round) => {
     const h = harness({}, 'D2');
     h.readThrough();
     for (let i = 1; i < round; i++) h.choose(`d2-round-${i}`, `d2-r${i}-fact`);
     h.choose(`d2-round-${round}`, `d2-r${round}-force`);
     expect(h.transitions).toEqual(['S10', 'D2', 'E1']);
     expect(h.machine.getState()).toMatchObject({ ending: 'worst', route: 'breakdown' });
-    expect(h.order.slice(-2)).toEqual(['e1-worst-close', 'end']);
+    expect(h.order.slice(-3)).toEqual(['e1-worst-close', 'e1-worst-flood', 'end']);
     h.assertEndedOnce();
   });
 

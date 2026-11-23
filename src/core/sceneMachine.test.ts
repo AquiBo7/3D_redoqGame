@@ -95,11 +95,14 @@ function createHarness(chapter: ChapterStory = chapter1): Harness {
   };
 }
 
-/** 跳过 S1 的开场过场与字幕，停在等待点击手机的步骤 */
+/** 跳过 S1 的开场过场、电视早间新闻与心声字幕，停在等待点击手机的步骤 */
 function beginS1(h: Harness): void {
   h.machine.startNew('S1', 'bystander');
   h.machine.onDialogueEnd('s1-wake');
   h.machine.onDialogueEnd('s1-caption');
+  h.machine.onMomentEnd('s1-news');
+  h.machine.onDialogueEnd('s1-news-thought-1');
+  h.machine.onDialogueEnd('s1-news-thought-2');
 }
 
 /** 从 S1 进入 S2 手机面板 */
@@ -129,6 +132,9 @@ describe('SceneMachine 主线推进', () => {
     h.machine.onDialogueEnd('s3-run');
     h.machine.onPhoneAction('street-vibration-1', 'ignore');
     h.machine.onPhoneAction('street-vibration-2', 'open');
+    h.machine.onGazeHotspot('S4', 'convenience-scroller');
+    h.machine.onGazeHotspot('S4', 'father-suitcase');
+    h.machine.onInteract('S4', 'help-passerby');
     h.machine.onEnterZone('S4', 'stairs');
 
     // S5 观察楼梯一幕
@@ -179,6 +185,8 @@ describe('SceneMachine 主线推进', () => {
     expect(h.machine.isEnded()).toBe(false);
     expect(h.dialogues[h.dialogues.length - 1].stepId).toBe('s11-roommate');
     expect(state).toMatchObject({
+      newsSeen: true,
+      helpedPasserby: true,
       momReply: '起了起了。',
       phoneIgnored: 1,
       seenBag: true,
@@ -215,10 +223,15 @@ describe('SceneMachine 主线推进', () => {
     expect(h.phones.map((item) => item.stepId)).toEqual(['s2-phone', 's9-phone']);
     expect(h.hiddenPhones.map((item) => item.phoneId)).toEqual(['s2-phone', 's9-phone']);
 
-    // 只有 S1 / S2 两处心声字幕（S1 另有 3 条观察字幕不计入）
+    // S1 / S2 主线心声 + S4 街道三处伏笔心声
     expect(h.captions.filter((item) => item.kind === 'inner').map((item) => item.stepId)).toEqual([
       's1-caption',
+      's1-news-thought-1',
+      's1-news-thought-2',
       's2-caption',
+      's4-foreshadow-scroll',
+      's4-foreshadow-father',
+      's4-help-passerby',
     ]);
 
     expect(h.chapterEnds).toHaveLength(0);

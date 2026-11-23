@@ -66,7 +66,10 @@ export class Stage2D {
         if (this.root.hidden) return;
         // 当前协议不广播逐句变化，不读取或劫持 DialogueBox 的内部 DOM。
         const speaker = lines.find((line) => line.speaker !== null)?.speaker;
-        const asset = stepId === 'e1-best-smile' ? 'portrait_linxia_smile'
+        const emotion = lines.find((line) => line.emotion)?.emotion
+          ?? (stepId === 'e1-best-smile' ? 'smile' : 'normal');
+        this.portrait.dataset.emotion = emotion;
+        const asset = emotion === 'smile' ? 'portrait_linxia_smile'
           : stepId === 'e1-best-classroom' ? 'portrait_linxia_casual'
             : speaker ? PORTRAITS[speaker] : undefined;
         if (asset) renderAssetImage(asset, this.portrait).alt = '';
@@ -90,6 +93,18 @@ export class Stage2D {
         }
       }),
       bus.on('ui:showIntertitle', () => this.suspend()),
+      bus.on('ui:showMoment', ({ moment }) => {
+        if (moment === 'best-hesitation' || moment === 'middle-pause') {
+          this.interiorStarted = true;
+          this.present();
+          if (!this.root.hidden && this.portrait.children.length === 0) {
+            this.portrait.dataset.emotion = moment === 'middle-pause' ? 'sad' : 'normal';
+            renderAssetImage('portrait_linxia_casual', this.portrait).alt = '';
+          }
+          return;
+        }
+        if (moment !== 'opening-news') this.suspend();
+      }),
       bus.on('ui:showMinigame', () => this.suspend()),
       bus.on('game:chapterEnd', () => this.reset()),
       bus.on('game:title', () => this.reset()),
@@ -107,7 +122,7 @@ export class Stage2D {
   private present(): void {
     const scene = this.scene;
     const interior = scene?.sceneKey === 'interior'
-      && (scene.toSceneId === 'C4' || scene.toSceneId === 'D1' || scene.toSceneId === 'D6');
+      && (scene.toSceneId === 'C3' || scene.toSceneId === 'C4' || scene.toSceneId === 'D1' || scene.toSceneId === 'D6');
     const visible = !!scene && scene.toSceneId !== 'S10'
       && (scene.toSceneId !== 'E1' || this.interiorStarted)
       && (scene.sceneKey === 'stage2d' || (interior && this.interiorStarted));
@@ -122,6 +137,7 @@ export class Stage2D {
 
   private clearSpeaker(): void {
     this.dialogueStep = null;
+    delete this.portrait.dataset.emotion;
     clearImages(this.portrait);
   }
 

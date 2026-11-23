@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 import type { SceneId } from '../data/storySchema';
 import type { NavigationConfig, SceneRuntime, SceneRuntimeContext, SceneSpawn, WorldSceneDefinition } from '../world/worldSceneTypes';
-import { SHARED_RESOURCE_FLAG } from '../world/resources';
+import { type PropModelAsset, SHARED_RESOURCE_FLAG, loadPropModel } from '../world/resources';
 import { createActorAnimation, createCharacterActor, createTextSign, startIdleMotion } from './shared';
 import type { CharacterAnimationController } from './characterAnimation';
-import { getBarkMaterial, getDocumentLabelMaterial, getFabricMaterial, getFoliageMaterial, getPavingMaterial, getPlasterMaterial, getWindowGlassMaterial } from './materials';
+import { createContactShadowDiscBatch, getBarkMaterial, getDocumentLabelMaterial, getFabricMaterial, getFoliageMaterial, getPavingMaterial, getPlasterMaterial, getWindowGlassMaterial } from './materials';
 import { createCampusMeadow, createFoliageWindMaterial, type WindTime } from './foliageWind';
 
 const DESK = { center: { x: 0, y: 0.4, z: -4 }, size: { w: 2.6, h: 0.8, d: 1 } } as const;
@@ -23,6 +23,14 @@ const STANDS = {
 const SPAWN: SceneSpawn = { x: 0, z: -1.6, yaw: 0, pitchDeg: -6 };
 const POST_X = [-1.75, 1.75];
 const POST_Z = [-5.25, -3.25];
+const COURTYARD_LAMP_X = [-4.8, 4.8];
+const COURTYARD_LAMP_Z = [-10, -18, -23];
+/** 广场庭院灯 6 个灯位：外层 x、内层 z，程序化灯杆与成品铸铁路灯共用这一张位表 */
+const COURTYARD_LAMPS = COURTYARD_LAMP_X.flatMap((x) => COURTYARD_LAMP_Z.map((z) => ({ x, z })));
+/** 庭院灯换成 4.203m 成品铸铁路灯后，灯笼空腔实测在 y 3.0–3.6、半宽 0.134：自发光玻璃得收小挪进腔内，否则被铁艺骨架糊成一整面 */
+const LANTERN_GLOW: { y: number; size: V3 } = { y: 3.34, size: [0.19, 0.3, 0.19] };
+/** 登记桌左前角的桌面散件位：成品文具占地 0.33×0.18，此处离登记簿与挂绳盘都有空档，也不落在任何交互射线上 */
+const TABLE_STATIONERY = { x: -1.05, y: 0.822, z: -3.65, yaw: 0.18 } as const;
 const NAV: NavigationConfig = {
   groundY: 0,
   bounds: { minX: -5, maxX: 5, minZ: -6.5, maxZ: 5.5 },
@@ -164,6 +172,119 @@ function drape(parent: THREE.Object3D, name: string, w: number, h: number, p: V3
   mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
+}
+
+// ——————————————————————————————————————————————————————————————————————————————
+// 第三方道具热替换（docs/道具挂载工单.md · T3）
+// 程序化家具先照常构建，GLB 到齐才换视觉层；加载失败或场景已切走就什么都不做，不留空洞也不弹窗。
+// ——————————————————————————————————————————————————————————————————————————————
+
+/** 场景代次：切场景后仍在途的道具回调必须作废，不能往复用的 levelGroup 里补挂上一代的几何 */
+let deskGeneration = 0;
+/** 道具实例网格：几何与材质由 resources 的道具缓存共享，离开 S7 时只回收实例自己的 GPU 缓冲 */
+const deskPropMeshes: THREE.InstancedMesh[] = [];
+
+/**
+ * 用道具几何按位表建一个 InstancedMesh：几何已在 resources 里贴地、XZ 居中、按清单高度归一化，位姿只带位移与 yaw。
+ * 逐实例明度 ±4% 抖动按序号取，既打散重复感又保证同机位截图可复现；instanceColor 不增加 DrawCall。
+ */
+function createPropInstances(
+  parent: THREE.Object3D,
+  name: string,
+  asset: PropModelAsset,
+  specs: ReadonlyArray<{ x: number; z: number; y?: number; yaw?: number }>,
+  castShadow: boolean,
+  geometry = asset.geometry,
+): THREE.InstancedMesh {
+  const mesh = new THREE.InstancedMesh(geometry, asset.material, specs.length);
+  const transform = new THREE.Object3D();
+  const color = new THREE.Color();
+  specs.forEach((spec, index) => {
+    transform.position.set(spec.x, spec.y ?? 0, spec.z);
+    transform.rotation.set(0, spec.yaw ?? 0, 0);
+    transform.scale.set(1, 1, 1);
+    transform.updateMatrix();
+    mesh.setMatrixAt(index, transform.matrix);
+    mesh.setColorAt(index, color.setScalar(1 + (((index * 7) % 5) - 2) * 0.02));
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.name = name;
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = true;
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
+  parent.add(mesh);
+  deskPropMeshes.push(mesh);
+  return mesh;
+}
+
+/** 按位表重排一组实例：自发光玻璃从程序化灯架挪进成品灯笼腔时用，实例数量与序号都不动 */
+function placeInstances(mesh: THREE.InstancedMesh, parts: Part[]): void {
+  const transform = new THREE.Object3D();
+  parts.forEach((part, index) => {
+    transform.position.set(...part.p);
+    transform.scale.set(...part.s);
+    transform.rotation.set(...(part.r ?? [0, 0, 0]));
+    transform.updateMatrix();
+    mesh.setMatrixAt(index, transform.matrix);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
+}
+
+/**
+ * 庭院灯热替换：6 盏程序化灯杆换成成品铸铁路灯，三组实例并成一组 DrawCall。
+ * 被顶替的灯杆与灯架只关 visible 不删除——deskPolish.test.ts:212 和 verifyPolish 的 `lamps === 6` 数的是位表条目数，
+ * 换掉视觉层后这条契约仍逐字成立；庭院灯本来就不进 obstacles / occluders，遮挡与碰撞语义因此一字未动。
+ */
+function mountPropCourtyardLamps(
+  parent: THREE.Object3D,
+  poles: THREE.InstancedMesh,
+  glass: THREE.InstancedMesh,
+  frames: THREE.InstancedMesh,
+): void {
+  const generation = deskGeneration;
+  loadPropModel('streetLamp').then((asset) => {
+    if (!asset || generation !== deskGeneration) return;
+    createPropInstances(
+      parent,
+      'desk-courtyard-lamp-props',
+      asset,
+      COURTYARD_LAMPS.map(({ x, z }) => ({ x, z, yaw: 0 })),
+      true,
+    );
+    poles.visible = false;
+    frames.visible = false;
+    placeInstances(glass, COURTYARD_LAMPS.map(({ x, z }): Part => ({ p: [x, LANTERN_GLOW.y, z], s: LANTERN_GLOW.size })));
+    const contacts = createContactShadowDiscBatch(
+      'desk-courtyard-lamp-contact',
+      COURTYARD_LAMPS.map(({ x, z }) => ({ x, z, radius: 0.34, y: 0.02 })),
+    );
+    if (contacts) parent.add(contacts);
+  });
+}
+
+/**
+ * 桌面散件热替换：登记桌左前角摆一套成品文具（书 + 铅笔 + 尺）。
+ * 两摞指南 desk-guide-* 与笔筒 desk-cup-stationery 是剧情细节，实例结构被 deskPolish.test.ts:155/156/159 逐条断言，
+ * 按工单口径保留不动，只在空档处加一件真实散件。
+ */
+function mountPropTableStationery(table: THREE.Group): void {
+  const generation = deskGeneration;
+  loadPropModel('stationery').then((asset) => {
+    if (!asset || generation !== deskGeneration) return;
+    // 成品文具是"平铺俯拍"式建模：件与件的高低差落在 Y 上，直接摆就是一排悬空铅笔。
+    // 克隆一份几何绕 X 转 −90° 放回台面平面并重新贴地，母本几何仍归 resources 的道具缓存。
+    const flat = asset.geometry.clone();
+    flat.rotateX(-Math.PI / 2);
+    flat.translate(0, 0.046, 0.09);
+    flat.computeBoundingBox();
+    flat.computeBoundingSphere();
+    // 小件只 receiveShadow，少一次阴影 pass
+    createPropInstances(table, 'desk-stationery-props', asset, [TABLE_STATIONERY], false, flat);
+  });
 }
 
 function buildTent(parent: THREE.Object3D, d: Details): THREE.Group {
@@ -315,6 +436,7 @@ function buildTable(parent: THREE.Object3D, d: Details): THREE.Group {
   d.boxes(lanyards, 'desk-lanyard-cards', d.matte(0xf1ead8), Array.from({ length: 5 }, (_, i) => ({
     p: [0.82 + i * 0.062, 0.845 + i * 0.004, -3.77], s: [0.045, 0.005, 0.065],
   })), false);
+  mountPropTableStationery(table);
   return table;
 }
 
@@ -439,19 +561,20 @@ function buildCampus(parent: THREE.Object3D, d: Details, time: WindTime): void {
   const poles: Part[] = [];
   const lanterns: Part[] = [];
   const capsAndFeet: Part[] = [];
-  for (const x of [-4.8, 4.8]) for (const z of [-10, -18, -23]) {
+  for (const { x, z } of COURTYARD_LAMPS) {
     poles.push({ p: [x, 1.65, z], s: [0.045, 3.3, 0.045] });
     lanterns.push({ p: [x, 3.2, z], s: [0.24, 0.38, 0.24] });
     capsAndFeet.push({ p: [x, 0.12, z], s: [0.21, 0.24, 0.21] }, { p: [x, 3.42, z], s: [0.32, 0.055, 0.32] });
     for (const dx of [-0.12, 0.12]) capsAndFeet.push({ p: [x + dx, 3.2, z], s: [0.023, 0.4, 0.26] });
   }
   const metal = d.matte(0x405552, 0.48, 0.6);
-  d.instances(parent, 'desk-courtyard-lamp-poles', new THREE.CylinderGeometry(1, 1, 1, 8), metal, poles);
+  const lampPoles = d.instances(parent, 'desk-courtyard-lamp-poles', new THREE.CylinderGeometry(1, 1, 1, 8), metal, poles);
   const glow = d.matte(0xe7d6ab, 0.35);
   glow.emissive.setHex(0xe8c982);
   glow.emissiveIntensity = 0.32;
-  d.boxes(parent, 'desk-courtyard-lantern-glass', glow, lanterns);
-  d.boxes(parent, 'desk-courtyard-lantern-frames', metal, capsAndFeet);
+  const lampGlass = d.boxes(parent, 'desk-courtyard-lantern-glass', glow, lanterns);
+  const lampFrames = d.boxes(parent, 'desk-courtyard-lantern-frames', metal, capsAndFeet);
+  mountPropCourtyardLamps(parent, lampPoles, lampGlass, lampFrames);
   for (const side of [-1, 1]) {
     const board = group(parent, `desk-notice-board-${side}`);
     board.position.set(side * 10.7, 0, -17);
@@ -546,6 +669,7 @@ function buildSchool(parent: THREE.Object3D, d: Details): void {
 
 function buildDesk(parent: THREE.Object3D): { occluders: THREE.Object3D[]; actors: Record<string, THREE.Object3D> } {
   const d = createDetails();
+  deskGeneration += 1;
   const environment = group(parent, 'desk-campus-environment');
   const time: WindTime = { value: 0 };
   environment.userData.windTime = time;
@@ -758,7 +882,13 @@ export const deskRuntime: SceneRuntime = {
     animatedActors.forEach((record) => updateAnimation(record, dtSeconds));
     updateVolunteerAnimation(dtSeconds);
   },
-  exit: clearRuntime,
+  exit(): void {
+    // 先作废在途回调，再回收本代道具实例自己的 GPU 缓冲；共享几何与材质留给 resources 的道具缓存，下次进 S7 直接命中
+    deskGeneration += 1;
+    for (const mesh of deskPropMeshes) mesh.dispose();
+    deskPropMeshes.length = 0;
+    clearRuntime();
+  },
 };
 
 export function createDeskDefinition(_sceneId: SceneId): WorldSceneDefinition {

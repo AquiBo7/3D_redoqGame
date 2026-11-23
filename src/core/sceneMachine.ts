@@ -36,7 +36,13 @@ export interface SceneMachineOptions {
 }
 
 function cloneState(state: StoryState): StoryState {
-  return { ...state, clues: [...state.clues], yuanKeys: [...state.yuanKeys], log: state.log.map((entry) => ({ ...entry })) };
+  return {
+    ...state,
+    clues: [...state.clues],
+    yuanKeys: [...state.yuanKeys],
+    draftReactions: [...state.draftReactions],
+    log: state.log.map((entry) => ({ ...entry })),
+  };
 }
 
 function findReplyOption(panel: PhonePanel, optionId: string): PhoneReplyOption | undefined {
@@ -175,6 +181,21 @@ export class SceneMachine {
     const waiting =
       step.kind === 'dialogue' || step.kind === 'caption' || step.kind === 'cutscene' || step.kind === 'intertitle' || step.kind === 'art';
     if (!waiting || step.id !== stepId) return;
+    this.advance();
+  }
+
+  onMomentEnd(stepId: string, outcome: 'completed' | 'interrupted' = 'completed'): void {
+    const step = this.currentStep();
+    if (!step || this.ended || step.kind !== 'moment' || step.id !== stepId) return;
+    if (outcome === 'interrupted' && step.onInterrupt) {
+      const changed = new Set<keyof StoryState>();
+      this.applyInto(changed, step.onInterrupt.effects);
+      this.emitStateChanged(changed);
+      if (step.onInterrupt.goto) {
+        this.gotoStep(step.onInterrupt.goto);
+        return;
+      }
+    }
     this.advance();
   }
 
@@ -385,6 +406,15 @@ export class SceneMachine {
             text: step.text,
             durationMs: step.durationMs ?? 2400,
             kind: 'inner',
+            ...(step.tone ? { tone: step.tone } : {}),
+          });
+          return;
+
+        case 'moment':
+          this.bus.emit('ui:showMoment', {
+            stepId: step.id,
+            moment: step.moment,
+            ...(step.lines ? { lines: [...step.lines] } : {}),
           });
           return;
 
@@ -411,7 +441,11 @@ export class SceneMachine {
             stepId: step.id,
             prompt: step.prompt,
             ...(step.allowMovement ? { allowMovement: true } : {}),
-            options: options.map((option) => ({ id: option.id, text: option.text })),
+            options: options.map((option) => ({
+              id: option.id,
+              text: option.text,
+              ...(option.interactId ? { hasInteract: true } : {}),
+            })),
           });
           return;
         }
@@ -489,12 +523,22 @@ export class SceneMachine {
       if (once) this.firedTriggers.add(trigger.id);
       this.applyInto(changed, trigger.effects);
 
+      if (trigger.observe) {
+        this.bus.emit('ui:showCaption', {
+          stepId: `${trigger.id}:observe`,
+          text: trigger.observe.text,
+          durationMs: trigger.observe.durationMs ?? 3000,
+          kind: 'observation',
+        });
+      }
+
       if (trigger.reveal) {
         this.bus.emit('ui:showCaption', {
           stepId: trigger.id,
           text: trigger.reveal.text,
           durationMs: trigger.reveal.durationMs ?? 2600,
           kind: trigger.reveal.kind ?? 'observation',
+          ...(trigger.reveal.tone ? { tone: trigger.reveal.tone } : {}),
         });
       }
     }

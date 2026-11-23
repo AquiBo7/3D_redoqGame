@@ -67,13 +67,30 @@ describe('第一章剧本结构', () => {
     }
   });
 
-  it('心声字幕不超过 3 处（当前为 2 处）', () => {
+  it('心声字幕覆盖起床、早间新闻后两句小字心声与手机退出', () => {
     const captions = configuredSceneIds.flatMap((sceneId) =>
       stepsOf(sceneId).filter((step) => step.kind === 'caption'),
     );
-    expect(captions).toHaveLength(2);
-    expect(captions.map((step) => step.id)).toEqual(['s1-caption', 's2-caption']);
-    expect(captions.length).toBeLessThanOrEqual(3);
+    expect(captions.map((step) => step.id)).toEqual([
+      's1-caption',
+      's1-news-thought-1',
+      's1-news-thought-2',
+      's2-caption',
+    ]);
+    const newsStep = stepById('S1', 's1-news');
+    expect(newsStep).toMatchObject({
+      kind: 'moment',
+      moment: 'opening-news',
+      effects: { set: { newsSeen: true } },
+    });
+    if (newsStep.kind === 'moment') {
+      expect(newsStep.lines).toEqual([
+        '……近日，多所学校提醒学生：转发未经核实的内容，同样可能伤害他人。',
+        '某学生因一张被断章取义的照片，被围攻数日，最终关闭了账号，也不再出门。',
+      ]);
+    }
+    expect(stepById('S1', 's1-news-thought-1')).toMatchObject({ text: '……又是这种新闻。', tone: 'subtle' });
+    expect(stepById('S1', 's1-news-thought-2')).toMatchObject({ text: '……跟我没关系。', tone: 'subtle' });
   });
 
   it('S2 手机内容包含闹钟、3 条群消息、3:12 备忘录与妈妈 2 条消息 + 3 个回复', () => {
@@ -129,6 +146,31 @@ describe('第一章剧本结构', () => {
     for (const trigger of open) {
       expect(trigger.effects?.add?.phoneIgnored).toBeUndefined();
     }
+  });
+
+  it('S4 包含三处可选街道伏笔与扶起自行车交互，均不阻塞主线', () => {
+    const triggers = sceneOf('S4').triggers ?? [];
+    const byId = new Map(triggers.map((item) => [item.id, item]));
+    expect(byId.get('s4-foreshadow-scroll')).toMatchObject({
+      event: 'scene:gazeHotspot',
+      target: 'convenience-scroller',
+      reveal: { kind: 'inner', text: '……随手转一下而已。' },
+    });
+    expect(byId.get('s4-foreshadow-father')).toMatchObject({
+      event: 'scene:gazeHotspot',
+      target: 'father-suitcase',
+      reveal: { kind: 'inner', text: '……爸爸都这样。' },
+    });
+    expect(byId.get('s4-foreshadow-bicycle')).toMatchObject({
+      event: 'scene:gazeHotspot',
+      target: 'fallen-bicycle',
+      reveal: { kind: 'inner', text: '……他们为什么都在拍？' },
+    });
+    expect(byId.get('s4-help-passerby')).toMatchObject({
+      event: 'scene:interact',
+      target: 'help-passerby',
+      effects: { set: { helpedPasserby: true } },
+    });
   });
 
   it('S7 递笔 / 原因 / 药袋选项数量与效果符合设计', () => {

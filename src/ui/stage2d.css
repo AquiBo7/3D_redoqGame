@@ -57,6 +57,43 @@
   animation: stage2d-appear 260ms ease-out both;
 }
 
+.stage2d__portrait[data-emotion='sad'] {
+  filter: saturate(.62) brightness(.84);
+  transform: translateY(8px);
+}
+
+.stage2d__portrait[data-emotion='cry'] {
+  filter: saturate(.55) brightness(.8);
+  animation: stage2d-sob 2.6s ease-in-out infinite;
+}
+
+.stage2d__portrait[data-emotion='cry']::after {
+  content: '';
+  position: absolute;
+  inset: 18% 28% 45% 28%;
+  background: radial-gradient(circle at 46% 34%, rgba(210, 234, 245, 0.55) 0 3px, transparent 5px),
+    radial-gradient(circle at 55% 38%, rgba(210, 234, 245, 0.55) 0 3px, transparent 5px);
+  animation: stage2d-tears 1.8s ease-in infinite;
+}
+
+.stage2d__portrait[data-emotion='despair'] {
+  filter: saturate(.4) brightness(.68) contrast(1.06);
+  transform: translateY(14px) scale(0.98);
+}
+
+@keyframes stage2d-sob {
+  0%, 100% { transform: translateY(8px); }
+  25% { transform: translateY(11px); }
+  50% { transform: translateY(8.5px); }
+  75% { transform: translateY(10.5px); }
+}
+
+@keyframes stage2d-tears {
+  0% { opacity: 0; transform: translateY(0); }
+  30% { opacity: 0.9; }
+  100% { opacity: 0; transform: translateY(18px); }
+}
+
 .stage2d__title {
   position: absolute;
   top: calc(24px + env(safe-area-inset-top));

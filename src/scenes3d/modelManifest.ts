@@ -12,7 +12,20 @@
 // 场景摆放约定：先 rotation.y = frontYawRad 归正（正面朝 +Z），再叠加所需朝向角：
 // yaw=0 → 面向 +Z，yaw=π → 面向 -Z，yaw=π/2 → 面向 +X。
 
-export type CharacterModelId = 'linxia' | 'father' | 'ayuan' | 'volunteer' | 'protagonist' | 'fatherCarry' | 'studentFemale' | 'studentMale';
+export type CharacterModelId =
+  | 'linxia'
+  | 'father'
+  | 'ayuan'
+  | 'volunteer'
+  | 'protagonist'
+  | 'fatherCarry'
+  | 'studentFemale'
+  | 'studentMale'
+  | 'studentMale2'
+  | 'studentMale3'
+  | 'studentMale4'
+  | 'studentFemale3'
+  | 'studentFemale4';
 
 export interface CharacterModelEntry {
   id: CharacterModelId;
@@ -35,6 +48,11 @@ export const CHARACTER_MODELS: readonly CharacterModelEntry[] = [
   { id: 'fatherCarry', name: '父女（背行提袋+下背放袋）', path: './models/chr_father_carry.glb', heightM: 1.78, frontYawRad: -Math.PI / 2 },
   { id: 'studentFemale', name: '女同学', path: './models/chr_student_female.glb', heightM: 1.65, frontYawRad: -Math.PI / 2 },
   { id: 'studentMale', name: '男同学', path: './models/chr_student_male.glb', heightM: 1.7, frontYawRad: -Math.PI / 2 },
+  { id: 'studentMale2', name: '男同学（发帖起哄）', path: './models/chr_student_male2.glb', heightM: 1.72, frontYawRad: -Math.PI / 2 },
+  { id: 'studentMale3', name: '男同学（围观看热闹）', path: './models/chr_student_male3.glb', heightM: 1.71, frontYawRad: -Math.PI / 2 },
+  { id: 'studentMale4', name: '男同学（理性同学）', path: './models/chr_student_male4.glb', heightM: 1.74, frontYawRad: -Math.PI / 2 },
+  { id: 'studentFemale3', name: '女同学（冷嘲热讽）', path: './models/chr_student_female3.glb', heightM: 1.64, frontYawRad: -Math.PI / 2 },
+  { id: 'studentFemale4', name: '女同学（沉默旁观）', path: './models/chr_student_female4.glb', heightM: 1.63, frontYawRad: -Math.PI / 2 },
 ];
 
 export function getCharacterModel(id: CharacterModelId): CharacterModelEntry {

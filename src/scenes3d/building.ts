@@ -2,7 +2,6 @@
 // S8 进入后林夏胶囊体沿路线慢步前行供玩家跟随；回头可见爸爸站在校门方向（look-back-father）。
 
 import * as THREE from 'three';
-import { gsap } from 'gsap';
 import type { SceneId } from '../data/storySchema';
 import type {
   NavigationConfig,
@@ -13,6 +12,7 @@ import type {
 } from '../world/worldSceneTypes';
 import { createActorAnimation, createCharacterActor, createMatteMaterial, createTextSign, startIdleMotion } from './shared';
 import {
+  createContactShadowDiscBatch,
   getPavingMaterial,
   getPlasterMaterial,
   getBarkMaterial,
@@ -24,19 +24,19 @@ import type { CharacterAnimationController } from './characterAnimation';
 import type { Vec3 } from './shared';
 import { createCampusMeadow, createFoliageWindMaterial } from './foliageWind';
 import type { MeadowBed, WindTime } from './foliageWind';
+import { createCanopyCardBatch } from './canopy';
+import type { CanopyCardSpec } from './canopy';
+import { canopyBudget, getQualityTier } from '../world/quality';
 import { advanceColorBloom, applyColorBloomShader, createColorBloomUniforms } from './colorBloom';
 import type { ColorBloomUniforms } from './colorBloom';
-import { SHARED_RESOURCE_FLAG } from '../world/resources';
+import { SHARED_RESOURCE_FLAG, loadPropModel } from '../world/resources';
 
 const buildingWindTime: WindTime = { value: 0 };
 
-/** 林夏慢行路线（XZ 平面折线，首尾即起止站位） */
+/** 林夏慢行路线（XZ 平面折线，首尾即起止站位）：与林荫道中轴平行的直线，不横穿路面 */
 const LINXIA_ROUTE: Vec3[] = [
   { x: 1.3, y: 0, z: -1 },
-  { x: 1.0, y: 0, z: -12 },
-  { x: 0.5, y: 0, z: -25 },
-  { x: 0.1, y: 0, z: -37 },
-  { x: -0.1, y: 0, z: -44 },
+  { x: 1.3, y: 0, z: -44 },
 ];
 
 /** 路线总时长（秒），约 20–30 秒慢步 */
@@ -66,6 +66,29 @@ const TREES: Array<{ x: number; z: number }> = [
   { x: 3.6, z: -34 },
 ];
 
+/**
+ * 长椅摆放位（工单 T4）：椅背朝行道树、椅面朝通道，再顺着往 A 栋走的方向偏 0.22 rad（≈13°），
+ * 别摆成正襟危坐的两张样板。成品绕 Y 转 ±90° 后 1.05 m 椅长落到 Z 轴，横向只占 |x| 2.70..3.40：
+ * 既避开 x = ±2.65 的铺装分缝线，也够不到中央通道（nav 障碍名单锁死，长椅不进 obstacles）。
+ * 两侧各取两树之间的空档并错开一个身位，同向走时不会一次撞见两张并排的椅子。
+ */
+const BENCH_SPOTS: ReadonlyArray<{ x: number; z: number; yaw: number }> = [
+  { x: -3.05, z: -14.2, yaw: Math.PI / 2 + 0.22 },
+  { x: 3.05, z: -24.6, yaw: -Math.PI / 2 - 0.22 },
+];
+
+/** 铺装面在 y = -0.018，成品贴地基准是 y = 0：让椅腿吃进铺装 6 mm，底面才不会露出一圈悬空 */
+const BENCH_GROUND_Y = -0.024;
+/** 接触阴影贴片贴在铺装面以上 1.2 cm，比把阴影调硬更省，也贴本项目的画法 */
+const BENCH_CONTACT_Y = -0.006;
+/**
+ * 长椅底图亮度补偿：Poly Haven 的 painted_wooden_bench 是深红棕旧漆，
+ * 512² 底图实测均值 (70,56,51)，再乘工单 §6.1 的木器色温 0xb9a07f 之后线性反照率只剩 (0.030,0.014,0.007)，
+ * 在林荫道这套冷灰光照下直接读成一块黑影。色温只能往下乘，所以在场景侧把材质色整体提 3 倍
+ * （克隆件，不动 resources 的共享道具材质），落点回到与程序化木条座椅同档的中深棕。
+ */
+const BENCH_ALBEDO_GAIN = 3;
+
 /** A 栋教学楼立面与大门 */
 const FACADE = { center: { x: 0, y: 5, z: -50 }, size: { w: 18, h: 10, d: 4 } } as const;
 const DOOR = { center: { x: 0, y: 1.4, z: -47.9 }, size: { w: 2.4, h: 2.8, d: 0.2 } } as const;
@@ -75,7 +98,8 @@ const FATHER = { x: 0, z: 8.6 } as const;
 
 /** 右侧草坪边缘：鞋底贴 lawn 的 y=-0.055，整个人在可行走边界外，不挤占同行路线。 */
 const PHONE_PASSERBY = { x: 6.45, y: -0.055, z: -10, yaw: -2.58 } as const;
-const PHONE_LOCAL = { x: 0, y: 0.63, z: 0.42 } as const;
+/** 手机收到胸口高度：竖屏、屏幕朝自己，镜头朝林荫道，与双手的握持点重合。 */
+const PHONE_LOCAL = { x: 0, y: 0.325, z: 0.3 } as const;
 const PHONE_PIVOT_Y = 0.9;
 const PHONE_HOTSPOT = {
   x: PHONE_PASSERBY.x + Math.sin(PHONE_PASSERBY.yaw) * PHONE_LOCAL.z,
@@ -139,14 +163,6 @@ function directionAlongRoute(progress: number): { x: number; z: number } {
   if (Math.abs(dx) + Math.abs(dz) < 1e-6) return { x: 0, z: -1 };
   const length = Math.hypot(dx, dz);
   return { x: dx / length, z: dz / length };
-}
-
-/** 角度趋近（处理 ±π 环绕），用于折线拐点处的平滑转身 */
-function approachAngle(current: number, target: number, t: number): number {
-  let delta = target - current;
-  while (delta > Math.PI) delta -= Math.PI * 2;
-  while (delta < -Math.PI) delta += Math.PI * 2;
-  return current + delta * t;
 }
 
 type CampusTuple = [number, number, number];
@@ -315,7 +331,7 @@ function campusMesh(
   return mesh;
 }
 
-/** 独立程序化路人：双手横持手机拍校园，局部 +Z 为镜头方向，不加载任何角色模型。 */
+/** 独立程序化路人：双手在胸前竖持手机拍校园，局部 +Z 为镜头方向，不加载任何角色模型。 */
 function createCampusPhotographer(): THREE.Group {
   const actor = new THREE.Group();
   actor.name = 'building-campus-photographer';
@@ -374,18 +390,20 @@ function createCampusPhotographer(): THREE.Group {
   };
   for (const side of [-1, 1]) {
     const suffix = side < 0 ? 'left' : 'right';
-    const shoulder: CampusTuple = [side * 0.2, 0.43, 0];
-    const elbow: CampusTuple = [side * 0.32, 0.27, 0.2];
-    const hand: CampusTuple = [side * 0.125, 0.57, PHONE_LOCAL.z];
+    // 双手胸前取景（竖屏）：大臂下垂、肘部收在肋侧，掌心托在机身下缘两侧，
+    // 竖屏机宽只有 0.125，握点收到 ±0.075 才真的搭在边上，同行视线上手机仍是第一个被命中的物件。
+    const shoulder: CampusTuple = [side * 0.185, 0.4, 0];
+    const elbow: CampusTuple = [side * 0.2, 0.09, 0.08];
+    const hand: CampusTuple = [side * 0.075, 0.235, 0.29];
     limb(`upper-arm-${suffix}`, shoulder, elbow, 0.073, shirt);
     limb(`forearm-${suffix}`, elbow, hand, 0.046, skin);
     part(pose, `hand-${suffix}`, new THREE.IcosahedronGeometry(0.043, 1), skin, hand);
   }
-  const phone = part(pose, 'device', new THREE.BoxGeometry(0.22, 0.125, 0.026), casing,
+  const phone = part(pose, 'device', new THREE.BoxGeometry(0.125, 0.22, 0.026), casing,
     [PHONE_LOCAL.x, PHONE_LOCAL.y, PHONE_LOCAL.z]);
-  part(phone, 'screen', new THREE.BoxGeometry(0.193, 0.099, 0.003), screen, [0, 0, -0.014]);
-  part(phone, 'camera-pad', new THREE.BoxGeometry(0.047, 0.042, 0.004), hair, [-0.071, 0.029, 0.015]);
-  part(phone, 'lens', new THREE.SphereGeometry(0.011, 6, 4), lens, [-0.071, 0.029, 0.019]);
+  part(phone, 'screen', new THREE.BoxGeometry(0.099, 0.193, 0.003), screen, [0, 0, -0.014]);
+  part(phone, 'camera-pad', new THREE.BoxGeometry(0.042, 0.047, 0.004), hair, [-0.03, 0.078, 0.015]);
+  part(phone, 'lens', new THREE.SphereGeometry(0.011, 6, 4), lens, [-0.03, 0.078, 0.019]);
   actor.traverse((object) => { object.userData.campusDetail = true; });
   // 几何与材质均为本场景私有，随 WorldApp 的场景树释放；没有贴图、定时器或异步装填。
   return actor;
@@ -525,11 +543,70 @@ function campusLobbyMaterial(): THREE.MeshStandardMaterial {
   }, { roughness: 0.32, metalness: 0.12, emissive: 0xffdfab, emissiveIntensity: 0.46 }, true);
 }
 
+/** 场景代次：切场景后仍在途的道具回调必须作废，不能往复用的 levelGroup 里补挂上一代的几何 */
+let buildingGeneration = 0;
+/** 道具实例网格：几何与材质归 resources 的道具缓存共享，离开 S8/S9 时只释放实例缓冲 */
+const buildingPropMeshes: THREE.InstancedMesh[] = [];
+
+/** 释放道具实例缓冲；共享几何 / 材质留给缓存复用，场景不得 dispose */
+function disposeBuildingPropMeshes(): void {
+  for (const mesh of buildingPropMeshes) mesh.dispose();
+  buildingPropMeshes.length = 0;
+}
+
+/**
+ * 校园长椅 ×2：2 件成品合 1 个 InstancedMesh，接触阴影另起 1 批，合计 2 个 DrawCall。
+ * GLB 加载失败就什么都不挂——长椅是本场景原本不存在的新增内容，不挂即等于改前，不会留空洞。
+ * 不进 occluders，也不加 obstacle / hotspot / interactable：S8 的 phone-behind 靠 occluders 做视线
+ * 判定，多一件遮挡体会改到它的触发时机；障碍名单与 S9 的空 hotspots 都是工单锁死的口径。
+ */
+function attachCampusBenches(parent: THREE.Object3D): void {
+  const generation = buildingGeneration;
+  loadPropModel('bench').then((asset) => {
+    if (!asset || generation !== buildingGeneration) return;
+    // 场景私有材质副本：亮度补偿只作用于 S8/S9，共享道具材质与底图留给其它场景原样复用
+    const material = asset.material.clone() as THREE.MeshStandardMaterial;
+    delete material.userData[SHARED_RESOURCE_FLAG];
+    material.color.multiplyScalar(BENCH_ALBEDO_GAIN);
+    const mesh = new THREE.InstancedMesh(asset.geometry, material, BENCH_SPOTS.length);
+    const transform = new THREE.Object3D();
+    const contacts: Array<{ x: number; z: number; radius: number; y: number }> = [];
+    BENCH_SPOTS.forEach((spot, index) => {
+      transform.position.set(spot.x, BENCH_GROUND_Y, spot.z);
+      transform.rotation.set(0, spot.yaw, 0);
+      transform.scale.set(1, 1, 1);
+      transform.updateMatrix();
+      mesh.setMatrixAt(index, transform.matrix);
+      // 椅长 1.05 m，一片圆盖不住两头：沿长度轴（局部 X）各贴一片
+      for (const end of [-0.3, 0.3]) {
+        contacts.push({
+          x: spot.x + Math.cos(spot.yaw) * end,
+          z: spot.z - Math.sin(spot.yaw) * end,
+          radius: 0.3,
+          y: BENCH_CONTACT_Y,
+        });
+      }
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.name = 'building-bench-props';
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.computeBoundingBox();
+    mesh.computeBoundingSphere();
+    parent.add(mesh);
+    buildingPropMeshes.push(mesh);
+
+    const shadows = createContactShadowDiscBatch('building-bench-contact', contacts);
+    if (shadows) parent.add(shadows);
+  });
+}
+
 function buildBuilding(parent: THREE.Object3D): {
   occluders: THREE.Object3D[];
   actors: Record<string, THREE.Object3D>;
 } {
   buildingWindTime.value = 0;
+  buildingGeneration += 1;
   const occluders: THREE.Object3D[] = [];
   const bloomUniforms = createColorBloomUniforms();
   const bloomEnvironment = new THREE.Group();
@@ -805,8 +882,11 @@ function buildBuilding(parent: THREE.Object3D): {
   const trunks: CampusPart[] = [];
   const branches: CampusPart[] = [];
   const crowns: CampusPart[] = [];
+  const groveCards: CanopyCardSpec[] = [];
   const leafTips: CampusPart[] = [];
   const shadePatches: CampusPart[] = [];
+  const groveTier = canopyBudget(getQualityTier());
+  const groveGolden = Math.PI * (3 - Math.sqrt(5)) * 2;
   for (const [index, tree] of grove.entries()) {
     const size = tree.size;
     trunks.push({ p: [tree.x, 1.9 * size, tree.z], s: [0.23 * size, 3.8 * size, 0.23 * size] });
@@ -824,17 +904,34 @@ function buildBuilding(parent: THREE.Object3D): {
       const z = tree.z + Math.sin(angle) * radius * 0.83;
       const y = (i < 8 ? 4.65 + (i % 3) * 0.2 : 5.75 + (i % 2) * 0.2) * size;
       crowns.push({
-        p: [x, y, z], s: [(1.05 + (i % 3) * 0.14) * size, (0.8 + (i % 2) * 0.13) * size, 1.07 * size],
-        r: [0.12, angle, 0.1], color: [0x9dac87, 0xb2bd94, 0x8fa681, 0xbdc49e][(index + i) % 4],
+        p: [x, y, z], s: [(0.92 + (i % 3) * 0.12) * size, (0.72 + (i % 2) * 0.11) * size, 0.94 * size],
+        r: [0.12, angle, 0.1], color: [0x5f8a41, 0x76a04d, 0x4f7a3b, 0x88ac5c][(index + i) % 4],
       });
       for (let tip = 0; tip < 4; tip += 1) {
         const a = angle + tip * 1.57;
         leafTips.push({
           p: [x + Math.cos(a) * 1.03 * size, y + Math.sin(i + tip) * 0.55 * size, z + Math.sin(a) * size],
           s: [0.48 * size, 0.23 * size, 0.36 * size], r: [0.25, a, 0.3],
-          color: [0xaebd8e, 0x96ad7d, 0xc2c89d][(i + tip) % 3],
+          color: [0x9dbb6f, 0x7fa85f, 0xbdd083][(i + tip) % 3],
         });
       }
+    }
+    // 冠团外再套一层 alpha 卡片：icosahedron 的外缘是一段连续折线，卡片把它切成叶簇的碎边。
+    // 卡片比冠团大一圈、按黄金角错开朝向，走动时剪影随之变化，才不像贴在空中的绿球。
+    const groveCenterY = 5.15 * size;
+    for (let card = 0; card < groveTier.cards; card += 1) {
+      const t = (card + 0.5) / groveTier.cards;
+      const angle = card * groveGolden + index * 1.37;
+      const ring = 0.95 * size * (0.3 + 0.7 * Math.sin(Math.PI * t));
+      groveCards.push({
+        x: tree.x + Math.cos(angle) * ring,
+        y: groveCenterY + (t - 0.5) * 1.9 * size,
+        z: tree.z + Math.sin(angle) * ring * 0.86,
+        scale: (2.85 + ((card * 5 + index) % 3) * 0.18) * size,
+        yaw: angle + Math.PI / 2,
+        tilt: (card % 3 - 1) * 0.17,
+        tint: [0xdfe7d6, 0xe9efe0, 0xd4dec9, 0xeef4e7][(index + card) % 4],
+      });
     }
     for (let i = 0; i < 18; i += 1) {
       const a = i * 2.399 + index;
@@ -850,6 +947,15 @@ function buildBuilding(parent: THREE.Object3D): {
   campusInstances(parent, new THREE.CylinderGeometry(0.35, 1, 1, 7), bark, branches);
   campusInstances(parent, new THREE.IcosahedronGeometry(1, 1), foliageWind, crowns);
   campusInstances(parent, new THREE.IcosahedronGeometry(1, 0), foliageWind, leafTips);
+  const groveCanopy = createCanopyCardBatch(groveCards, {
+    name: 'building-grove-canopy-cards',
+    texture: { size: groveTier.textureSize, seed: 5, aniso: groveTier.anisotropy, density: 0.92 },
+    alphaTest: groveTier.alphaTest,
+    time: buildingWindTime,
+    sway: 0.035,
+  });
+  groveCanopy.userData.windTime = buildingWindTime;
+  parent.add(groveCanopy);
   const shade = new THREE.MeshBasicMaterial({ color: 0x374d3c, transparent: true, opacity: 0.075, depthWrite: false });
   const dapple = campusInstances(parent, new THREE.CircleGeometry(1, 9), shade, shadePatches, false);
   dapple.raycast = () => {};
@@ -940,20 +1046,32 @@ function buildBuilding(parent: THREE.Object3D): {
     { x: 11.4, z: -33.1, height: 4.8, size: 0.73 }, { x: 12.1, z: -41.4, height: 5.7, size: 0.8 },
     { x: 12.2, z: -53.3, height: 7.4, size: 0.95 },
   ];
+  // 二排行道树改卡片树：真树干 + alpha 卡片冠。球冠的圆弧外轮廓就是"花椰菜"的成因，
+  // 卡片按黄金角错开朝向，玩家一走动就有视差，才读得出体积（手册 06_WINDOW_TREE 第三节）。
+  // 卡片走 unlit 材质，明暗已经烘在贴图里，不再让场景灯去算第二遍。
+  const rowTier = canopyBudget(getQualityTier());
+  const rowGolden = Math.PI * (3 - Math.sqrt(5));
+  const rowTints = [0xdfe7d6, 0xe9efe0, 0xd4dec9, 0xeef4e7];
   for (const side of [-1, 1]) {
     const rowTrunks: CampusPart[] = [];
-    const rowCrowns: CampusPart[] = [];
+    const rowCards: CanopyCardSpec[] = [];
     const rowShrubs: CampusPart[] = [];
     for (const [index, tree] of secondRow.entries()) {
       if (Math.sign(tree.x) !== side) continue;
       rowTrunks.push({ p: [tree.x, tree.height / 2, tree.z], s: [0.18 * tree.size, tree.height, 0.18 * tree.size] });
-      for (let cluster = 0; cluster < 5; cluster += 1) {
-        const angle = cluster * 2.399 + index * 0.63;
-        const radius = cluster < 4 ? 0.53 * tree.size : 0;
-        rowCrowns.push({
-          p: [tree.x + Math.cos(angle) * radius, tree.height + (cluster < 4 ? 0 : 0.95) * tree.size, tree.z + Math.sin(angle) * radius],
-          s: [0.98 * tree.size, (cluster < 4 ? 0.78 : 0.69) * tree.size, 0.91 * tree.size],
-          r: [0.06, angle, 0.08], color: [0x91a384, 0xa8b492, 0x81997e, 0xb0bb9b][(index + cluster) % 4],
+      const crownCenter = tree.height + 0.55 * tree.size;
+      for (let card = 0; card < rowTier.cards; card += 1) {
+        const t = (card + 0.5) / rowTier.cards;
+        const angle = card * rowGolden * 2 + index * 1.37 + side * 0.4;
+        const ring = 0.66 * tree.size * (0.4 + 0.6 * Math.sin(Math.PI * t));
+        rowCards.push({
+          x: tree.x + Math.cos(angle) * ring,
+          y: crownCenter + (t - 0.5) * 1.5 * tree.size,
+          z: tree.z + Math.sin(angle) * ring * 0.72,
+          scale: (1.62 + ((card * 5 + index) % 3) * 0.1) * tree.size,
+          yaw: angle + Math.PI / 2,
+          tilt: (card % 3 - 1) * 0.16,
+          tint: rowTints[(index + card) % rowTints.length],
         });
       }
       for (let shrub = 0; shrub < 3; shrub += 1) {
@@ -965,7 +1083,15 @@ function buildBuilding(parent: THREE.Object3D): {
       }
     }
     detailInstances(`building-second-row-trunks-${side}`, new THREE.CylinderGeometry(0.65, 1, 1, 7), bark, rowTrunks);
-    detailInstances(`building-second-row-crowns-${side}`, new THREE.IcosahedronGeometry(1, 0), foliageWind, rowCrowns);
+    const rowCrowns = createCanopyCardBatch(rowCards, {
+      name: `building-second-row-crowns-${side}`,
+      texture: { size: rowTier.textureSize, seed: 5, aniso: rowTier.anisotropy, density: 0.92 },
+      alphaTest: rowTier.alphaTest,
+      time: buildingWindTime,
+      sway: 0.03,
+    });
+    rowCrowns.userData.windTime = buildingWindTime;
+    parent.add(rowCrowns);
     detailInstances(`building-second-row-shrubs-${side}`, new THREE.IcosahedronGeometry(1, 0), foliageWind, rowShrubs);
   }
 
@@ -1384,6 +1510,8 @@ function buildBuilding(parent: THREE.Object3D): {
   const campusPhotographer = createCampusPhotographer();
   parent.add(campusPhotographer);
 
+  attachCampusBenches(parent);
+
   return { occluders, actors: { linxia, father, campusReader, campusObserver, campusPhotographer, bloomEnvironment } };
 }
 
@@ -1475,7 +1603,7 @@ function enterCampusIdle(actors: Record<string, THREE.Object3D>): void {
   tickCampusIdle(0);
 }
 
-let walkTween: gsap.core.Tween | null = null;
+let walkElapsed = 0;
 let fatherIdleDispose: (() => void) | null = null;
 let phonePanPose: THREE.Object3D | null = null;
 let phonePanTime = 0;
@@ -1497,10 +1625,30 @@ function clearBuildingBusSubscriptions(): void {
 }
 
 function beginLinxiaWalk(): void {
-  if (!walkWaitingForDialogue || !walkTween || walkArrived) return;
+  if (!walkWaitingForDialogue || walkArrived) return;
   walkWaitingForDialogue = false;
-  walkTween.resume();
   linxiaAnimation?.play('walk', { timeScale: WALK_TIME_SCALE, fadeIn: 0.35 });
+}
+
+/**
+ * 同行推进：只用路线的起点与终点做线性插值，位移量按真实秒数累积。
+ * 不走补间是为了绕开两件事：后台标签页把 rAF 节流到 1 fps 时补间会被压住，
+ * 以及全局时间缩放会同时改掉动画与位移；按 dt 累加后，任意帧率下同一秒的落点都相同。
+ */
+function tickLinxiaWalk(dtSeconds: number): void {
+  if (!walkingLinxia || walkWaitingForDialogue || walkArrived || dtSeconds <= 0) return;
+  walkElapsed = Math.min(WALK_DURATION_SEC, walkElapsed + dtSeconds);
+  const progress = walkElapsed / WALK_DURATION_SEC;
+  const point = pointAlongRoute(progress);
+  walkingLinxia.position.set(point.x, 0, point.z);
+  // 直线段没有拐点：朝向恒等于前进方向，不做逐帧角度插值（那会让转身快慢随帧率变化）
+  const direction = directionAlongRoute(progress);
+  walkingLinxia.rotation.y = Math.atan2(direction.x, direction.z);
+  // 到达 A 栋门口：交叉淡出走路，切到低速站定待机，避免停在半步姿势
+  if (progress >= 1) {
+    walkArrived = true;
+    linxiaAnimation?.play('afraid', { timeScale: 0.3, fadeIn: 0.6 });
+  }
 }
 
 function tickColorBloom(dtSeconds: number): void {
@@ -1549,21 +1697,17 @@ export const buildingRuntime: SceneRuntime = {
 
     if (context.sceneId !== 'S8') return;
     clearBuildingBusSubscriptions();
-    if (walkTween) {
-      walkTween.kill();
-      walkTween = null;
-    }
     disposeLinxiaAnimation();
     walkArrived = false;
+    walkElapsed = 0;
     walkWaitingForDialogue = Boolean(context.isModalBlocked?.());
 
     const linxia = context.actors.linxia;
     walkingLinxia = linxia;
     linxia.position.set(LINXIA_ROUTE[0].x, 0, LINXIA_ROUTE[0].z);
     linxia.rotation.z = 0;
-    // 朝向按折线切线平滑趋近，拐点不跳变
-    let facing = Math.atan2(directionAlongRoute(0).x, directionAlongRoute(0).z);
-    linxia.rotation.y = facing;
+    // 直线段：起点朝向即路线方向，之后每拍都按同一规则重算，不再有转身插值
+    linxia.rotation.y = Math.atan2(directionAlongRoute(0).x, directionAlongRoute(0).z);
 
     // 真实骨骼走路：若开场对话/选项正在进行，先让林夏原地站定等待，待主角说完话再启程同行
     linxiaAnimation = createActorAnimation(linxia);
@@ -1573,32 +1717,10 @@ export const buildingRuntime: SceneRuntime = {
       linxiaAnimation?.play('walk', { timeScale: WALK_TIME_SCALE, fadeIn: 0.2 });
     }
 
-    const progress = { value: 0 };
-    walkTween = gsap.to(progress, {
-      value: 1,
-      duration: WALK_DURATION_SEC,
-      ease: 'none',
-      onUpdate: () => {
-        const point = pointAlongRoute(progress.value);
-        linxia.position.set(point.x, 0, point.z);
-        const direction = directionAlongRoute(progress.value);
-        facing = approachAngle(facing, Math.atan2(direction.x, direction.z), 0.12);
-        linxia.rotation.y = facing;
-        // 到达 A 栋门口：交叉淡出走路，切到低速站定待机，避免停在半步姿势
-        if (!walkArrived && progress.value >= 0.999) {
-          walkArrived = true;
-          linxiaAnimation?.play('afraid', { timeScale: 0.3, fadeIn: 0.6 });
-        }
-      },
-    });
-    if (walkWaitingForDialogue) {
-      walkTween.pause();
-    }
-
     const pauseBeforeWalk = (): void => {
-      if (!walkArrived && walkTween && walkTween.progress() < 0.01) {
+      // 只在还没迈出第一步时改站定：走起来后对话不再打断同行（与补间版行为一致）
+      if (!walkArrived && walkElapsed < WALK_DURATION_SEC * 0.01) {
         walkWaitingForDialogue = true;
-        walkTween.pause();
         linxiaAnimation?.play('afraid', { timeScale: 0.35, fadeIn: 0.25 });
       }
     };
@@ -1624,6 +1746,8 @@ export const buildingRuntime: SceneRuntime = {
     if (walkWaitingForDialogue && !bloomContext?.isModalBlocked?.()) {
       beginLinxiaWalk();
     }
+    // 位移在动画更新之前推进，两者共用同一拍 dt
+    tickLinxiaWalk(dtSeconds);
     if (phonePanPose) {
       // 十秒小幅扫过林荫道与 A 栋；经过的两人自然入画，不追踪玩家、不抢占主镜头。
       phonePanTime = (phonePanTime + dtSeconds) % 10;
@@ -1665,6 +1789,9 @@ export const buildingRuntime: SceneRuntime = {
   },
 
   exit(): void {
+    // 先作废本代场景：仍在途的道具回调不能再往复用的 levelGroup 里补挂几何
+    buildingGeneration += 1;
+    disposeBuildingPropMeshes();
     clearBuildingBusSubscriptions();
     walkWaitingForDialogue = false;
     activeButterflies = null;
@@ -1677,10 +1804,7 @@ export const buildingRuntime: SceneRuntime = {
     phonePanPose = null;
     phonePanTime = 0;
     disposeCampusIdle();
-    if (walkTween) {
-      walkTween.kill();
-      walkTween = null;
-    }
+    walkElapsed = 0;
     disposeLinxiaAnimation();
     walkArrived = false;
     if (fatherIdleDispose) {

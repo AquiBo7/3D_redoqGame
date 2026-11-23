@@ -10,3 +10,11 @@ art/raw/*.glb
 
 # 队友交付的原始压缩包同样只归档不入库
 art/raw/*.zip
+*.zip
+.tmp/
+.tmp_*
+art/props_raw/
+__pycache__/
+*.pyc
+
+

@@ -104,6 +104,46 @@ const NEW_ANIMATED_MODELS = [
     lockedHipClips: ['walk', 'greet_04'],
     minTris: 20000,
   },
+  {
+    file: 'chr_student_male2.glb',
+    clips: ['angry_01', 'laugh_02', 'make_a_call_01', 'swagger', 'wait', 'walk'],
+    expectedSkins: 1,
+    allowUnskinnedMeshes: false,
+    lockedHipClips: ['walk', 'swagger'],
+    minTris: 20000,
+  },
+  {
+    file: 'chr_student_male3.glb',
+    clips: ['bow', 'cheer', 'greet_01', 'make_a_call_02', 'wait', 'walk'],
+    expectedSkins: 1,
+    allowUnskinnedMeshes: false,
+    lockedHipClips: ['walk', 'greet_01'],
+    minTris: 20000,
+  },
+  {
+    file: 'chr_student_male4.glb',
+    clips: ['agree', 'greet_01', 'look_around', 'make_a_call_02', 'walk', 'wave_goodbye_02'],
+    expectedSkins: 1,
+    allowUnskinnedMeshes: false,
+    lockedHipClips: ['walk', 'greet_01', 'wave_goodbye_02'],
+    minTris: 20000,
+  },
+  {
+    file: 'chr_student_female3.glb',
+    clips: ['afraid', 'agree', 'laugh_01', 'make_a_call_01', 'swagger', 'walk'],
+    expectedSkins: 1,
+    allowUnskinnedMeshes: false,
+    lockedHipClips: ['walk', 'swagger'],
+    minTris: 20000,
+  },
+  {
+    file: 'chr_student_female4.glb',
+    clips: ['afraid', 'fold_arms', 'look_around', 'make_a_call_02', 'sit', 'walk'],
+    expectedSkins: 1,
+    allowUnskinnedMeshes: false,
+    lockedHipClips: ['walk'],
+    minTris: 20000,
+  },
 ];
 
 describe('新父女、女老师与同学动画资源', () => {

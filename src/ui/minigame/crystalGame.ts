@@ -1,6 +1,11 @@
 import './crystalGame.css';
 
-export interface CrystalGameOptions { joined: boolean; tries: number }
+export interface CrystalGameOptions {
+  joined: boolean;
+  tries: number;
+  /** 每次出现新消息目标（含分裂子目标）时触发；intensity ∈ [0, 1] */
+  onSpawn?: (intensity: number) => void;
+}
 export interface CrystalGameResult { hits: number; kills: number; tries: number }
 export type CrystalPhase = 'ready' | 'phase1' | 'failed' | 'phase2' | 'ended';
 export type CrystalEnemyKind = 'small' | 'big' | 'splitter';
@@ -61,15 +66,14 @@ export function attackCrystal(model: CrystalModel, ally = false): CrystalEnemy |
   if (model.phase !== 'phase1' && model.phase !== 'phase2') return null;
   if (ally && !model.joined) return null;
   if (model.ticks < (ally ? model.nextAllyAttack : model.nextAttack)) return null;
-  if (!ally && Math.abs(model.player) < 0.2) return null;
   const side = ally ? -model.side : model.side;
   let target: CrystalEnemy | undefined;
   for (const enemy of model.enemies) {
-    if (enemy.side === side && enemy.distance <= 0.72 && (!target || enemy.distance < target.distance)) target = enemy;
+    if (enemy.side === side && enemy.distance <= 0.85 && (!target || enemy.distance < target.distance)) target = enemy;
   }
   if (!target) return null;
-  if (ally) { model.nextAllyAttack = model.ticks + 18; model.lastAllyAttack = model.ticks; }
-  else { model.nextAttack = model.ticks + 18; model.lastAttack = model.ticks; }
+  if (ally) { model.nextAllyAttack = model.ticks + 14; model.lastAllyAttack = model.ticks; }
+  else { model.nextAttack = model.ticks + 12; model.lastAttack = model.ticks; }
   target.hp -= 1;
   if (target.hp === 0) {
     model.enemies = model.enemies.filter((enemy) => enemy !== target);
@@ -94,8 +98,9 @@ export function advanceCrystalModel(model: CrystalModel, seconds: number, input:
     model.ticks += 1;
     model.phaseTicks += 1;
     const movement = Number(Boolean(input.right)) - Number(Boolean(input.left));
-    model.player = Math.max(-0.62, Math.min(0.62, model.player + movement * 1.8 / HZ));
-    if (Math.abs(model.player) >= 0.2) model.side = model.player < 0 ? -1 : 1;
+    model.player = Math.max(-0.62, Math.min(0.62, model.player + movement * 2.5 / HZ));
+    if (movement !== 0) model.side = movement < 0 ? -1 : 1;
+    else if (Math.abs(model.player) >= 0.15) model.side = model.player < 0 ? -1 : 1;
     if (model.phaseTicks >= model.nextSpawn) {
       const surge = model.phase === 'phase2';
       const kind: CrystalEnemyKind = surge && model.spawned % 3 === 0 ? 'splitter' : model.spawned % 5 === 4 ? 'big' : 'small';
@@ -216,7 +221,11 @@ export class CrystalGame {
       panel.hidden = s.mode === 'phase1' || s.mode === 'phase2';
       controls.hidden = !panel.hidden;
       if (s.mode === 'phase1' || s.mode === 'phase2') {
-        status.textContent = s.mode === 'phase1' ? (s.model.joined ? '你守住一侧，另一侧有人回应。' : '靠近声音来的一侧，拦住它们。') : '声音越来越密。你仍可以拦下一些。';
+        status.textContent = s.mode === 'phase1'
+          ? (s.model.joined
+            ? `已拦住 ${s.model.attemptKills}/${TARGET} · 你守住一侧，另一侧有人回应`
+            : `已拦住 ${s.model.attemptKills}/${TARGET} · 靠近声音来的一侧，按空格/J拦截`)
+          : '声音越来越密。你仍可以拦下一些。';
         canvas.focus({ preventScroll: true });
       } else if (s.mode === 'failed') {
         title.textContent = '先停一停，再试一次';
@@ -336,7 +345,18 @@ export class CrystalGame {
           const mapped = action({ code, key: code } as KeyboardEvent);
           if (mapped) held.add(mapped);
         }
+        const beforeNextId = s.model.nextId;
         advanceCrystalModel(s.model, seconds, { left: held.has('left'), right: held.has('right'), attack: held.has('attack') });
+        if (s.model.nextId > beforeNextId) {
+          const isSurge = s.model.phase === 'phase2';
+          const progress = isSurge ? Math.min(1, s.model.phaseTicks / NARRATIVE_TICKS) : 0;
+          this.options.onSpawn?.(isSurge ? 0.55 + progress * 0.45 : 0.22);
+        }
+        if (s.model.phase === 'phase1') {
+          status.textContent = s.model.joined
+            ? `已拦住 ${s.model.attemptKills}/${TARGET} · 你守住一侧，另一侧有人回应`
+            : `已拦住 ${s.model.attemptKills}/${TARGET} · 靠近声音来的一侧，按空格/J拦截`;
+        }
         sync();
       }
       this.draw(s); schedule();
@@ -403,13 +423,20 @@ export class CrystalGame {
     ctx.restore();
     const person = (position: number, ally: boolean): void => {
       const x = cx + position * scale, y = cy + size * 0.5;
+      const facing = ally ? -m.side : m.side;
       ctx.fillStyle = ally ? '#d99b68' : '#d3d9d0';
       circle(x, y - size * 0.95, size * 0.23); ctx.fill();
       ctx.beginPath(); ctx.moveTo(x, y - size * 0.65); ctx.lineTo(x + size * 0.32, y + size * 0.65); ctx.lineTo(x - size * 0.32, y + size * 0.65); ctx.closePath(); ctx.fill();
+      // 朝向与拦截范围微弱弧线提示
+      ctx.strokeStyle = ally ? 'rgba(227,171,125,0.35)' : 'rgba(245,232,188,0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y - size * 0.25, size * 0.95, facing > 0 ? -0.75 : Math.PI - 0.75, facing > 0 ? 0.75 : Math.PI + 0.75);
+      ctx.stroke();
       const age = m.ticks - (ally ? m.lastAllyAttack : m.lastAttack);
       if (age < 12) {
-        ctx.strokeStyle = ally ? '#e3ab7d' : '#f5e8bc'; ctx.lineWidth = 2;
-        circle(x, y - size * 0.3, size * (s.reducedMotion ? 1.3 : 1 + age / 12)); ctx.stroke();
+        ctx.strokeStyle = ally ? '#e3ab7d' : '#f5e8bc'; ctx.lineWidth = 2.5;
+        circle(x, y - size * 0.3, size * (s.reducedMotion ? 1.3 : 1 + age / 10)); ctx.stroke();
       }
     };
     person(m.player, false);

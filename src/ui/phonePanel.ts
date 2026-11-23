@@ -364,6 +364,11 @@ export class PhonePanelView {
         for (const draft of panel.profile.drafts) {
           const card = createElement('p', `phone__draft${draft.unlocked ? '' : ' phone__draft--locked'}`,
             draft.unlocked ? draft.text : '未发送的草稿');
+          if (draft.unlocked && draft.assetId) {
+            const fig = createElement('span', 'phone__draft-figure');
+            renderAssetImage(draft.assetId as AssetId, fig).draggable = false;
+            card.append(fig);
+          }
           list.append(card);
         }
       } else {
@@ -494,6 +499,35 @@ export class PhonePanelView {
       this.focusContent();
     });
     header.append(back, createElement('h3', 'phone__section-title', this.sectionTitle(section)));
+    if (section.kind === 'chat' && section.avatarActionId) {
+      const actionId = section.avatarActionId;
+      const avatarBtn = createButton('phone__avatar-btn', '查看头像');
+      avatarBtn.setAttribute('data-avatar-action', actionId);
+      avatarBtn.setAttribute('aria-label', `查看${section.title}的头像`);
+      avatarBtn.addEventListener('click', () => {
+        if (!this.isLive(avatarBtn) || !this.panel?.sections.includes(section)) return;
+        this.refreshShortcutCooldown();
+        const existing = this.body.querySelector('.phone__avatar-card');
+        if (existing) {
+          existing.remove();
+          return;
+        }
+        const card = createElement('div', 'phone__avatar-card');
+        const thumb = createElement('div', 'phone__avatar-card-img');
+        renderAssetImage('portrait_linxia_casual', thumb).draggable = false;
+        card.append(
+          thumb,
+          createElement('p', 'phone__avatar-card-name', section.title),
+          createElement('p', 'phone__avatar-card-note', '浅黄色外套 · 资料页'),
+        );
+        header.after(card);
+        if (!this.photoActions.has(actionId)) {
+          this.photoActions.add(actionId);
+          this.callbacks.onAction(this.panel.id, 'reply', actionId);
+        }
+      });
+      header.append(avatarBtn);
+    }
 
     this.body.append(header);
 

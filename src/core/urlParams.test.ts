@@ -10,7 +10,15 @@ describe('parseUrlParams', () => {
       phonePreview: false,
       role: 'bystander',
       scene: null,
+      night: false,
     });
+  });
+
+  it('识别 ?night=1 夜色开关且支持关闭值', () => {
+    expect(parseUrlParams('?night=1').night).toBe(true);
+    expect(parseUrlParams('?night').night).toBe(true);
+    expect(parseUrlParams('?night=0').night).toBe(false);
+    expect(parseUrlParams('?night=false').night).toBe(false);
   });
 
   it('识别 ?phonePreview=1 且支持关闭值', () => {

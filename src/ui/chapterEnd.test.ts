@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eventBus } from '../core/eventBus';
 import { createInitialStoryState, type StoryState } from '../core/state';
+import { DRAWING_WITHDRAWN_LOG } from '../data/endingContent';
 import { renderAssetImage } from './assetImage';
 import { initChapterEnd } from './chapterEnd';
 
@@ -108,14 +109,14 @@ beforeEach(() => {
 afterEach(() => { dispose(); eventBus.clear(); vi.unstubAllGlobals(); });
 
 describe('结局页面展示与操作', () => {
-  it('保留 overlay 和 summary 契约，按五块呈现，图片只走 assetImage', () => {
+  it('保留 overlay 和 summary 契约，按六块呈现，图片只走 assetImage', () => {
     expect(overlay().hidden).toBe(true);
     show({ ending: 'joined', trust: 1, postChoice: 'joke' });
     const root = overlay();
     expect(root.hidden).toBe(false);
     expect(root.attributes).toMatchObject({ role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'chapter-end-title' });
     expect(root.querySelectorAll('summary')[0].textContent).toBe('查看足迹');
-    expect(root.children[0].children.map((child) => child.tagName)).toEqual(['HEADER', 'SECTION', 'DETAILS', 'SECTION', 'SECTION', 'FOOTER']);
+    expect(root.children[0].children.map((child) => child.tagName)).toEqual(['HEADER', 'SECTION', 'DETAILS', 'SECTION', 'SECTION', 'SECTION', 'FOOTER']);
     expect(root.querySelectorAll('.chapter-end__draft')).toHaveLength(4);
     expect(root.querySelectorAll('.chapter-end__draft--locked')).toHaveLength(3);
     expect(root.querySelectorAll('.chapter-end__action')).toHaveLength(5);
@@ -198,5 +199,76 @@ describe('结局页面展示与操作', () => {
     show({ ending: 'best' });
     expect(root.hidden).toBe(true);
     expect(host.children).toHaveLength(0);
+  });
+});
+
+describe('结局页三视角应对与法治清单', () => {
+  it('六个关键节点全部成卡，默认三栏并排，底部给出法条依据', () => {
+    show({ ending: 'middle' });
+    const root = overlay();
+    const nodes = root.querySelectorAll('.chapter-end__node');
+    expect(nodes.map((node) => node.dataset.nodeId)).toEqual(['N1', 'N2', 'N3', 'N4', 'N5', 'N6']);
+    expect(root.querySelectorAll('.chapter-end__perspective')).toHaveLength(18);
+    expect(root.querySelectorAll('.chapter-end__perspective').every((column) => !column.hidden)).toBe(true);
+    expect(root.querySelectorAll('.chapter-end__tab')).toHaveLength(4);
+    expect(root.querySelectorAll('.chapter-end__stamp')).toHaveLength(0);
+    expect(root.textContent).toContain('如果你是受害者');
+    expect(root.textContent).toContain('第一千零二十四条');
+    expect(root.textContent).not.toMatch(/harm|trust|分数|得分/);
+  });
+
+  it('只给本局日志到过的节点盖章，不按结局倒推', () => {
+    show({ ending: 'best', log: [
+      { sceneId: 'S14', type: 'choice' as const, summary: '选择了等等。', timestamp: 0 },
+      { sceneId: 'D2', type: 'choice' as const, summary: '第 1 轮：说明事实。', timestamp: 1 },
+    ] });
+    const stamped = overlay().querySelectorAll('.chapter-end__node')
+      .filter((node) => node.querySelectorAll('.chapter-end__stamp').length > 0)
+      .map((node) => node.dataset.nodeId);
+    expect(stamped).toEqual(['N1', 'N2', 'N5']);
+  });
+
+  it('切换视角页签只收起其他两栏，切回全部三视角恢复', () => {
+    show({ ending: 'best' });
+    const columns = overlay().querySelectorAll('.chapter-end__perspective');
+    button('受害者自护').dispatch('click');
+    expect(button('受害者自护').attributes['aria-pressed']).toBe('true');
+    expect(button('全部三视角').attributes['aria-pressed']).toBe('false');
+    expect(columns.filter((column) => !column.hidden)).toHaveLength(6);
+    expect(columns.every((column) => (column.dataset.perspective === 'victim') === !column.hidden)).toBe(true);
+
+    button('推手止损').dispatch('click');
+    expect(columns.filter((column) => !column.hidden).every((column) => column.dataset.perspective === 'perpetrator')).toBe(true);
+
+    button('全部三视角').dispatch('click');
+    expect(columns.filter((column) => !column.hidden)).toHaveLength(18);
+  });
+
+  it('重复打开结局页时清单替换而非累加', () => {
+    show({ ending: 'best' });
+    show({ ending: 'joined' });
+    const root = overlay();
+    expect(root.querySelectorAll('.chapter-end__node')).toHaveLength(6);
+    expect(root.querySelectorAll('.chapter-end__tab')).toHaveLength(4);
+  });
+
+  it('最好结局收回画、草稿箱反应与最后一问均按顺序呈现且在草稿内渲染画作', () => {
+    show({
+      ending: 'best',
+      trust: 7,
+      log: [{ sceneId: 'E1', type: 'choice', summary: DRAWING_WITHDRAWN_LOG, timestamp: 1 }],
+      draftReactions: ['那天，我看到有人点开了我的头像。', '你先问了我。谢谢。'],
+      finalAnswer: 'wrong',
+    });
+    const root = overlay();
+    const drafts = root.querySelectorAll('.chapter-end__draft');
+    expect(drafts.map((item) => item.dataset.draftId)).toEqual([
+      'draft-1', 'draft-2', 'draft-3', 'draft-4', 'reaction-1', 'reaction-2', 'draft-final',
+    ]);
+    expect(drafts[2].querySelectorAll('.chapter-end__draft-figure')[0]?.querySelectorAll('img')[0]?.dataset.assetId)
+      .toBe('cg_ending_best_drawing');
+    expect(drafts[4].textContent).toContain('那天，我看到有人点开了我的头像。');
+    expect(drafts[5].textContent).toContain('你先问了我。谢谢。');
+    expect(drafts[6].textContent).toContain('不对');
   });
 });

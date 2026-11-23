@@ -1,8 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { FirstPersonController } from './FirstPersonController';
-import type { FirstPersonCallbacks } from './FirstPersonController';
+import type { FirstPersonCallbacks, FirstPersonNavigation } from './FirstPersonController';
 import { FIRST_PERSON_CONFIG } from './worldConfig';
+import type { SceneSpawn } from './worldSceneTypes';
+import {
+  FLOOR2_Y,
+  LANDING_Y,
+  SPAWN_1F,
+  SPAWN_2F,
+  SPAWN_ABOVE_OFFICE_2F,
+  SPAWN_STAIR_TOP_2F,
+  TWO_FLOOR_NAV,
+} from './twoFloorNavFixture';
 
 type Listener = (event: unknown) => void;
 
@@ -73,18 +83,26 @@ function installDom(): void {
   globals.document = fakeDocument;
 }
 
-function createController(callbacks: FirstPersonCallbacks = {}): FirstPersonController {
+const FLAT_NAV: FirstPersonNavigation = {
+  bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+  obstacles: [],
+};
+
+const FLAT_SPAWN: SceneSpawn = { x: 0, z: 0, yaw: 0, pitchDeg: 0 };
+
+function createController(
+  callbacks: FirstPersonCallbacks = {},
+  navigation: FirstPersonNavigation = FLAT_NAV,
+  spawn: SceneSpawn = FLAT_SPAWN,
+): FirstPersonController {
   camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 120);
   scene = new THREE.Scene();
   return new FirstPersonController({
     camera,
     domElement: domElement as unknown as HTMLElement,
     scene,
-    spawn: { x: 0, z: 0, yaw: 0, pitchDeg: 0 },
-    navigation: {
-      bounds: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
-      obstacles: [],
-    },
+    spawn,
+    navigation,
     callbacks,
   });
 }
@@ -609,5 +627,155 @@ describe('FirstPersonController 触屏双击疾跑', () => {
     tap(200);
     controller.update(0.05);
     expect(controller.getMoveSpeed()).toBeCloseTo(FIRST_PERSON_CONFIG.walkSpeed);
+  });
+});
+
+describe('FirstPersonController 双层教学楼（1F + 双跑折返楼梯 + 2F）', () => {
+  let controller: FirstPersonController;
+
+  beforeEach(() => {
+    installDom();
+    pointerTime = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => pointerTime);
+  });
+
+  afterEach(() => {
+    controller?.dispose();
+    vi.restoreAllMocks();
+  });
+
+  /** 连续推进若干帧，返回逐帧脚底高度 */
+  function walk(frames: number): number[] {
+    const heights: number[] = [];
+    for (let index = 0; index < frames; index += 1) {
+      controller.update(0.05);
+      heights.push(controller.getFeetPosition().y);
+    }
+    return heights;
+  }
+
+  /** 逐帧高差不得超过单步吸附上限，否则就是穿楼板 / 瞬移上二楼 */
+  function assertNoTeleport(heights: number[]): void {
+    let previous = heights[0];
+    for (const height of heights) {
+      expect(Math.abs(height - previous)).toBeLessThanOrEqual(0.65);
+      previous = height;
+    }
+  }
+
+  it('2F 出生停在楼板上：逐帧静止也不会被 1F 地面拽下去', () => {
+    controller = createController({}, TWO_FLOOR_NAV, SPAWN_2F);
+    expect(controller.getFeetPosition().y).toBeCloseTo(FLOOR2_Y, 6);
+    const heights = walk(30);
+    assertNoTeleport(heights);
+    for (const height of heights) expect(height).toBeCloseTo(FLOOR2_Y, 6);
+    expect(camera.position.y).toBeGreaterThan(FLOOR2_Y + FIRST_PERSON_CONFIG.eyeHeight - 0.05);
+    expect(camera.position.y).toBeLessThan(FLOOR2_Y + FIRST_PERSON_CONFIG.eyeHeight + 0.05);
+  });
+
+  it('1F 出生点正上方就是 2F 楼板：不填 spawn.y 也留在 1F 地面', () => {
+    controller = createController({}, TWO_FLOOR_NAV, SPAWN_1F);
+    expect(controller.getFeetPosition().y).toBeCloseTo(0, 6);
+    walk(20);
+    expect(controller.getFeetPosition().y).toBeCloseTo(0, 6);
+  });
+
+  it('2F 玩家横穿 1F 办公桌上方不受阻挡', () => {
+    controller = createController({}, TWO_FLOOR_NAV, { x: -7.5, z: -1.5, y: FLOOR2_Y, yaw: 0, pitchDeg: 0 });
+    pressKey('KeyD');
+    walk(40);
+    releaseKey('KeyD');
+    expect(controller.getFeetPosition().x).toBeGreaterThan(-4);
+    expect(controller.getFeetPosition().y).toBeCloseTo(FLOOR2_Y, 6);
+  });
+
+  it('1F 玩家横穿 2F 课桌下方不受阻挡', () => {
+    controller = createController({}, TWO_FLOOR_NAV, { x: -7.5, z: 2, yaw: 0, pitchDeg: 0 });
+    expect(controller.getFeetPosition().y).toBeCloseTo(0, 6);
+    pressKey('KeyD');
+    walk(40);
+    releaseKey('KeyD');
+    expect(controller.getFeetPosition().x).toBeGreaterThan(-4);
+    expect(controller.getFeetPosition().y).toBeCloseTo(0, 6);
+  });
+
+  it('本层办公桌照常挡人：同一条路线在 1F 被 1F 办公桌拦下', () => {
+    controller = createController({}, TWO_FLOOR_NAV, { x: -7.5, z: -1.5, yaw: 0, pitchDeg: 0 });
+    pressKey('KeyD');
+    walk(40);
+    releaseKey('KeyD');
+    expect(controller.getFeetPosition().x).toBeGreaterThan(-6.5);
+    expect(controller.getFeetPosition().x).toBeLessThan(-6.2);
+  });
+
+  it('沿双跑折返楼梯连续走下到 1F 梯脚，全程高度平滑', () => {
+    controller = createController({}, TWO_FLOOR_NAV, SPAWN_STAIR_TOP_2F);
+    pressKey('KeyW');
+    const heights = walk(100);
+    releaseKey('KeyW');
+    assertNoTeleport(heights);
+
+    const feet = controller.getFeetPosition();
+    expect(feet.z).toBeCloseTo(5, 3);
+    expect(feet.y).toBeLessThan(0.02);
+    expect(heights.some((height) => Math.abs(height - LANDING_Y) < 0.06)).toBe(true);
+  });
+
+  it('从 1F 梯脚沿原路走回 2F，回到楼板高度', () => {
+    controller = createController({}, TWO_FLOOR_NAV, SPAWN_STAIR_TOP_2F);
+    pressKey('KeyW');
+    walk(100);
+    releaseKey('KeyW');
+
+    const bottom = controller.getFeetPosition();
+    expect(bottom.y).toBeLessThan(0.02);
+    controller.setSpawn({ x: bottom.x, z: bottom.z, y: bottom.y, yaw: 0, pitchDeg: 0 });
+    pressKey('KeyW');
+    const heights = walk(100);
+    releaseKey('KeyW');
+    assertNoTeleport(heights);
+
+    const top = controller.getFeetPosition();
+    expect(top.z).toBeCloseTo(-4, 3);
+    expect(top.y).toBeCloseTo(FLOOR2_Y, 3);
+  });
+
+  it('1F 玩家沿楼板下方走过：全程留在 1F，不被拽上 2F', () => {
+    controller = createController({}, TWO_FLOOR_NAV, { x: -7.5, z: 4, yaw: 0, pitchDeg: 0 });
+    pressKey('KeyD');
+    const heights = walk(50);
+    releaseKey('KeyD');
+    for (const height of heights) expect(height).toBeCloseTo(0, 6);
+    expect(controller.getFeetPosition().x).toBeGreaterThan(-2.5);
+  });
+
+  it('触屏轻点：站在 2F 外廊边缘点向楼下草坪不会隔层起步', () => {
+    controller = createController({}, TWO_FLOOR_NAV, {
+      x: -4, z: -7.9, y: FLOOR2_Y, yaw: 0, pitchDeg: -70,
+    });
+    tap(100, 400, 225);
+    controller.update(0.05);
+    expect(controller.getMoveSpeed()).toBe(0);
+    expect(controller.getFeetPosition().y).toBeCloseTo(FLOOR2_Y, 6);
+    expect((scene.children[0] as THREE.Mesh).visible).toBe(false);
+  });
+
+  it('触屏轻点：同层 2F 楼板照常起步且留在 2F', () => {
+    controller = createController({}, TWO_FLOOR_NAV, {
+      x: -4, z: 0, y: FLOOR2_Y, yaw: 0, pitchDeg: -70,
+    });
+    tap(100, 400, 225);
+    controller.update(0.05);
+    expect(controller.getMoveSpeed()).toBeCloseTo(FIRST_PERSON_CONFIG.walkSpeed);
+    const heights = walk(20);
+    assertNoTeleport(heights);
+    expect(controller.getFeetPosition().z).toBeLessThan(-0.3);
+    expect(controller.getFeetPosition().y).toBeCloseTo(FLOOR2_Y, 6);
+  });
+
+  it('站在 1F 办公室触发区正上方的 2F：脚底高度保持 3.8 供触发区判层', () => {
+    controller = createController({}, TWO_FLOOR_NAV, SPAWN_ABOVE_OFFICE_2F);
+    const heights = walk(20);
+    for (const height of heights) expect(height).toBeCloseTo(FLOOR2_Y, 6);
   });
 });

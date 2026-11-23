@@ -41,6 +41,12 @@
   pointer-events: auto;
 }
 
+.caption--inner.caption--subtle {
+  font-size: 15px;
+  color: rgba(246, 243, 236, 0.88);
+  letter-spacing: 0.14em;
+}
+
 .caption--observation {
   bottom: clamp(226px, 37vh, 370px);
   z-index: 19;
@@ -76,6 +82,10 @@
     font-size: 16px;
   }
 
+  .caption--inner.caption--subtle {
+    font-size: 13.5px;
+  }
+
   .caption--observation {
     bottom: clamp(200px, 40vh, 246px);
     font-size: 12.5px;
@@ -98,6 +108,11 @@ body:has(.lite-world:not([hidden])) .caption--inner {
   background: rgba(250, 247, 239, 0.96);
   color: #2f3734;
   text-shadow: none;
+}
+
+body:has(.lite-world:not([hidden])) .caption--inner.caption--subtle {
+  font-size: 14px;
+  color: rgba(47, 55, 52, 0.88);
 }
 
 body:has(.lite-world:not([hidden])) .caption--observation {

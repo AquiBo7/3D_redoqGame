@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chapter1 } from '../data/story';
+import { DRAWING_WITHDRAWN_LOG } from '../data/endingContent';
 import type { PhonePanel, PhoneSection, SceneId } from '../data/storySchema';
 import { buildPhonePresentation } from './phonePresentation';
 import { createInitialStoryState } from './state';
@@ -90,5 +91,25 @@ describe('四Tab手机的剧情展示投影', () => {
     const result = buildPhonePresentation(source, state, 'S13', chapter1);
     expect(byKind(result, 'chat').some((chat) => chat.title === '林夏')).toBe(false);
     expect(JSON.stringify({ source, state })).toBe(before);
+  });
+
+  it('已加林夏好友后非 E1 阶段可点开头像触发记录，E1 草稿箱同步投影反应与收回画', () => {
+    const state = {
+      ...createInitialStoryState(),
+      addedHer: true,
+      trust: 7,
+      ending: 'best' as const,
+      draftReactions: ['那天，我看到有人点开了我的头像。'],
+      finalAnswer: 'silent' as const,
+      log: [{ sceneId: 'E1' as const, type: 'choice' as const, summary: DRAWING_WITHDRAWN_LOG, timestamp: 1 }],
+    };
+    const inC1 = buildPhonePresentation(panelAt('C1'), state, 'C1', chapter1);
+    expect(byKind(inC1, 'chat').find((chat) => chat.id === 'archive-linxia')?.avatarActionId).toBe('view-linxia-avatar');
+
+    const inE1 = buildPhonePresentation({ id: 'ending-archive', closeActionId: 'close', sections: [] }, state, 'E1', chapter1);
+    expect(byKind(inE1, 'chat').find((chat) => chat.id === 'archive-linxia')?.avatarActionId).toBeUndefined();
+    expect(inE1.profile?.drafts?.[2]?.assetId).toBe('cg_ending_best_drawing');
+    expect(inE1.profile?.drafts?.some((draft) => draft.text === '那天，我看到有人点开了我的头像。')).toBe(true);
+    expect(inE1.profile?.drafts?.[inE1.profile.drafts.length - 1]?.text).toContain('什么都没说');
   });
 });

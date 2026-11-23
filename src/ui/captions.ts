@@ -62,7 +62,7 @@ export class CaptionView {
     this.innerActive = false;
     this.innerStepId = '';
     this.innerRoot.hidden = true;
-    this.innerRoot.classList.remove('is-visible');
+    this.innerRoot.classList.remove('is-visible', 'caption--subtle');
     this.observationRoot.hidden = true;
     this.observationRoot.classList.remove('is-visible');
   }
@@ -78,6 +78,7 @@ export class CaptionView {
     this.innerActive = true;
     this.innerStepId = payload.stepId;
     this.innerText.textContent = payload.text;
+    this.innerRoot.classList.toggle('caption--subtle', payload.tone === 'subtle');
     this.innerRoot.hidden = false;
     this.restartTransition(this.innerRoot);
 

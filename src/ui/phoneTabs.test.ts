@@ -32,6 +32,17 @@ class FakeElement extends EventTarget {
   append(...nodes: FakeElement[]): void {
     for (const node of nodes) { node.remove(); node.parentElement = this; this.children.push(node); }
   }
+  after(...nodes: FakeElement[]): void {
+    const parent = this.parentElement;
+    if (!parent) return;
+    let index = parent.children.indexOf(this) + 1;
+    for (const node of nodes) {
+      node.remove();
+      node.parentElement = parent;
+      parent.children.splice(index, 0, node);
+      index += 1;
+    }
+  }
   replaceChildren(...nodes: FakeElement[]): void {
     for (const child of this.children) child.parentElement = null;
     this.children.length = 0;
@@ -179,6 +190,34 @@ describe('v0.6 四 Tab 展示', () => {
     expect(query('.phone__body').textContent).not.toContain('尚未解锁的正文');
     phone.open({ ...panel(), defaultTab: 'me' });
     expect(query('.phone__empty').textContent).toContain('故事结束后');
+
+    phone.open({ ...panel(), defaultTab: 'me', profile: { name: '新生', account: 'campus_26', drafts: [
+      { text: '收回的画留在了草稿里。', unlocked: true, assetId: 'cg_ending_best_drawing' },
+    ] } });
+    expect(query('.phone__draft').textContent).toBe('收回的画留在了草稿里。');
+    expect(query('.phone__draft-figure').querySelectorAll('img')).toHaveLength(1);
+  });
+
+  it('带 avatarActionId 的聊天可点击查看头像、再次点击收起，且只回报 core 一次', () => {
+    const data: PhonePanel = {
+      ...panel(),
+      defaultTab: 'messages',
+      sections: [{
+        kind: 'chat', id: 'linxia', title: '林夏', unread: 0, avatarActionId: 'view-linxia-avatar',
+        messages: [{ id: 'm1', from: '林夏', text: '嗯。' }],
+      }],
+    };
+    phone.open(data);
+    query('[data-section-id="linxia"]').click();
+    const btn = query('[data-avatar-action="view-linxia-avatar"]');
+    btn.click();
+    expect(query('.phone__avatar-card').textContent).toContain('林夏');
+    expect(onAction).toHaveBeenCalledExactlyOnceWith('tabs', 'reply', 'view-linxia-avatar');
+    btn.click();
+    expect(doc.body.querySelector('.phone__avatar-card')).toBeNull();
+    btn.click();
+    expect(query('.phone__avatar-card').textContent).toContain('林夏');
+    expect(onAction).toHaveBeenCalledTimes(1);
   });
 
   it('删除占位显示传入历史转发数，不显示旧内容或互动', () => {

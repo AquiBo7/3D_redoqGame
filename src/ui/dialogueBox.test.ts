@@ -1,5 +1,8 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { READY_EXTERNAL_ASSETS } from '../data/assetManifest';
+import { EXPRESSION_PORTRAITS } from '../data/expressionPortraits';
 import { DialogueBox, SPEAKER_PORTRAIT_URLS } from './dialogueBox';
 
 class ClassListStub {
@@ -180,5 +183,59 @@ describe('DialogueBox 左侧人物立绘渲染与降级', () => {
     ayuanImg.dispatchEvent(new Event('error'));
     expect(portrait.hidden).toBe(true);
     expect(section.classList.contains('dialogue--has-portrait')).toBe(false);
+  });
+
+  it('30 张差分表情立绘文件真实存在；同角色按台词与情绪原地换脸不重建 DOM，失败回退默认立绘', () => {
+    for (const rel of Object.values(EXPRESSION_PORTRAITS)) {
+      const file = resolve(process.cwd(), 'public', rel.slice('./'.length));
+      expect(existsSync(file), `缺少表情立绘：${rel}`).toBe(true);
+    }
+    const onEnd = vi.fn();
+    box = new DialogueBox({
+      container: rootHost as unknown as HTMLElement,
+      onEnd,
+    });
+    box.show({
+      stepId: 'e1-best-gift',
+      speakerNames: { linxia: '林夏', ayuan: '阿远', teacher: '周老师' },
+      lines: [
+        { speaker: 'linxia', text: '……给你。' },
+        { speaker: 'linxia', text: '我自己画的。' },
+        { speaker: 'ayuan', text: '你说的这些话，我也截下来了。' },
+        { speaker: 'teacher', text: '林夏同意吗？' },
+        { speaker: 'linxia', emotion: 'cry', text: '未收录但带哭泣情绪的台词' },
+      ],
+    });
+    const section = rootHost.findByClass('dialogue')!;
+    const portrait = section.findByClass('dialogue__portrait')!;
+    const panel = section.findByClass('dialogue__panel')!;
+
+    const img = portrait.findByClass('dialogue__portrait-image')!;
+    expect(img.src).toBe(EXPRESSION_PORTRAITS.linxiaSmile2);
+
+    // 同一说话人切换到“我自己画的。”，复用同一 <img> 原地切真心笑
+    panel.dispatchEvent(new Event('click'));
+    panel.dispatchEvent(new Event('click'));
+    expect(portrait.findByClass('dialogue__portrait-image')).toBe(img);
+    expect(img.src).toBe(EXPRESSION_PORTRAITS.linxiaJoy2);
+
+    // 切换阿远阴阳怪气_3，若该表情图加载失败先回退基础半身立绘
+    panel.dispatchEvent(new Event('click'));
+    panel.dispatchEvent(new Event('click'));
+    const ayuanImg = portrait.findByClass('dialogue__portrait-image')!;
+    expect(ayuanImg.src).toBe(EXPRESSION_PORTRAITS.ayuanSmirk3);
+    ayuanImg.dispatchEvent(new Event('error'));
+    expect(portrait.hidden).toBe(false);
+    expect(ayuanImg.src).toBe(READY_EXTERNAL_ASSETS.portrait_ayuan);
+
+    // 周老师正色_2
+    panel.dispatchEvent(new Event('click'));
+    panel.dispatchEvent(new Event('click'));
+    expect(portrait.findByClass('dialogue__portrait-image')!.src).toBe(EXPRESSION_PORTRAITS.teacherSerious2);
+
+    // 未收录但带 cry 情绪 → 命中林夏低落_3
+    panel.dispatchEvent(new Event('click'));
+    panel.dispatchEvent(new Event('click'));
+    expect(portrait.findByClass('dialogue__portrait-image')!.src).toBe(EXPRESSION_PORTRAITS.linxiaLow3);
   });
 });

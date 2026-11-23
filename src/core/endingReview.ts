@@ -1,8 +1,11 @@
+import type { AssetId } from '../data/assetManifest';
 import {
-  BEST_WITHOUT_DRAWING, CHAPTER_REVIEW_CONTENT, ENDING_ACTION_CARDS, ENDING_CONTENT,
-  ENDING_DRAFTS, FOOTPRINT_GROUPS, REVIEW_LABELS,
+  BEST_WITHDRAWN_DRAWING, BEST_WITHOUT_DRAWING, CHAPTER_REVIEW_CONTENT, DRAWING_WITHDRAWN_LOG,
+  ENDING_ACTION_CARDS, ENDING_CONTENT, ENDING_DRAFTS, FINAL_ANSWER_DRAFTS, FINAL_ANSWER_LABELS,
+  FOOTPRINT_GROUPS, REVIEW_LABELS,
   type EndingCopy, type EndingId,
 } from '../data/endingContent';
+import { LEGAL_HINTS, PERSPECTIVE_LABELS } from '../data/legalHints';
 import type { StoryState } from './state';
 
 export interface ReviewFootprint {
@@ -13,11 +16,30 @@ export interface ReviewFootprint {
   records: string[];
 }
 
+export type ReviewPerspectiveKey = 'victim' | 'bystander' | 'perpetrator';
+
+export interface ReviewPerspective {
+  key: ReviewPerspectiveKey;
+  label: string;
+  text: string;
+}
+
+export interface ReviewNodeGuide {
+  id: string;
+  title: string;
+  /** 本局日志是否走过该节点关联的场景，只作标记，不评价当时的选择。 */
+  experienced: boolean;
+  lawRef: string;
+  lawSummary: string;
+  perspectives: ReviewPerspective[];
+}
+
 export interface EndingReview extends EndingCopy {
   ending: EndingId | null;
   footprints: ReviewFootprint[];
-  drafts: Array<{ id: string; unlocked: boolean; text: string }>;
+  drafts: Array<{ id: string; unlocked: boolean; text: string; assetId?: AssetId }>;
   actions: Array<{ title: string; text: string }>;
+  nodeGuides: ReviewNodeGuide[];
 }
 
 /** 计次只接受非负有限整数展示；旧存档中的负值不改变剧情，也不显示为负次数。 */
@@ -30,15 +52,29 @@ function publicText(text: string): boolean {
   return text.trim().length > 0 && !/harm|trust|yuanScore|伤害值?|信任值|信任度|分数|得分/i.test(text);
 }
 
+/** 数据层文案同样过一遍校验，避免新增提示语绕过红线。 */
+function safeText(text: string): string {
+  return publicText(text) ? text : '';
+}
+
 /** 纯投影：不读写存档、不访问 DOM、不重新判定结局，不修改或共享输入数组。 */
 export function createEndingReview(state: Readonly<StoryState>): EndingReview {
   const copy = state.ending ? ENDING_CONTENT[state.ending] : CHAPTER_REVIEW_CONTENT;
-  const withoutDrawing = state.ending === 'best' && !(state.trust >= 5);
+  const drawingWithdrawn = state.ending === 'best'
+    && state.trust >= 5
+    && state.log.some((entry) => entry.sceneId === 'E1' && entry.summary === DRAWING_WITHDRAWN_LOG);
+  const withoutDrawing = state.ending === 'best' && (!(state.trust >= 5) || drawingWithdrawn);
   const lines: Record<string, string[]> = {};
   const add = (id: string, text: string): void => {
     if (publicText(text)) (lines[id] ??= []).push(text);
   };
   const hasScene = (...scenes: string[]): boolean => state.log.some((entry) => scenes.includes(entry.sceneId));
+
+  if (state.newsSeen) {
+    add('arrival', '清晨起床时看到早间新闻，你心想：“……跟我没关系。”');
+    if (state.ending === 'bystander') add('arrival', '你曾经说过，这件事跟你没关系。');
+  }
+  if (state.helpedPasserby) add('arrival', '上学路上，你走过去帮忙扶起了摔倒的自行车。');
 
   if (state.seenBag) add('steps', '你看见了爸爸提着的两个大袋子。');
   if (state.seenHandoff) add('steps', '你看见了爸爸把林夏放下的瞬间。');
@@ -81,6 +117,7 @@ export function createEndingReview(state: Readonly<StoryState>): EndingReview {
   }
   if (state.apologized) add('afterwards', '阿远当面向林夏道了歉。');
   if (state.soloRepair) add('afterwards', '你独自向林夏询问、说明。');
+  if (state.finalAnswer) add('afterwards', `面对林夏最后的提问，你的回应：“${FINAL_ANSWER_LABELS[state.finalAnswer]}”`);
 
   const footprints = FOOTPRINT_GROUPS.map((group): ReviewFootprint => ({
     id: group.id,
@@ -91,20 +128,62 @@ export function createEndingReview(state: Readonly<StoryState>): EndingReview {
       .map((entry) => entry.summary),
   })).filter((group) => group.lines.length > 0 || group.records.length > 0);
 
+  const perspectiveKeys: ReviewPerspectiveKey[] = ['victim', 'bystander', 'perpetrator'];
+  const nodeGuides: ReviewNodeGuide[] = LEGAL_HINTS.map((hint): ReviewNodeGuide => ({
+    id: hint.id,
+    title: safeText(hint.title),
+    experienced: hint.scenes.some((scene) => hasScene(scene)),
+    lawRef: safeText(hint.lawRef),
+    lawSummary: safeText(hint.lawSummary),
+    perspectives: perspectiveKeys.map((key): ReviewPerspective => ({
+      key,
+      label: safeText(PERSPECTIVE_LABELS[key]),
+      text: safeText(hint.perspectives[key]),
+    })),
+  }));
+
+  const bestFallback = drawingWithdrawn ? BEST_WITHDRAWN_DRAWING : BEST_WITHOUT_DRAWING;
+  const drafts: EndingReview['drafts'] = ENDING_DRAFTS.map((draft) => {
+    const unlocked = state.trust >= draft.threshold;
+    if (draft.id === 'draft-3' && drawingWithdrawn) {
+      return {
+        id: draft.id,
+        unlocked: true,
+        text: BEST_WITHDRAWN_DRAWING.draftText,
+        assetId: 'cg_ending_best_drawing' as AssetId,
+      };
+    }
+    return {
+      id: draft.id,
+      unlocked,
+      text: unlocked ? draft.text : draft.lockedText,
+    };
+  });
+  const seenReactions = new Set<string>();
+  state.draftReactions.forEach((reaction, index) => {
+    if (!publicText(reaction) || seenReactions.has(reaction)) return;
+    seenReactions.add(reaction);
+    drafts.push({ id: `reaction-${index + 1}`, unlocked: true, text: reaction });
+  });
+  if (state.finalAnswer) {
+    drafts.push({
+      id: 'draft-final',
+      unlocked: true,
+      text: FINAL_ANSWER_DRAFTS[state.finalAnswer],
+    });
+  }
+
   return {
     ending: state.ending,
     title: copy.title,
     lead: copy.lead,
-    epilogue: [copy.epilogue[0], withoutDrawing ? BEST_WITHOUT_DRAWING.impact : copy.epilogue[1]],
+    epilogue: [copy.epilogue[0], withoutDrawing ? bestFallback.impact : copy.epilogue[1]],
     insight: copy.insight,
-    cg: { ...(withoutDrawing ? BEST_WITHOUT_DRAWING.cg : copy.cg) },
+    cg: { ...(withoutDrawing ? bestFallback.cg : copy.cg) },
     ...(copy.retry ? { retry: { ...copy.retry } } : {}),
     footprints,
-    drafts: ENDING_DRAFTS.map((draft) => ({
-      id: draft.id,
-      unlocked: state.trust >= draft.threshold,
-      text: state.trust >= draft.threshold ? draft.text : draft.lockedText,
-    })),
+    drafts,
     actions: ENDING_ACTION_CARDS.map((action) => ({ ...action })),
+    nodeGuides,
   };
 }

@@ -132,6 +132,33 @@ export const chapter1: ChapterStory = {
           durationMs: 2400,
         },
         {
+          kind: 'moment',
+          id: 's1-news',
+          moment: 'opening-news',
+          lines: [
+            '……近日，多所学校提醒学生：转发未经核实的内容，同样可能伤害他人。',
+            '某学生因一张被断章取义的照片，被围攻数日，最终关闭了账号，也不再出门。',
+          ],
+          effects: {
+            set: { newsSeen: true },
+            log: { type: 'observe', summary: '起床后听到旅馆电视播放的早间新闻。' },
+          },
+        },
+        {
+          kind: 'caption',
+          id: 's1-news-thought-1',
+          text: '……又是这种新闻。',
+          durationMs: 2200,
+          tone: 'subtle',
+        },
+        {
+          kind: 'caption',
+          id: 's1-news-thought-2',
+          text: '……跟我没关系。',
+          durationMs: 2400,
+          tone: 'subtle',
+        },
+        {
           kind: 'wait',
           id: 's1-phone-wait',
           waitFor: { interactId: 'phone' },
@@ -276,6 +303,47 @@ export const chapter1: ChapterStory = {
           effects: {
             log: { type: 'observe', summary: '看了第二次手机震动时的迎新群消息。' },
           },
+        },
+        {
+          id: 's4-foreshadow-scroll',
+          event: 'scene:gazeHotspot',
+          target: 'convenience-scroller',
+          effects: {
+            log: { type: 'observe', summary: '便利店门口，路人低头刷手机，手指随手一划就转发了。' },
+          },
+          observe: { text: '便利店门口，路人低头刷着手机，手指随手一划点了转发。', durationMs: 3000 },
+          reveal: { kind: 'inner', tone: 'subtle', text: '……随手转一下而已。', durationMs: 2800 },
+        },
+        {
+          id: 's4-foreshadow-father',
+          event: 'scene:gazeHotspot',
+          target: 'father-suitcase',
+          effects: {
+            log: { type: 'observe', summary: '路边一位爸爸帮孩子拎箱子，孩子说“爸，我自己来。”爸爸说“行行行。”' },
+          },
+          observe: { text: '“爸，我自己来。”“行行行。”爸爸还是没松开手里的行李箱。', durationMs: 3200 },
+          reveal: { kind: 'inner', tone: 'subtle', text: '……爸爸都这样。', durationMs: 2800 },
+        },
+        {
+          id: 's4-foreshadow-bicycle',
+          event: 'scene:gazeHotspot',
+          target: 'fallen-bicycle',
+          effects: {
+            log: { type: 'observe', summary: '路边有人摔了自行车，四五个人举着手机，没人上前。' },
+          },
+          observe: { text: '路边有人摔了自行车，四五个人举着手机，没人上前。', durationMs: 3200 },
+          reveal: { kind: 'inner', tone: 'subtle', text: '……他们为什么都在拍？', durationMs: 2800 },
+        },
+        {
+          id: 's4-help-passerby',
+          event: 'scene:interact',
+          target: 'help-passerby',
+          effects: {
+            set: { helpedPasserby: true },
+            log: { type: 'choice', summary: '在路上走过去帮忙扶起了摔倒的自行车。' },
+          },
+          observe: { text: '你走过去把倒下的自行车扶了起来，对方低声说了句“谢谢”。', durationMs: 3200 },
+          reveal: { kind: 'inner', tone: 'subtle', text: '……他们为什么都在拍？', durationMs: 2800 },
         },
       ],
       transitions: [{ to: 'S5' }],

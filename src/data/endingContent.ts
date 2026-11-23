@@ -50,7 +50,7 @@ export const ENDING_CONTENT: Record<EndingId, EndingCopy> = {
     lead: '一个月后，话题沉了下去。',
     epilogue: [
       '一个月后没人再提。她仍坐在最后一排，脚好了，话更少。走廊里遇见，你们互相点点头。',
-      '你记得自己看过的每一条，却说不出自己做过什么。后来你偶尔点开那条沉底的帖子，什么也没有改变。',
+      '你记得自己看过的每一条，却说不出自己做过什么。后来你偶尔点开那条沉底的帖子，什么也没有改变。——“……跟我没关系。”你曾经说过，这件事跟你没关系。',
     ],
     insight: '你什么都没做。她那天，也什么都没等到。',
     cg: { assetId: 'cg_ending_bystander_seat', caption: '最后一排 · 沉默的席位' },
@@ -73,6 +73,36 @@ export const BEST_WITHOUT_DRAWING = {
   impact: '她对你点点头，合上速写本走出教室。以后看到别人被拍、被议论，你会先想一想“前面发生了什么”。',
   cg: { assetId: 'cg_ending_middle_sketch', caption: '合上的速写本之外 · 尚未送出的画意' },
 } as const;
+
+export const BEST_WITHDRAWN_DRAWING = {
+  impact: '你急着开了口，她的手僵了一下，把折了一半的纸赶紧收回本子里。以后看到别人被拍、被议论，你会先想一想“前面发生了什么”。',
+  cg: { assetId: 'cg_ending_middle_sketch', caption: '收回本子里的画 · 只留在草稿箱中' },
+  draftText: '想把那天早上的台阶画下来。画成完整的。刚撕下来，手心里全是汗——他一开口问，我又不敢递出去了，只能折起来收进本子里。',
+} as const;
+
+export const DRAWING_WITHDRAWN_LOG = '在林夏犹豫时催促，她把纸收了回去。';
+
+/** 草稿箱里的行为反应（只陈述，不责备） */
+export const DRAFT_REACTIONS = {
+  viewedAvatar: '那天，我看到有人点开了我的头像。',
+  forwardedRoommate: '我不知道是谁，但我猜得到。',
+  askedBeforeEvidence: '你先问了我。谢谢。',
+} as const;
+
+export type FinalAnswerId = NonNullable<StoryVariables['finalAnswer']>;
+
+/** 最后一问的回答对应草稿箱最后一条 */
+export const FINAL_ANSWER_DRAFTS: Record<FinalAnswerId, string> = {
+  wrong: '他说不出为什么，只说觉得不对。那天手机响到后半夜，屏幕扣在枕头下都觉得发烫。至少，还有一个人停下来说了一句不对。',
+  tired: '原来那天有人看出来我快撑不住了。被那么多人盯着议论的时候，连呼吸都发紧。后来再走过那段台阶，我还是会下意识低头，但脚步比那天稳了一点。',
+  silent: '他什么都没说，只是安安静静地站在旁边。那几天到处都是议论和震动，吵得人喘不过气，反而只有这阵沉默让我稍微缓了一点。',
+};
+
+export const FINAL_ANSWER_LABELS: Record<FinalAnswerId, string> = {
+  wrong: '我也不知道。就是觉得不对。',
+  tired: '你那天看起来很累。',
+  silent: '（沉默）',
+};
 
 export const CHAPTER_REVIEW_CONTENT: EndingCopy = {
   title: '把看见的，留在心里', lead: '这一段，到这里。',

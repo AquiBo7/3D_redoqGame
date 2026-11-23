@@ -37,6 +37,11 @@ export interface FirstPersonConfig {
   stuckTimeoutMs: number;
   /** 距寻路目标小于该距离即视为到达（米） */
   autoWalkStopDistance: number;
+  /**
+   * 轻点落点可接受的最大高差（米）：需大于楼梯单段高度、小于一个层高，
+   * 使触屏既能在本层与梯段间寻路，也不会隔层点到楼下地面。
+   */
+  tapMaxHeightDelta: number;
   bob: BobConfig;
 }
 
@@ -44,9 +49,9 @@ export const FIRST_PERSON_CONFIG: FirstPersonConfig = {
   eyeHeight: 1.6,
   walkSpeed: 2.1,
   sprintSpeed: 3.9,
-  mouseSensitivity: 0.0022,
-  touchSensitivity: 0.0032,
-  dragSensitivity: 0.0028,
+  mouseSensitivity: 0.0036,
+  touchSensitivity: 0.0042,
+  dragSensitivity: 0.0045,
   pitchLimitDeg: 70,
   playerRadius: 0.32,
   interactRange: 1.8,
@@ -55,6 +60,7 @@ export const FIRST_PERSON_CONFIG: FirstPersonConfig = {
   stuckSpeedThreshold: 0.15,
   stuckTimeoutMs: 350,
   autoWalkStopDistance: 0.08,
+  tapMaxHeightDelta: 2.2,
   bob: {
     idleAmp: 0.006,
     idleFreq: 0.25,

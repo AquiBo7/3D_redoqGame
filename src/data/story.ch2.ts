@@ -1,3 +1,4 @@
+import { DRAFT_REACTIONS } from './endingContent';
 import type { Condition, SceneDef, SceneId, SceneTrigger } from './storySchema';
 
 const explain: Condition = { key: 'postChoice', op: '==', value: 'explain' };
@@ -49,6 +50,7 @@ export const chapter2Scenes: Partial<Record<SceneId, SceneDef>> = {
           goto: 's11-done' },
         { id: 's11-classmate', text: '这是我们班的吧。',
           effects: { set: { roommateReply: '这是我们班的吧。', pointedOut: true }, add: { harm: 3 },
+            pushDraftReaction: DRAFT_REACTIONS.forwardedRoommate,
             log: { type: 'choice', summary: '对小陈说：“这是我们班的吧。”' } },
           goto: 's11-classmate-reply' },
       ] },
@@ -158,7 +160,8 @@ export const chapter2Scenes: Partial<Record<SceneId, SceneDef>> = {
         { speaker: 'linxia', text: '……谢谢你听我说。' },
       ] },
       { kind: 'goto', id: 's14-explain-to-evidence', when: explain, target: 's14-evidence' },
-      { kind: 'choice', id: 's14-add-her', when: wait, prompt: '你找到林夏的头像。要不要加她，说明一下？', options: [
+      { kind: 'choice', id: 's14-add-her', when: wait, prompt: '你找到林夏的头像。要不要加她，说明一下？',
+        effects: { pushDraftReaction: DRAFT_REACTIONS.viewedAvatar }, options: [
         { id: 's14-add-yes', text: '加她，说一声。',
           effects: { set: { addedHer: true }, log: { type: 'choice', summary: '主动加了林夏，想说明帖子的事。' } }, goto: 's14-distant-chat' },
         { id: 's14-add-no', text: '算了，先不加了。',
@@ -194,6 +197,7 @@ export const chapter2Scenes: Partial<Record<SceneId, SceneDef>> = {
       ] },
       { kind: 'system', id: 's14-evidence-save', when: canAskEvidence,
         effects: { set: { evidence: true }, add: { trust: 1 },
+          pushDraftReaction: DRAFT_REACTIONS.askedBeforeEvidence,
           log: { type: 'choice', summary: '征得林夏明确同意后，保存了药店小票，并答应使用前先问她。' } } },
       { kind: 'system', id: 's14-after-evidence', effects: {} },
       { kind: 'minigame', id: 's14-bubble', when: explain, game: 'bubble' },

@@ -153,13 +153,11 @@ try {
   const actors = await page.evaluate(() => ({
     carry: window.__worldApp.getActorPosition('carryGroup'),
     linxia: window.__worldApp.getActorPosition('linxiaSolo'),
-    father: window.__worldApp.getActorPosition('fatherSolo'),
-    bags: window.__worldApp.getActorPosition('bagsSolo'),
     typer: window.__worldApp.getActorPosition('typer'),
     diagnostics: window.__worldApp.getVisualDiagnostics(),
     sources: window.__motionSources,
   }));
-  check('父女与行李拆分后不落回平地', [actors.carry, actors.linxia, actors.father, actors.bags].every((position) => Math.abs(position[1] - 0.42) < 1e-6), actors);
+  check('父女交接后两人都站在台顶平地', [actors.carry, actors.linxia].every((position) => Math.abs(position[1] - 0.42) < 1e-6), actors);
   check('打字男生左后方站位保持贴地', Math.abs(actors.typer[1]) < 1e-6 && actors.typer[0] === -3.6 && actors.typer[2] === 7.95, actors.typer);
   check('地形相对接触阴影排除背负的林夏', !actors.diagnostics.carryLinxiaHasShadow && actors.diagnostics.shadowActors.includes('actor-fatherCarry'), actors.diagnostics);
   check('新模型已经加载，不是胶囊体占位', await page.evaluate(() => ['fatherCarry', 'studentFemale', 'studentMale'].every((id) => window.__worldApp.hasModel(id))), true);

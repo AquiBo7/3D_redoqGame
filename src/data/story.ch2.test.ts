@@ -222,4 +222,20 @@ describe('第二章剧本', () => {
       '林夏的座位，空了几天。', '没有人记得，是谁先笑的。',
     ]);
   });
+
+  it('追加 F：S11 指认室友、S14 点开加好友与先征求同意留证会记入 draftReactions', () => {
+    const h1 = harness('S11');
+    h1.readThrough();
+    h1.choose('s11-reply', 's11-classmate');
+    expect(h1.machine.getState().draftReactions).toContain('我不知道是谁，但我猜得到。');
+
+    const h2 = harness('S14', { picked: true, trust: 1 });
+    h2.choose('s14-choice', 's14-wait');
+    h2.choose('s14-add-her', 's14-add-yes');
+    h2.choose('s14-evidence', 's14-evidence-ask');
+    expect(h2.machine.getState().draftReactions).toEqual([
+      '那天，我看到有人点开了我的头像。',
+      '你先问了我。谢谢。',
+    ]);
+  });
 });

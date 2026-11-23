@@ -1,5 +1,5 @@
 import type { EventBus } from '../core/eventBus';
-import { chapter1Objectives } from '../data/objectives.ch1';
+import { allObjectives } from '../data/objectives.all';
 import type { SceneId } from '../data/storySchema';
 import { createElement } from './uiDom';
 import './objectivePrompt.css';
@@ -21,7 +21,7 @@ export function initObjectivePrompt(container: HTMLElement, bus: EventBus): () =
     chip.hidden = true;
   };
   const show = (sceneId: SceneId): void => {
-    const objective = chapter1Objectives[sceneId];
+    const objective = allObjectives[sceneId];
     if (!objective) return;
     clear();
     text.textContent = `“${objective.text}”`;

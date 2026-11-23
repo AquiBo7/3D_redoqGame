@@ -3,6 +3,7 @@
 //       ?phonePreview=1（手机界面独立调试入口）
 //       ?role=bystander|victim|perpetrator（多周目视角测试）
 //       ?scene=S1–S9（直达场景测试）
+//       ?night=1（夜间氛围：太阳与环境光压成冷蓝低照度，路灯接管照明）
 // 本模块属于 core，严格禁止 import three.js。
 
 import { isRole, isSceneId } from '../data/storySchema';
@@ -21,6 +22,8 @@ export interface UrlParams {
   role: Role;
   /** 指定进入的场景编号，如 S1；未指定或非法时为 null */
   scene: SceneId | null;
+  /** 夜间氛围测试：街道等室外场景改由路灯照明，正式剧情时段不受影响 */
+  night: boolean;
 }
 
 const FALSE_VALUES = new Set(['0', 'false', 'off', 'no']);
@@ -43,5 +46,6 @@ export function parseUrlParams(search: string = window.location.search): UrlPara
     phonePreview: toFlag(params.get('phonePreview')),
     role: isRole(rawRole) ? rawRole : 'bystander',
     scene: isSceneId(rawScene) ? rawScene : null,
+    night: toFlag(params.get('night')),
   };
 }

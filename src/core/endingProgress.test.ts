@@ -13,7 +13,7 @@ class MemoryStorage implements StorageLike {
   setItem(key: string, value: string): void { this.data.set(key, value); }
   removeItem(key: string): void { this.data.delete(key); }
 }
-const params = { debug: false, lite: false, modelViewer: false, phonePreview: false, role: 'bystander' as const, scene: null };
+const params = { debug: false, lite: false, modelViewer: false, phonePreview: false, night: false, role: 'bystander' as const, scene: null };
 function setup() {
   const storage = new MemoryStorage();
   const bus = new EventBus();

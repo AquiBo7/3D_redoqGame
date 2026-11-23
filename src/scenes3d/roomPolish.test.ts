@@ -80,12 +80,16 @@ describe('M2 模块3 卧室精装', () => {
     }
     expect(result.actors).toBeUndefined();
     expect(definition.interactables).toEqual([
-      { id: 'culture-shirt', position: { x: 2.42, y: 1.06, z: -0.62 }, maxDistance: 3.5 },
+      { id: 'culture-shirt', position: { x: 2.78, y: 1.6, z: 1.14 }, lightOffsetY: 0.2, maxDistance: 3.5 },
       { id: 'document-bag', position: { x: 2.7, y: 0.84, z: -2.2 }, maxDistance: 3.5 },
     ]);
     expect(createRoomDefinition('S1').interactables?.[0].position).toEqual({ x: -2.85, y: 0.66, z: -4.02 });
     expect(createRoomDefinition('S2').interactables).toEqual([]);
-    expect(object(root, 'culture-shirt').position.toArray()).toEqual([2.42, 1.06, -0.62]);
+    // 文化衫从椅背改挂进衣柜，注视 / 点击锚点落在敞开的柜门口
+    expect(object(root, 'culture-shirt').position.toArray()).toEqual([3.06, 1.76, 1.15]);
+    expect(object(root, 'culture-shirt').rotation.y).toBeCloseTo(-Math.PI / 2);
+    expect(createRoomDefinition('S1').hotspots?.find((item) => item.id === 'suitcase')?.position)
+      .toEqual({ x: 1.75, y: 0.55, z: 3.1 });
     expect(definition.nav.bounds).toEqual({ minX: -3.3, maxX: 3.3, minZ: -6.2, maxZ: 3.2 });
   });
 
@@ -153,7 +157,7 @@ describe('M2 模块3 卧室精装', () => {
       const position = new THREE.Vector3(), scale = new THREE.Vector3(), rotation = new THREE.Quaternion();
       transform.decompose(position, rotation, scale);
       expect(position.y).toBeCloseTo(2.38 - i * 0.096);
-      expect(new THREE.Euler().setFromQuaternion(rotation).x).toBeCloseTo(-0.2);
+      expect(new THREE.Euler().setFromQuaternion(rotation).x).toBeCloseTo(-0.78);
       expect(scale.toArray()[0]).toBeCloseTo(1.31);
     }
     expect((mesh(root, 'room-blind-ladder-cords') as THREE.InstancedMesh).count).toBe(2);
@@ -203,20 +207,25 @@ describe('M2 模块3 卧室精装', () => {
     const upper = bounds(root, 'room-shelf-stacked-book-yellow');
     expect(upper.min.y).toBeCloseTo(lower.max.y, 2);
     expect(object(root, 'room-shelf-stacked-book-lake').rotation.z).toBeCloseTo(Math.PI / 2);
-    expect(material(root, 'room-plant-dark-gray-pot').color.getHex()).toBe(0x424444);
-    expect((mesh(root, 'room-plant-dark-gray-pot').geometry as THREE.CylinderGeometry).parameters.openEnded).toBe(true);
-    expect((mesh(root, 'room-plant-green-leaves') as THREE.InstancedMesh).count).toBe(9);
+    expect(material(root, 'room-plant-pot').color.getHex()).toBe(0x424444);
+    expect((mesh(root, 'room-plant-pot').geometry as THREE.CylinderGeometry).parameters.openEnded).toBe(true);
+    expect((mesh(root, 'room-plant-leaves') as THREE.InstancedMesh).count).toBe(9);
   });
 
-  it('桌后双哑光灰边框暗屏，键鼠红本马克杯齐全，双抽屉黑拉手不重叠', () => {
+  it('桌后双哑光灰边框亮屏分别出 NVIDIA / Qoder，键鼠杯绿植齐全，双抽屉黑拉手不重叠', () => {
     const { root } = build();
     for (let i = 1; i <= 2; i += 1) {
       expect(material(root, `room-monitor-${i}-matte-frame`).roughness).toBe(0.85);
-      expect(material(root, `room-monitor-${i}-dark-screen`).roughness).toBe(0.28);
-      expect(material(root, `room-monitor-${i}-dark-screen`).color.getHex()).toBe(0x19272d);
+      const screen = material(root, `room-monitor-${i}-lit-screen`);
+      expect(screen.roughness).toBe(0.32);
+      expect(screen.emissive.getHex()).toBe(0xffffff);
+      expect(screen.emissiveIntensity).toBe(0.52);
+      expect(screen.emissiveMap).toBeInstanceOf(THREE.CanvasTexture);
       expect(bounds(root, `room-monitor-${i}`).max.z).toBeLessThan(-2.32);
       expect(material(root, `room-desk-black-handle-${i}`).color.getHex()).toBe(0x242728);
     }
+    // 靠里一台出 NVIDIA、靠外那台（更挨着椅子与房门）出 Qoder，两张贴图不能混用
+    expect(material(root, 'room-monitor-1-lit-screen')).not.toBe(material(root, 'room-monitor-2-lit-screen'));
     expect(bounds(root, 'room-desk-drawer-front-1').intersectsBox(bounds(root, 'room-desk-drawer-front-2'))).toBe(false);
     expect((mesh(root, 'room-keyboard-keys') as THREE.InstancedMesh).count).toBe(36);
     expect(bounds(root, 'room-keyboard-base').intersectsBox(bounds(root, 'room-monitor-2-foot'))).toBe(false);
@@ -225,6 +234,11 @@ describe('M2 模块3 卧室精装', () => {
     expect((mesh(root, 'room-desk-mug').geometry as THREE.CylinderGeometry).parameters.openEnded).toBe(true);
     expect(mesh(root, 'room-mug-handle').geometry).toBeInstanceOf(THREE.TorusGeometry);
     object(root, 'room-mug-coffee');
+    // 桌面收干净：红皮本搬进书架，桌面只剩键 / 鼠 / 杯 / 一小盆绿植
+    expect(bounds(root, 'room-red-notebook').min.x).toBeGreaterThan(3);
+    expect(bounds(root, 'room-desk-plant').min.y).toBeGreaterThan(0.7);
+    expect(bounds(root, 'room-desk-plant').max.x).toBeLessThan(2.2);
+    expect(object(root, 'room-desk-plant-leaves')).toBeInstanceOf(THREE.InstancedMesh);
   });
 
   it('证件袋几何/标签与原锚点对齐，前中央留白且三条实际交互视线无遮挡', () => {
@@ -261,7 +275,7 @@ describe('M2 模块3 卧室精装', () => {
     expect(mesh(root, 'room-white-sheet-rolled-edge').geometry).toBeInstanceOf(THREE.CylinderGeometry);
   });
 
-  it('木色梯形纸篓是有厚度内壁/底板的真开口，桶外两团白皱纸贴地并避开床体', () => {
+  it('木色梯形纸篓是有厚度内壁/底板的真开口，床侧两团皱纸已清空', () => {
     const { root, definition } = build();
     const shell = mesh(root, 'room-wastebasket-hollow-shell');
     expect(shell.geometry).not.toBeInstanceOf(THREE.CylinderGeometry);
@@ -280,14 +294,166 @@ describe('M2 模块3 卧室精装', () => {
     expect(hits[0].point.y).toBeCloseTo(0.023);
     expect(definition.nav.obstacles.find((item) => item.id === 'room-wastebasket')?.height).toBe(0.34);
     expect(bounds(root, 'room-open-trapezoid-wastebasket').max.z).toBeLessThan(-1.55);
-    expect(mesh(root, 'room-crumpled-paper-1').geometry).toBe(mesh(root, 'room-crumpled-paper-2').geometry);
-    for (let i = 1; i <= 2; i += 1) {
-      const name = `room-crumpled-paper-${i}`;
-      expect(material(root, name).color.getHex()).toBe(0xfffcf6);
-      expect(bounds(root, name).min.y).toBeCloseTo(0.002);
-      expect(bounds(root, name).min.z).toBeGreaterThan(-2.0);
-      expect(bounds(root, name).intersectsBox(bounds(root, 'room-open-trapezoid-wastebasket'))).toBe(false);
+    expect(root.getObjectByName('room-crumpled-paper-1')).toBeUndefined();
+    expect(root.getObjectByName('room-crumpled-paper-2')).toBeUndefined();
+  });
+
+  it('居家化布置：衣柜 / 书架贴右墙且不挡开门，地毯居中留出通道，画像并排挂床头橙墙', () => {
+    const { root, result, definition } = build();
+    const wardrobe = bounds(root, 'room-wardrobe-carcass');
+    expect(wardrobe.min.x).toBeCloseTo(2.82);
+    expect(wardrobe.max.x).toBeCloseTo(3.4);
+    expect(wardrobe.max.y).toBeCloseTo(2.2);
+    expect(wardrobe.getSize(new THREE.Vector3()).z).toBeCloseTo(1.2);
+    expect(2.09 - wardrobe.max.z).toBeGreaterThan(0.59);
+    expect(object(root, 'room-wardrobe-door-near').rotation.y).toBe(0);
+    expect(object(root, 'room-wardrobe-door-far').rotation.y).toBeCloseTo((55 * Math.PI) / 180);
+    // 敞开那扇斜在柜口的门扇不进遮挡列表，否则文化衫在 S1/S3 永远点不到
+    expect(result.occluders).not.toContain(object(root, 'room-wardrobe-door-far'));
+    // 柜门口不能被柜体 / 关着那扇门糊住：S3 文化衫是可点击带走的交互
+    const shirtAnchor = new THREE.Vector3(2.78, 1.6, 1.14);
+    for (const origin of [
+      new THREE.Vector3(1.6, 1.5, 0.9), new THREE.Vector3(2.0, 1.5, 1.6), new THREE.Vector3(0.4, 1.6, 1.2),
+    ]) {
+      const ray = new THREE.Raycaster(origin, shirtAnchor.clone().sub(origin).normalize(), 0, origin.distanceTo(shirtAnchor) - 0.02);
+      const blockers = result.occluders.flatMap((item) => ray.intersectObject(item, true).map((hit) => hit.object.name));
+      expect(blockers, `${origin.toArray()} 看向文化衫`).toEqual([]);
     }
+    const shirt = object(root, 'culture-shirt');
+    expect(shirt.parent?.name).toBe('room-wardrobe');
+    expect(shirt.position.toArray()).toEqual([3.06, 1.76, 1.15]);
+    expect(object(root, 'room-wardrobe-hanging-rail').rotation.x).toBeCloseTo(Math.PI / 2);
+    expect(object(root, 'room-wardrobe-top-basket').position.y).toBeGreaterThan(2.2);
+    expect(object(root, 'room-wardrobe-top-plant').position.y).toBe(2.2);
+    expect(bounds(root, 'room-wardrobe-top-plant').max.y).toBeLessThan(2.8);
+    expect(root.getObjectByName('room-wardrobe-plant-leaves')).toBeInstanceOf(THREE.InstancedMesh);
+
+    const shelf = bounds(root, 'room-bookshelf-carcass');
+    expect(shelf.min.x).toBeCloseTo(3.1);
+    expect(shelf.max.y).toBeCloseTo(1.7);
+    expect(shelf.getSize(new THREE.Vector3()).z).toBeCloseTo(1.1);
+    expect(shelf.getSize(new THREE.Vector3()).x).toBeCloseTo(0.3);
+    expect(wardrobe.min.z - shelf.max.z).toBeGreaterThanOrEqual(0.4);
+    expect(shelf.min.z).toBeGreaterThan(-1.71);
+    expect((mesh(root, 'room-bookshelf-book-spines') as THREE.InstancedMesh).count).toBe(39);
+    expect((mesh(root, 'room-bookshelf-book-pages') as THREE.InstancedMesh).count).toBe(39);
+    // 书只占七层满，余量给了陶瓷杯 / 小绿植 / 从桌面收下来的红皮本
+    expect(bounds(root, 'room-bookshelf-ceramic-cup').intersectsBox(bounds(root, 'room-bookshelf-book-spines'))).toBe(false);
+    expect(bounds(root, 'room-red-notebook').min.z).toBeGreaterThan(shelf.max.z - 0.4);
+    expect(bounds(root, 'room-bookshelf-top-plant').max.x).toBeLessThan(3.38);
+
+    const rug = bounds(root, 'room-rug-field');
+    expect(rug.getSize(new THREE.Vector3()).x).toBeCloseTo(2);
+    expect(rug.getSize(new THREE.Vector3()).z).toBeCloseTo(1.5);
+    // 地毯离床脚 40cm（床体障碍 max z = -2.0），且不在椅子推拉路径上
+    // 地毯离床脚 40cm，且不压在椅子的推拉路径上
+    const bedFoot = definition.nav.obstacles.find((item) => item.id === 'room-bed')!.maxZ;
+    expect(rug.min.z - bedFoot).toBeCloseTo(0.4);
+    expect(rug.max.x).toBeLessThan(2.15);
+    expect(rug.min.y).toBeCloseTo(0);
+    const mat = bounds(root, 'room-bedfoot-round-mat');
+    expect(mat.getSize(new THREE.Vector3()).x).toBeCloseTo(0.6);
+    expect(mat.intersectsBox(rug)).toBe(false);
+    expect(mat.intersectsBox(bounds(root, 'room-open-trapezoid-wastebasket'))).toBe(false);
+
+    const her = bounds(root, 'room-portrait-her-oak-frame');
+    const dad = bounds(root, 'room-portrait-father-oak-frame');
+    for (const [name, box] of [['her', her], ['father', dad]] as const) {
+      expect(box.getSize(new THREE.Vector3()).x, name).toBeCloseTo(0.4);
+      expect(box.getSize(new THREE.Vector3()).y, name).toBeCloseTo(0.5);
+      expect(box.getSize(new THREE.Vector3()).z, name).toBeCloseTo(0.035);
+      expect(box.getCenter(new THREE.Vector3()).y, name).toBeCloseTo(1.5);
+      expect(box.max.z, name).toBeLessThan(-6.26);
+      expect(object(root, `room-portrait-${name}-print`), name).toBeInstanceOf(THREE.Mesh);
+    }
+    // 两幅并排挂在床头橙墙，以床的正中线 x −2.85 对称，框间留 20cm
+    expect(dad.min.x).toBeGreaterThan(her.max.x);
+    expect(dad.min.x - her.max.x).toBeCloseTo(0.2);
+    expect((her.min.x + dad.max.x) / 2).toBeCloseTo(-2.85, 2);
+    // 离窗洞（x 1.1~2.5）≥80cm；书桌那面白墙已空出，不再挂任何东西
+    expect(1.1 - dad.max.x).toBeGreaterThan(0.8);
+    expect(her.min.x).toBeGreaterThan(-3.4);
+
+    expect(object(root, 'room-trolley').position.toArray()).toEqual([1.15, 0, 0.7]);
+    expect(bounds(root, 'room-trolley').max.x).toBeLessThan(2.2);
+    expect(bounds(root, 'room-trolley').min.z).toBeGreaterThan(2.8);
+
+    // 房间中央 60×60 行走净空不被任何障碍体占用
+    const aisle = new THREE.Box3(
+      new THREE.Vector3(-0.3, 0, -0.1), new THREE.Vector3(0.3, 1.8, 0.7),
+    );
+    for (const obstacle of definition.nav.obstacles) {
+      const box = new THREE.Box3(
+        new THREE.Vector3(obstacle.minX, 0, obstacle.minZ),
+        new THREE.Vector3(obstacle.maxX, obstacle.height, obstacle.maxZ),
+      );
+      expect(box.intersectsBox(aisle), obstacle.id).toBe(false);
+    }
+  });
+
+  it('床头只留长枕；梳妆区贴 +Z 墙成套，不压地毯、不挡开门、推车仍可活动', () => {
+    const { root, definition } = build();
+    // 两只圆形靠枕删除后，那颗形变球体只剩长枕独占，手机与被子不动
+    const pillow = mesh(root, 'room-bed-long-pillow');
+    expect(pillow.scale.toArray()).toEqual([0.9, 0.14, 0.42]);
+    expect(root.children.filter((item) => item instanceof THREE.Mesh
+      && item.geometry === pillow.geometry)).toEqual([pillow]);
+    expect(object(root, 'room-bedside-phone')).toBeDefined();
+    expect(object(root, 'room-coral-fabric-duvet')).toBeDefined();
+
+    const carcass = bounds(root, 'room-dresser-carcass');
+    const dresser = bounds(root, 'room-dresser');
+    expect(carcass.max.z).toBeCloseTo(3.3);
+    expect(carcass.getSize(new THREE.Vector3()).z).toBeGreaterThan(0.4);
+    expect(dresser.min.x).toBeCloseTo(-2.1);
+    expect(bounds(root, 'room-dresser-top').max.y).toBeCloseTo(0.75);
+    // 靠房门那一侧的台边缘远超 60cm，门开到最大的开启弧（x 2.2~3.3）碰不到台面
+    expect(3.24 - dresser.max.x).toBeGreaterThan(0.6);
+    expect(dresser.max.x).toBeLessThan(2.2);
+    // 与小推车之间还留得下推车进出
+    expect(bounds(root, 'room-trolley').min.x - dresser.max.x).toBeGreaterThan(0.6);
+
+    const mirror = bounds(root, 'room-dressing-mirror');
+    expect(mirror.getCenter(new THREE.Vector3()).y).toBeCloseTo(1.5, 1);
+    expect(mirror.min.z).toBeGreaterThan(3.2);
+    expect(object(root, 'room-dressing-mirror-glass').rotation.y).toBeCloseTo(Math.PI);
+
+    // 圆凳推在台面开口正中：坐面低于台底，平面完全落在开口内
+    const stool = bounds(root, 'room-dressing-stool');
+    expect(stool.max.y).toBeLessThan(0.7);
+    expect(stool.min.x).toBeGreaterThan(-1.73);
+    expect(stool.max.x).toBeLessThan(-1.065);
+    expect(stool.min.z).toBeGreaterThan(carcass.min.z);
+
+    // 落地灯 1.5~1.6m、灯头朝梳妆台（+X）倾，立在梳妆台与小推车之间靠墙角一侧
+    const shade = bounds(root, 'room-floor-lamp-shade');
+    expect(shade.max.y).toBeGreaterThan(1.5);
+    expect(shade.max.y).toBeLessThan(1.6);
+    expect(object(root, 'room-floor-lamp-head').rotation.z).toBeLessThan(-0.2);
+    expect((object(root, 'room-floor-lamp-point-light') as THREE.PointLight).castShadow).toBe(false);
+    const lampBase = bounds(root, 'room-floor-lamp-base');
+    expect(lampBase.min.x).toBeGreaterThan(-3.4);
+    expect(dresser.min.x - lampBase.max.x).toBeGreaterThan(0.3);
+    expect(lampBase.intersectsBox(bounds(root, 'room-trolley'))).toBe(false);
+
+    // 地毯不被梳妆台、镜子或落地灯压到
+    const rug = bounds(root, 'room-rug-field');
+    for (const name of ['room-dresser', 'room-dressing-mirror', 'room-floor-lamp']) {
+      expect(rug.intersectsBox(bounds(root, name)), name).toBe(false);
+    }
+    // 红框这一片台前仍留 60cm 以上走动净空
+    const standing = new THREE.Box3(new THREE.Vector3(-2.2, 0, 2.1), new THREE.Vector3(-0.9, 1.8, 2.7));
+    for (const obstacle of definition.nav.obstacles) {
+      const box = new THREE.Box3(
+        new THREE.Vector3(obstacle.minX, 0, obstacle.minZ),
+        new THREE.Vector3(obstacle.maxX, obstacle.height, obstacle.maxZ),
+      );
+      expect(box.intersectsBox(standing), obstacle.id).toBe(false);
+    }
+    expect(definition.nav.obstacles.map((item) => item.id)).toEqual([
+      'room-bed', 'room-desk', 'room-chair', 'room-suitcase', 'room-wastebasket',
+      'room-wardrobe', 'room-wardrobe-door', 'room-bookshelf', 'room-dresser', 'room-floor-lamp',
+    ]);
   });
 
   it('新增盒体复用局部几何、百叶/按键/叶片批量化；场景释放克隆而全局释放共享贴图与光晕', () => {
@@ -298,7 +464,7 @@ describe('M2 模块3 卧室精装', () => {
     const source = getPlasterMaterial({ repeatX: 3, repeatY: 1 });
     const glow = getWarmLampGlowMaterial();
     const slats = mesh(root, 'room-blind-slats') as THREE.InstancedMesh;
-    const leaves = mesh(root, 'room-plant-green-leaves') as THREE.InstancedMesh;
+    const leaves = mesh(root, 'room-plant-leaves') as THREE.InstancedMesh;
     const slatsDispose = vi.spyOn(slats, 'dispose');
     const leavesDispose = vi.spyOn(leaves, 'dispose');
     const cloneDispose = vi.spyOn(clone, 'dispose');

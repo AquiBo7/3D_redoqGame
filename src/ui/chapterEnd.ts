@@ -1,5 +1,6 @@
 import { eventBus } from '../core/eventBus';
 import { createEndingReview, type EndingReview } from '../core/endingReview';
+import { PERSPECTIVE_TABS } from '../data/legalHints';
 import { renderAssetImage } from './assetImage';
 import './chapterEnd.css';
 
@@ -53,6 +54,58 @@ export function initChapterEnd(): () => void {
     return node;
   }
 
+  /** 关键节点三视角清单：筛选只切换可见栏位，不重排数据，也不判断玩家当时的选择。 */
+  function nodeGuides(review: EndingReview): HTMLElement {
+    const block = section('05 / 关键情境 · 三视角应对与法治清单');
+    block.append(element('p', 'chapter-end__caption', '六组分岔口，三种处境并排。「本局经历」只说明你在这局里走过那里，不评价当时选了什么。'));
+
+    const tabs = element('nav', 'chapter-end__tabs');
+    tabs.setAttribute('aria-label', '视角筛选');
+    const list = element('div', 'chapter-end__node-list');
+    const columns: HTMLElement[] = [];
+    const tabButtons: Array<{ key: string; node: HTMLButtonElement }> = [];
+
+    function applyFilter(key: string): void {
+      for (const tab of tabButtons) tab.node.setAttribute('aria-pressed', tab.key === key ? 'true' : 'false');
+      for (const column of columns) column.hidden = key !== 'all' && column.dataset.perspective !== key;
+    }
+
+    for (const guide of review.nodeGuides) {
+      const card = element('article', 'chapter-end__node');
+      card.dataset.nodeId = guide.id;
+      const head = element('div', 'chapter-end__node-head');
+      head.append(element('h4', 'chapter-end__subheading', guide.title));
+      if (guide.experienced) head.append(element('span', 'chapter-end__stamp', '本局经历'));
+      card.append(head);
+
+      const grid = element('div', 'chapter-end__node-columns');
+      for (const perspective of guide.perspectives) {
+        const column = element('div', 'chapter-end__perspective');
+        column.dataset.perspective = perspective.key;
+        column.append(
+          element('h5', 'chapter-end__perspective-label', perspective.label),
+          element('p', 'chapter-end__perspective-text', perspective.text),
+        );
+        columns.push(column);
+        grid.append(column);
+      }
+      card.append(grid, element('p', 'chapter-end__node-law', `${guide.lawRef} ${guide.lawSummary}`));
+      list.append(card);
+    }
+
+    for (const tab of PERSPECTIVE_TABS) {
+      const node = element('button', 'chapter-end__tab', tab.label);
+      node.type = 'button';
+      node.addEventListener('click', () => applyFilter(tab.key));
+      tabButtons.push({ key: tab.key, node });
+      tabs.append(node);
+    }
+    applyFilter('all');
+
+    block.append(tabs, list);
+    return block;
+  }
+
   function render(review: EndingReview): void {
     clear();
     const hero = element('header', 'chapter-end__hero');
@@ -102,6 +155,11 @@ export function initChapterEnd(): () => void {
       item.dataset.draftId = draft.id;
       item.append(element('h4', 'chapter-end__subheading', `草稿 ${index + 1} · ${draft.unlocked ? '已展开' : '未解锁'}`),
         element('p', '', draft.text));
+      if (draft.unlocked && draft.assetId) {
+        const fig = element('figure', 'chapter-end__draft-figure');
+        renderAssetImage(draft.assetId, fig).draggable = false;
+        item.append(fig);
+      }
       draftList.append(item);
     });
     drafts.append(draftList);
@@ -114,6 +172,8 @@ export function initChapterEnd(): () => void {
       actionList.append(item);
     }
     actions.append(actionList);
+
+    const nodes = nodeGuides(review);
 
     const footer = element('footer', 'chapter-end__footer');
     const retry = review.retry;
@@ -131,7 +191,7 @@ export function initChapterEnd(): () => void {
       button('从头开始', () => { hide(); eventBus.emit('game:start'); }, 'chapter-end__restart'),
     );
     footer.append(navigation, element('p', 'chapter-end__caption', '本故事及人物均为虚构。谢谢你停下来，看见截图以外。'));
-    card.append(hero, epilogue, footprint, drafts, actions, footer);
+    card.append(hero, epilogue, footprint, drafts, actions, nodes, footer);
   }
 
   function onKeyDown(event: KeyboardEvent): void {

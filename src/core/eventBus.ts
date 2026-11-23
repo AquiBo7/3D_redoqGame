@@ -4,6 +4,7 @@
 
 import type {
   DialogueLine,
+  MomentKind,
   PhonePanel,
   Role,
   SceneId,
@@ -50,6 +51,7 @@ export interface GameEvents {
     optionId?: string;
   };
   'ui:dialogueEnd': { stepId: string };
+  'ui:momentEnd': { stepId: string; outcome?: 'completed' | 'interrupted' };
   'ui:minigameEnd': { stepId: string; hits: number; kills: number; tries?: number };
   'ui:worldBlocked': { blocked: boolean };
   'ui:restoreCheckpoint': { key: 'ch2_canteen' | 'ch3_morning' | 'ch4_platform' };
@@ -76,6 +78,7 @@ export interface GameEvents {
   'ui:showMinigame': { stepId: string; game: 'bubble' | 'crystal'; joined: boolean; tries: number };
   'ui:showArt': { stepId: string; assetId: string };
   'ui:showIntertitle': { stepId: string; lines: string[]; lineDurationMs: number; skippable: boolean };
+  'ui:showMoment': { stepId: string; moment: MomentKind; lines?: string[] };
   'ui:showPhone': { stepId: string; panel: PhonePanel };
   'ui:hidePhone': { phoneId: string };
   'ui:showCaption': {
@@ -83,12 +86,13 @@ export interface GameEvents {
     text: string;
     durationMs: number;
     kind: 'inner' | 'observation';
+    tone?: 'default' | 'subtle';
   };
   'ui:showChoices': {
     stepId: string;
     prompt?: string;
     allowMovement?: boolean;
-    options: Array<{ id: string; text: string }>;
+    options: Array<{ id: string; text: string; hasInteract?: boolean }>;
   };
   'ui:phoneVibrate': { vibrationId: string; preview: string };
   'ui:showObjective': { sceneId: SceneId };

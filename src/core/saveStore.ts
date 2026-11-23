@@ -118,6 +118,8 @@ function isLogArray(value: unknown): value is LogEntry[] {
 
 // 映射类型强制每个状态字段都有对应验证器，避免扩容后漏验新字段。
 const STATE_VALIDATORS: { [K in keyof StoryState]: (value: unknown) => value is StoryState[K] } = {
+  newsSeen: isBoolean,
+  helpedPasserby: isBoolean,
   momReply: isNullableString,
   phoneIgnored: isFiniteNumber,
   seenBag: isBoolean,
@@ -163,6 +165,8 @@ const STATE_VALIDATORS: { [K in keyof StoryState]: (value: unknown) => value is 
   trust: isFiniteNumber,
   harm: isFiniteNumber,
   ending: nullableChoice('joined', 'bystander', 'worst', 'best', 'middle'),
+  finalAnswer: nullableChoice('wrong', 'tired', 'silent'),
+  draftReactions: isStringArray,
   log: isLogArray,
 };
 

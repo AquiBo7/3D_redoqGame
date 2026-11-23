@@ -3,7 +3,8 @@
 
 import type { GameEvents } from '../core/eventBus';
 import { READY_EXTERNAL_ASSETS } from '../data/assetManifest';
-import type { SpeakerId } from '../data/storySchema';
+import { resolveExpressionPortrait } from '../data/expressionPortraits';
+import type { DialogueEmotion, SpeakerId } from '../data/storySchema';
 import { createElement } from './uiDom';
 import './dialogueBox.css';
 
@@ -54,7 +55,9 @@ export class DialogueBox {
   private active = false;
   private finishing = false;
   private timer = 0;
+  private currentSpeaker: SpeakerId | null = null;
   private currentPortraitUrl: string | null = null;
+  private portraitImage: HTMLImageElement | null = null;
 
   constructor(options: DialogueBoxOptions) {
     this.portraits = options.portraits ?? SPEAKER_PORTRAIT_URLS;
@@ -140,7 +143,7 @@ export class DialogueBox {
     const speakerName = speaker ? this.speakerNames[speaker] ?? speaker : '';
     this.root.classList.toggle('dialogue--narration', speaker === null);
     this.name.textContent = speakerName;
-    this.renderAvatar(speaker, speakerName);
+    this.renderAvatar(speaker, speakerName, line.text, line.emotion);
 
     this.chars = Array.from(line.text);
     this.charIndex = 0;
@@ -150,14 +153,21 @@ export class DialogueBox {
   }
 
   private clearPortrait(): void {
+    this.currentSpeaker = null;
     this.currentPortraitUrl = null;
+    this.portraitImage = null;
     this.portrait.replaceChildren();
     this.portrait.hidden = true;
     this.portrait.className = 'dialogue__portrait';
     this.root.classList.remove('dialogue--has-portrait');
   }
 
-  private renderAvatar(speaker: SpeakerId | null, speakerName: string): void {
+  private renderAvatar(
+    speaker: SpeakerId | null,
+    speakerName: string,
+    lineText: string,
+    emotion?: DialogueEmotion,
+  ): void {
     this.avatar.replaceChildren();
     this.avatar.hidden = speaker === null;
     if (!speaker) {
@@ -171,18 +181,30 @@ export class DialogueBox {
       createElement('span', 'dialogue__avatar-letter', firstCharacter(speakerName, speaker)),
     );
 
-    const portraitUrl = this.portraits[speaker];
+    const basePortraitUrl = this.portraits[speaker];
+    const expressionUrl = resolveExpressionPortrait(speaker, lineText, emotion);
+    const portraitUrl = expressionUrl ?? basePortraitUrl;
     if (!portraitUrl) {
       this.clearPortrait();
       return;
     }
 
-    // 同一说话人连续台词复用已有立绘 DOM，避免逐句闪烁
-    if (this.currentPortraitUrl === portraitUrl && !this.portrait.hidden) {
+    // 同一说话人连句且表情相同：直接复用已有立绘 DOM
+    if (this.currentSpeaker === speaker && this.currentPortraitUrl === portraitUrl && !this.portrait.hidden) {
       this.root.classList.add('dialogue--has-portrait');
       return;
     }
 
+    // 同一说话人切换差分表情：保留容器与 <img> 节点原地换图（头位已对齐，零跳动闪烁）
+    if (this.currentSpeaker === speaker && this.portraitImage && !this.portrait.hidden) {
+      this.currentPortraitUrl = portraitUrl;
+      this.bindPortraitError(this.portraitImage, portraitUrl, basePortraitUrl);
+      this.portraitImage.src = portraitUrl;
+      this.root.classList.add('dialogue--has-portrait');
+      return;
+    }
+
+    this.currentSpeaker = speaker;
     this.currentPortraitUrl = portraitUrl;
     this.portrait.replaceChildren();
     this.portrait.className = `dialogue__portrait dialogue__portrait--${speaker}`;
@@ -193,16 +215,31 @@ export class DialogueBox {
     image.alt = speakerName;
     image.decoding = 'async';
     image.draggable = false;
+    this.bindPortraitError(image, portraitUrl, basePortraitUrl);
+    image.src = portraitUrl;
+    this.portraitImage = image;
+    this.portrait.append(image);
+  }
+
+  private bindPortraitError(
+    image: HTMLImageElement,
+    activeUrl: string,
+    fallbackUrl: string | undefined,
+  ): void {
     image.addEventListener(
       'error',
       () => {
-        if (this.currentPortraitUrl !== portraitUrl) return;
+        if (this.currentPortraitUrl !== activeUrl) return;
+        if (fallbackUrl && activeUrl !== fallbackUrl) {
+          this.currentPortraitUrl = fallbackUrl;
+          this.bindPortraitError(image, fallbackUrl, undefined);
+          image.src = fallbackUrl;
+          return;
+        }
         this.clearPortrait();
       },
       { once: true },
     );
-    image.src = portraitUrl;
-    this.portrait.append(image);
   }
 
   private startTyping(): void {

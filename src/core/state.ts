@@ -32,6 +32,8 @@ export interface MetaProgress {
 
 export function createInitialStoryState(): StoryState {
   return {
+    newsSeen: false,
+    helpedPasserby: false,
     momReply: null,
     phoneIgnored: 0,
     seenBag: false,
@@ -77,6 +79,8 @@ export function createInitialStoryState(): StoryState {
     trust: 0,
     harm: 20,
     ending: null,
+    finalAnswer: null,
+    draftReactions: [],
     log: [],
   };
 }
@@ -122,6 +126,7 @@ export function applyStoryEffect(
   // set 也允许赋数组；必须在追加前复制，不能共享输入状态或效果数据的数组。
   next.clues = [...next.clues];
   next.yuanKeys = [...next.yuanKeys];
+  next.draftReactions = [...next.draftReactions];
 
   const add = effect.add;
   if (add) {
@@ -145,6 +150,16 @@ export function applyStoryEffect(
   if (effect.pushYuanKey !== undefined) {
     next.yuanKeys.push(effect.pushYuanKey);
     changed.add('yuanKeys');
+  }
+  if (effect.pushDraftReaction !== undefined) {
+    const reactions = typeof effect.pushDraftReaction === 'string'
+      ? [effect.pushDraftReaction]
+      : effect.pushDraftReaction;
+    for (const reaction of reactions) {
+      if (next.draftReactions.includes(reaction)) continue;
+      next.draftReactions.push(reaction);
+      changed.add('draftReactions');
+    }
   }
 
   if (effect.log) {
