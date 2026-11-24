@@ -15,6 +15,8 @@ import {
   loadPropModel,
 } from '../world/resources';
 import type { PropModelId } from './propManifest';
+import { createOwnedCanopyCardBatch, type CanopyCardSpec, type WindTime } from './canopy';
+import { canopyBudget, getQualityTier } from '../world/quality';
 
 type V3 = [number, number, number];
 interface Part { p: V3; s: V3; r?: V3; color?: number }
@@ -825,8 +827,125 @@ function architecture(parent: THREE.Object3D, d: Details, occluders: THREE.Objec
   const fill = new THREE.HemisphereLight(0x5a6488, 0x2c2f38, 0.55);
   fill.name = 'canteen-shadowless-fill';
   parent.add(fill);
+  buildWindowGarden(parent, d);
+}
 
+/** 周期噪声辅助：与 materials.ts 的 barkColor 同算法，使食堂窗外树干/树枝与上学林荫路树皮纹理保持一致。 */
+function barkHash(ix: number, iy: number, seed: number): number {
+  let h = Math.imul(ix, 374761393) ^ Math.imul(iy, 668265263) ^ Math.imul(seed, 1442695041);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+function barkPeriodicNoise(u: number, v: number, periodX: number, periodY: number, seed: number): number {
+  const x = u * periodX;
+  const y = v * periodY;
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const wrap = (val: number, period: number): number => ((val % period) + period) % period;
+  const xa = wrap(x0, periodX);
+  const xb = wrap(x0 + 1, periodX);
+  const ya = wrap(y0, periodY);
+  const yb = wrap(y0 + 1, periodY);
+  const tx = x - x0;
+  const ty = y - y0;
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+  const n00 = barkHash(xa, ya, seed);
+  const n10 = barkHash(xb, ya, seed);
+  const n01 = barkHash(xa, yb, seed);
+  const n11 = barkHash(xb, yb, seed);
+  return (n00 * (1 - sx) + n10 * sx) * (1 - sy) + (n01 * (1 - sx) + n11 * sx) * sy;
+}
+
+/** 独立拥有（非全局共享）的程序化树皮材质：纵向沟壑+横向短裂+高处微风摇摆，随材质 dispose 释放贴图。 */
+function createOwnedBarkMaterial(windTime: WindTime): THREE.MeshStandardMaterial {
+  const size = 128;
+  const pixels = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const u = x / size;
+      const v = y / size;
+      const ridge = barkPeriodicNoise(u, v, 24, 3, 89);
+      const crack = barkPeriodicNoise(u, v, 40, 12, 97);
+      const shade = 0.62 + ridge * 0.62 + crack * 0.12;
+      const r = ridge < 0.3 ? 43 : Math.min(255, Math.round(107 * shade));
+      const g = ridge < 0.3 ? 34 : Math.min(255, Math.round(88 * shade));
+      const b = ridge < 0.3 ? 27 : Math.min(255, Math.round(71 * shade));
+      pixels.set([r, g, b, 255], (y * size + x) * 4);
+    }
+  }
+  const texture = new THREE.DataTexture(pixels, size, size);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2, 3);
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  const material = new THREE.MeshStandardMaterial({
+    map: texture,
+    color: 0x8a8278,
+    roughness: 0.94,
+    metalness: 0,
+    envMapIntensity: 0.32,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = windTime;
+    shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        vec4 barkWorld = instanceMatrix * vec4(transformed, 1.0);
+        float barkHeight = clamp((barkWorld.y - 1.2) / 3.8, 0.0, 1.0);
+        float barkPhase = instanceMatrix[3][0] * 0.55 + instanceMatrix[3][2] * 0.78;
+      #else
+        float barkHeight = clamp((position.y + 0.5), 0.0, 1.0);
+        float barkPhase = 0.0;
+      #endif
+      float barkSway = sin(uTime * 1.35 + barkPhase) * 0.032 * barkHeight * barkHeight;
+      transformed.z += barkSway;
+      transformed.x += cos(uTime * 1.05 + barkPhase * 1.2) * 0.018 * barkHeight * barkHeight;`,
+    );
+  };
+  material.customProgramCacheKey = () => 'canteen-bark-wind-v1';
+  const release = (): void => { texture.dispose(); material.removeEventListener('dispose', release); };
+  material.addEventListener('dispose', release);
+  return material;
+}
+
+/** 独立拥有（非全局共享）的立体叶团/灌木逐顶点波浪风摆材质。 */
+function createOwnedFoliageWindMaterial(windTime: WindTime, amplitude: number): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.9,
+    metalness: 0,
+    envMapIntensity: 0.34,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = windTime;
+    shader.uniforms.uAmp = { value: amplitude };
+    shader.vertexShader = `uniform float uTime;\nuniform float uAmp;\n${shader.vertexShader}`.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        float leafPhase = instanceMatrix[3][0] * 0.61 + instanceMatrix[3][2] * 0.83 + instanceMatrix[3][1] * 0.37;
+      #else
+        float leafPhase = 0.0;
+      #endif
+      float leafWeight = clamp((position.y + 1.0) * 0.5, 0.0, 1.0);
+      transformed.z += sin(uTime * 1.55 + leafPhase) * uAmp * leafWeight;
+      transformed.x += cos(uTime * 1.18 + leafPhase * 1.27) * uAmp * 0.65 * leafWeight;`,
+    );
+  };
+  material.customProgramCacheKey = () => `canteen-foliage-wind:${amplitude.toFixed(3)}`;
+  return material;
+}
+
+/** 窗外树林与傍晚氛围：同款树皮沟壑纹理分叉枝干 + 同款 canopy 枝叶卡片 + 三层实时风摆摇曳。 */
+function buildWindowGarden(parent: THREE.Object3D, d: Details): void {
   const garden = group(parent, 'canteen-window-garden');
+  const windTime: WindTime = { value: 0 };
+  garden.userData.windTime = windTime;
   garden.add(createDuskBackdrop());
   d.box(garden, 'canteen-garden-ground', [-13, -0.08, 0], [9, 0.12, 26], d.matte(0x46524a));
   d.box(garden, 'canteen-garden-low-wall', [-16.9, 0.6, 0], [0.3, 1.2, 26], d.matte(0x5a616b));
@@ -837,81 +956,97 @@ function architecture(parent: THREE.Object3D, d: Details, occluders: THREE.Objec
   d.boxes(garden, 'canteen-far-campus', d.matte(0xffffff), facadeZ.map((z, i) => ({
     p: [-18.4, facadeH[i] / 2 - 0.08, z], s: [2.0, facadeH[i], 3.4], color: facadeTone[i],
   })));
-  // 树干（微锥圆柱）+ 多簇树冠 + 低矮灌木。
-  // C-38 空气透视：远处 5 棵整体降饱和 25%、提亮 8%，近处 2 棵保持原色并加枝干剪影。
-  // 任务书建议近处换卡片树，但贴图账已经到 25 上限，且资源生命周期单测禁止两次 build 共享同一张
-  // 缓存贴图——canopy.ts 的贴图是模块级缓存，换过来必然同时踩两条红线。这里改用"近实远虚"的
-  // 配色 + 同批次加枝干盒实现同一目的：0 新贴图、0 新 draw call。
-  //
-  // 树冠不用 d.sphere（168 面，且与学生头像共用同一份几何，改它等于改人脸）：另建 8×4 分段球
-  // 48 面，靠"每棵 6~7 块偏心簇 + 逐实例旋转 + 三层色"把原来 30 个大球的蘑菇轮廓拆掉。
-  // 背光口径按任务书：冠顶透光黄绿、冠体中绿、冠底与内侧深绿，远景整层灰化提亮。
-  // 面数 30×168 + 7×168 = 6216 → 44×48 + 12×48 = 2688，省出的 3528 面付给一桌四椅真实模型套装。
-  const trunkGeo = new THREE.CylinderGeometry(0.06, 0.1, 1, 6);
+
+  // 8 边微锥树干与分叉主枝（贴与 street/building 同算法树皮沟壑纹理）+ 立体内芯球簇 + 同款枝叶卡片群
+  const trunkGeo = new THREE.CylinderGeometry(0.068, 0.118, 1, 8);
   const canopyGeo = new THREE.SphereGeometry(1, 7, 4);
+  const barkMat = createOwnedBarkMaterial(windTime);
+  const foliageWindMat = createOwnedFoliageWindMaterial(windTime, 0.075);
+  const shrubWindMat = createOwnedFoliageWindMaterial(windTime, 0.045);
+
   const trunks: Part[] = [];
   const foliage: Part[] = [];
   const shrubs: Part[] = [];
-  // 三层色：0 冠顶（透光黄绿）/ 1 冠体（中绿）/ 2 冠底与内侧（深绿）
-  const nearTone = [0x6d7a3a, 0x48603a, 0x2c4a30];
-  const farTone = [0x5d6a4c, 0x4d5c50, 0x3e4f45];
+  const canopyCards: CanopyCardSpec[] = [];
+  const tier = canopyBudget(getQualityTier());
+  const cardsPerTree = Math.min(8, Math.max(5, tier.cards));
+  const golden = Math.PI * (3 - Math.sqrt(5)) * 2;
+
+  // 傍晚冷暖空气透视：冠顶微透暮光黄绿，冠体中绿，冠底深绿，远处灰化提亮
+  const nearTone = [0x6e7d40, 0x48623d, 0x2c4832];
+  const farTone = [0x5c6b4d, 0x4b5c51, 0x3c4d45];
+  const nearCardTints = [0xb9c79b, 0x9eb289, 0x8ea37e, 0xc4caa0];
+  const farCardTints = [0x95a58d, 0x859887, 0x7b8f82, 0xa2b098];
   const nearShrub = 0x35473f;
   const farShrub = 0x3c4d44;
-  // [dx, dy(相对树梢基准 h), dz, sx, sy, sz, 色层, 旋转]：偏心且不对称，破掉球堆感
-  const CLUMPS: Array<[number, number, number, number, number, number, number, number]> = [
-    [0.00, 0.95, 0.00, 1.28, 0.98, 1.16, 1, 0.0],
-    [0.66, 0.42, 0.26, 0.94, 0.78, 0.88, 2, 0.5],
-    [-0.62, 0.30, -0.32, 0.88, 0.72, 0.82, 2, 1.1],
-    [0.34, 1.48, -0.24, 0.78, 0.66, 0.74, 0, 0.8],
-    [-0.40, 1.34, 0.34, 0.70, 0.60, 0.68, 0, 1.7],
-    [-0.82, 0.98, -0.58, 0.60, 0.52, 0.58, 1, 0.3],
-    [0.10, 1.88, 0.04, 0.52, 0.44, 0.50, 0, 2.4],
+
+  // 每棵树仅保留收紧的小体积深绿内芯托底，外围完全由同款枝叶卡片展现细碎树叶与分叉树枝剪影（彻底消除球块轮廓）
+  const CORE_CLUMPS: Array<[number, number, number, number, number, number, number, number]> = [
+    [0.00, 1.05, 0.00, 0.76, 0.62, 0.72, 1, 0.0],
+    [0.36, 0.62, 0.16, 0.56, 0.48, 0.54, 2, 0.5],
+    [-0.34, 0.56, -0.18, 0.54, 0.46, 0.52, 2, 1.1],
+    [0.10, 1.48, -0.08, 0.48, 0.42, 0.46, 0, 1.6],
   ];
+
   let treeIndex = 0;
   for (let z = -9; z <= 9; z += 3) {
     const jitter = (treeIndex % 3) - 1;
-    const near = treeIndex >= 5;
+    const near = treeIndex >= 4;
     const tone = near ? nearTone : farTone;
-    const x = -12.5 + jitter * 0.4;
-    const h = 3.0 + (treeIndex % 3) * 0.28 + (near ? 0.35 : 0);
-    trunks.push({ p: [x, h / 2, z], s: [1, h, 1] });
+    const cardPalette = near ? nearCardTints : farCardTints;
+    const x = -12.4 + jitter * 0.45;
+    const h = 3.05 + (treeIndex % 3) * 0.3 + (near ? 0.3 : 0);
+    // 主干
+    trunks.push({ p: [x, h / 2, z], s: [1.05, h, 1.05] });
+    // 每棵树 3 根自然向外分叉的粗斜枝（与 building.ts 林荫树分叉比例一致），近景多补 1 根外探长枝
+    const branchCount = near ? 4 : 3;
+    for (let b = 0; b < branchCount; b += 1) {
+      const angle = b * 2.08 + treeIndex * 0.75;
+      const len = (near ? 1.55 : 1.32) - (b % 2) * 0.18;
+      const pitch = 0.68 + (b % 3) * 0.16;
+      const startY = h * 0.84 + (b % 2) * 0.22;
+      trunks.push({
+        p: [
+          x + Math.sin(angle) * Math.sin(pitch) * (len * 0.48),
+          startY + Math.cos(pitch) * (len * 0.48),
+          z + Math.cos(angle) * Math.sin(pitch) * (len * 0.48),
+        ],
+        s: [0.56, len, 0.56],
+        r: [Math.cos(angle) * pitch, 0, -Math.sin(angle) * pitch],
+      });
+    }
     const spin = treeIndex * 0.41;
-    CLUMPS.forEach((clump, i) => {
-      // 远景树少挂一块侧簇、并整体收拢 8%，七棵树的天际线因此高低错落
-      if (!near && (i === 5 || i === 3)) return;
-      const [dx, dy, dz, sx, sy, sz, layer, rot] = clump;
-      const tuck = near ? 1 : 0.92;
+    const tuck = near ? 1 : 0.92;
+    for (const [dx, dy, dz, sx, sy, sz, layer, rot] of CORE_CLUMPS) {
       foliage.push({
         p: [x + dx * tuck, h + dy, z + dz * tuck],
         s: [sx * tuck, sy, sz * tuck],
         r: [rot + spin, spin * 0.7, rot * 0.4 - spin * 0.3],
         color: tone[layer],
       });
-    });
+    }
+    // 树冠外围环绕与 building/street 同款的枝叶卡片（枝条骨架+破形枝+四层叶簇，黄金角错开避免纸片感）
+    const crownCenterY = h + 1.15;
+    for (let card = 0; card < cardsPerTree; card += 1) {
+      const t = (card + 0.5) / cardsPerTree;
+      const angle = card * golden + treeIndex * 1.43;
+      const ring = 0.82 * tuck * (0.32 + 0.68 * Math.sin(Math.PI * t));
+      canopyCards.push({
+        x: x + Math.cos(angle) * ring * 0.85,
+        y: crownCenterY + (t - 0.5) * 1.72 * tuck,
+        z: z + Math.sin(angle) * ring,
+        scale: (2.48 + ((card * 5 + treeIndex) % 3) * 0.2) * tuck,
+        yaw: angle + Math.PI / 2,
+        tilt: ((card % 3) - 1) * 0.18,
+        tint: cardPalette[(treeIndex + card) % cardPalette.length],
+      });
+    }
     shrubs.push({
       p: [x + 1.2, 0.4, z + 0.8], s: [1.1, 0.8, 0.7], r: [0.18 * treeIndex, treeIndex * 0.9, 0],
       color: near ? nearShrub : farShrub,
     });
-    if (near) {
-      // C-38 出枝：细圆柱绕 X 轴转到近水平，从 trunk 批次里斜插出冠缘。天空背景下剩下的就是
-      // 枝干剪影，球冠的"蘑菇"轮廓因此破掉。同批次加实例 = 0 新 draw call、0 新贴图。
-      for (const [side, pitch, len] of [[1, 1.22, 1.55], [-1, 1.06, 1.3], [1, 0.82, 1.0]] as Array<[number, number, number]>) {
-        const theta = side * pitch;
-        trunks.push({
-          p: [x + 0.08, h + 0.42 + (len / 2) * Math.cos(theta), z + (len / 2) * Math.sin(theta)],
-          s: [0.9, len, 0.9],
-          r: [theta, 0, 0],
-        });
-      }
-      // 冠外一块偏心的侧叶，让两棵树的外轮廓不重样
-      foliage.push({
-        p: [x + 0.2, h + 0.62, z - 0.95], s: [1.12, 0.66, 0.92], r: [0.4, spin, 0.2],
-        color: tone[1],
-      });
-    }
     treeIndex += 1;
   }
-  // 灌木补一行矮丛，把地面与树冠之间的空档填上（仍共用同一批次）
   for (let i = 0; i < 3; i += 1) {
     shrubs.push({
       p: [-11.6 + (i % 2) * 1.4, 0.28, -7.5 + i * 3.6],
@@ -920,9 +1055,18 @@ function architecture(parent: THREE.Object3D, d: Details, occluders: THREE.Objec
       color: i % 2 === 0 ? farShrub : nearShrub,
     });
   }
-  d.batch(garden, 'canteen-tree-trunks', trunkGeo, d.matte(0x4a443c), trunks);
-  d.batch(garden, 'canteen-tree-foliage', canopyGeo, d.matte(0xffffff), foliage);
-  d.batch(garden, 'canteen-shrubs', canopyGeo, d.matte(0xffffff), shrubs);
+
+  d.batch(garden, 'canteen-tree-trunks', trunkGeo, barkMat, trunks);
+  d.batch(garden, 'canteen-tree-foliage', canopyGeo, foliageWindMat, foliage);
+  d.batch(garden, 'canteen-shrubs', canopyGeo, shrubWindMat, shrubs);
+  const canopyBatch = createOwnedCanopyCardBatch(canopyCards, {
+    name: 'canteen-tree-canopy-cards',
+    texture: { size: tier.textureSize, seed: 5, aniso: tier.anisotropy, density: 0.94 },
+    alphaTest: tier.alphaTest,
+    time: windTime,
+    sway: 0.088,
+  });
+  garden.add(canopyBatch);
 }
 
 /** 场景代次：切走食堂后仍在途的道具回调必须作废，不能往复用的关卡根节点里补挂上一代的几何 */
@@ -1601,6 +1745,7 @@ interface CanteenSession {
   dust?: THREE.InstancedMesh;
   fans?: THREE.InstancedMesh;
   foliage?: THREE.Object3D;
+  windTime?: WindTime;
   lightSheets?: THREE.Mesh;
   clockHour?: THREE.Object3D;
   clockMinute?: THREE.Object3D;
@@ -1788,6 +1933,9 @@ export const canteenRuntime: SceneRuntime = {
     if (fans instanceof THREE.InstancedMesh) current.fans = fans;
     const foliage = crowdRoot?.getObjectByName('canteen-tree-foliage');
     if (foliage) current.foliage = foliage;
+    const garden = crowdRoot?.getObjectByName('canteen-window-garden');
+    const windTime = garden?.userData.windTime as WindTime | undefined;
+    if (windTime) current.windTime = windTime;
     const lightSheets = crowdRoot?.getObjectByName('canteen-light-sheets');
     if (lightSheets instanceof THREE.Mesh) current.lightSheets = lightSheets;
     current.clockHour = crowdRoot?.getObjectByName('canteen-clock-hour') ?? undefined;
@@ -1874,9 +2022,10 @@ export const canteenRuntime: SceneRuntime = {
     if (session.steam) updateSteam(session.steam, session.time);
     if (session.dust) updateDust(session.dust, session.time);
     if (session.fans) updateFans(session.fans, session.time);
+    if (session.windTime) session.windTime.value += dt;
     if (session.foliage) {
-      session.foliage.position.z = Math.sin(session.time * 0.72) * 0.045;
-      session.foliage.rotation.z = Math.sin(session.time * 0.58) * 0.006;
+      session.foliage.position.z = Math.sin(session.time * 0.78) * 0.05;
+      session.foliage.rotation.z = Math.sin(session.time * 0.62) * 0.008;
     }
     if (session.lightSheets && session.lightSheets.material instanceof THREE.MeshBasicMaterial) {
       session.lightSheets.material.opacity = 0.34 + Math.sin(session.time * 0.85) * 0.03;

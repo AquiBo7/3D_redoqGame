@@ -1,18 +1,36 @@
-// 教学楼共享几何：模块预载不创建资源、不访问 DOM；剧情推进完全交给 core。
+// scenes3d/schoolInterior.ts —— 双层教学楼（1F 辅导员办公室/阅览室/玄关 + 可步行双跑折返楼梯 + 2F 教室/走廊/侧楼梯平台）
+// 严格对照《一条截图_教学楼审查与Blender执行提示词》第 2～4 节重构：
+//   · P0-01：按柱跨凹间重排走廊立柱、公告栏与八门百叶矮柜，保证距柱边与门套留足净距、零穿插截断。
+//   · P0-02：改为顺板长拼缝哑光暖木地板（roughness 0.60）+ 非叠加窗格柔光带（NormalBlending）+ 克制夕照点光，消除门槛过曝白斑。
+//   · P0-03：移除重复叠加玻璃，每扇窗格独立嵌入单层浅灰蓝玻璃，木窗框与密实褶皱窗帘走不透明通道。
+//   · P1-04/05：接入 tools/blender_school_kit.py 生产的 13 件高精度低模套件（倒角课桌椅、掏空书斗、百叶柜、书包、公告栏、讲桌、圆网音箱、胡桃木办公桌、档案柜与 A/B/C 三型香樟树 + 留白透天庭院）。
+
 import * as THREE from 'three';
 import type { SceneId } from '../data/storySchema';
-import type { ObstacleAabb } from '../world/navMath';
+import type { GroundSurface, ObstacleAabb, RectBounds } from '../world/navMath';
+import { loadPropModel, type PropModelAsset } from '../world/resources';
 import type { SceneRuntime, SceneRuntimeContext, WorldSceneDefinition } from '../world/worldSceneTypes';
-import { createActorAnimation, createCharacterActor, createTextSign, findActorModelRoot } from './shared';
 import type { CharacterAnimationController } from './characterAnimation';
 import { getCharacterModel, type CharacterModelId } from './modelManifest';
+import type { PropModelId } from './propManifest';
+import { createActorAnimation, createCharacterActor, createTextSign, findActorModelRoot } from './shared';
 
 type InteriorScene = 'C2' | 'C3' | 'C4' | 'C5' | 'C6' | 'D1' | 'D6';
 type V3 = [number, number, number];
+type BoxPart = { p: V3; s: V3; r?: V3; color?: number };
+
+export const FLOOR1_Y = 0;
+export const LANDING_Y = 1.9;
+export const FLOOR2_Y = 3.8;
+const CEILING_H = 3.68;
+const SLAB_THICK = 0.12;
+const ROOF_Y = FLOOR2_Y + CEILING_H + SLAB_THICK / 2;
+
 const SCENES: readonly InteriorScene[] = ['C2', 'C3', 'C4', 'C5', 'C6', 'D1', 'D6'];
 const MODELS: readonly CharacterModelId[] = [
   'linxia',
   'ayuan',
+  'volunteer',
   'studentMale2',
   'studentMale3',
   'studentMale4',
@@ -21,78 +39,282 @@ const MODELS: readonly CharacterModelId[] = [
 ];
 const ORANGE = 0xcd793c;
 
-/** 脚底导航点与交互锚点分开，便于浏览器验收 / teleport；所有坐标都是米。 */
-export const INTERIOR_LOCATIONS = {
-  spawns: {
-    C2: { x: -0.1, z: 5, yaw: Math.PI / 2, pitchDeg: -6 },
-    C3: { x: 2.8, z: 5.2, yaw: 0, pitchDeg: -3 },
-    C4: { x: 3, z: 6, yaw: -Math.PI / 2, pitchDeg: -3 },
-    C5: { x: 2.7, z: 6.5, yaw: 0, pitchDeg: -3 },
-    C6: { x: 3, z: 3.5, yaw: -Math.PI / 2, pitchDeg: -3 },
-    D1: { x: 7, z: 0, yaw: Math.PI, pitchDeg: -3 },
-    D6: { x: 3, z: 5, yaw: 0, pitchDeg: -3 },
-  },
-  seats: [
-    { id: 'seat-beside', x: -4, y: 0.48, z: 4.75, approach: { x: -5.3, z: 4.75 } },
-    { id: 'seat-front', x: -7, y: 0.48, z: 1.75, approach: { x: -5.3, z: 1.75 } },
-    { id: 'seat-far', x: -4, y: 0.48, z: -4.25, approach: { x: -2.5, z: -4.25 } },
-  ],
-  students: [
-    // 教室前侧过道（不敢出声的旁观者女同学）：四处张望/抱臂/拘谨
-    { id: 'student-1', modelId: 'studentFemale4' as CharacterModelId, x: -1.5, z: -6.2, yaw: 0.32, approach: { x: -1.1, z: -4.8 }, lightOffset: { x: 0.14, z: 0.48 }, clips: ['look_around', 'fold_arms', 'afraid'] as const },
-    // 走廊北侧靠墙（理性正派男同学，保留 (4.15, -4) 碰撞契约）：接电话/点头/张望
-    { id: 'student-2', modelId: 'studentMale4' as CharacterModelId, x: 4.15, z: -4, yaw: -Math.PI / 2, approach: { x: 2.7, z: -4 }, lightOffset: { x: -0.5, z: 0 }, clips: ['make_a_call_02', 'agree', 'look_around'] as const },
-    // 教室后侧过道（冷嘲热讽女同学）：窃笑/附和/拘谨（纯站姿）
-    { id: 'student-3', modelId: 'studentFemale3' as CharacterModelId, x: -1.5, z: 2.6, yaw: 0.18, approach: { x: -1.3, z: 4.1 }, lightOffset: { x: 0.07, z: 0.5 }, clips: ['laugh_01', 'agree', 'afraid'] as const },
-    // 侧楼梯平台窗边（阿远，橙色手机壳线索）：低头看手机
-    { id: 'student-4', modelId: 'ayuan' as CharacterModelId, x: 8.2, z: 1.2, yaw: -Math.PI / 2, approach: { x: 6.8, z: 1.2 }, lightOffset: { x: -0.5, z: 0 }, clips: [] as const },
-    // 走廊中段西侧（围观看热闹男同学）：起哄/待机/拿手机
-    { id: 'student-5', modelId: 'studentMale3' as CharacterModelId, x: 1.9, z: 0.4, yaw: Math.PI / 2, approach: { x: 3.3, z: 0.4 }, lightOffset: { x: 0.5, z: 0 }, clips: ['cheer', 'wait', 'make_a_call_02'] as const },
-    // 侧楼梯南侧平台（发帖起哄/键盘侠男同学）：急躁/嗤笑/待机（纯站姿）
-    { id: 'student-6', modelId: 'studentMale2' as CharacterModelId, x: 8.2, z: 6.4, yaw: -Math.PI * 0.72, approach: { x: 6.9, z: 5.7 }, lightOffset: { x: -0.44, z: -0.24 }, clips: ['angry_01', 'laugh_02', 'wait'] as const },
-  ],
-  linxiaDesk: { x: -7, z: 4.75 },
-  stairwell: { x: 7, z: -1 },
-  stairwellActor: { x: 8.3, z: -1 },
-  platform: { x: 7, z: 5 },
-  platformActor: { x: 8.3, z: 5 },
-  corridor: { x: 2.8, z: -4 },
-  corridorLinxia: { x: 4.15, z: -4 },
-  corridorAyuan: { x: 4.15, z: -1 },
-  classroomDoor: { x: 1, z: 5 },
-  stairwellDoor: { x: 5, z: 5 },
-  teacherOfficeDoor: { x: 3.0, y: 1.2, z: -8.82 },
+// 审查第 3 节统一建筑色板（克制米灰上墙 + 蓝灰墙裙 + 暖木地面与收口）
+const COL_WALL_UPPER = 0xdad7cc;
+const COL_WAINSCOT = 0x849197;
+const COL_BASEBOARD = 0x927a5d;
+const COL_WOOD_FRAME = 0x625146;
+const COL_HARDWARE = 0x454b4f;
+const COL_CLASS_DOOR = 0x426c75;
+const COL_DESK_WOOD = 0xad8e68;
+const COL_DESK_STEEL = 0x384448;
+const COL_CHALKBOARD = 0x314943;
+const COL_LOCKER_CREAM = 0xc9c2b4;
+const COL_LOCKER_TERRA = 0xa97862;
+const COL_EXIT_GREEN = 0x285847;
+const COL_GUIDE_OCHRE = 0xcba53e;
+const COL_STAIR_PAD = 0x527582;
+
+// 1F & 2F 走廊统一柱网 Z 坐标（对齐 1F 分室隔墙 z=0.20，避开全部门洞与公告栏凹间）
+export const CORRIDOR_PILLAR_Z = [-6.65, 0.2, 6.65] as const;
+
+export const CORRIDOR_LAYOUT = {
+  f1BulletinsZ: [-4.95, 1.3] as const,
+  f2BulletinsZ: [1.25, 7.65] as const,
+  f1LowLockersZ: [-7.85, 2.82] as const,
+  f2LowLockersZ: [-2.65, -1.05, 2.92] as const,
 } as const;
 
-const DESKS = [-7, -4].flatMap((x) => [-5, -2, 1, 4].map((z) => ({ x, z })));
-// 门洞宽 2.4m / 4m；墙、台阶与家具的可见占地与碰撞配置共用数据。
-const PARTITIONS = [
-  { name: 'class-wall-front', p: [1, 1.9, -7.6], s: [0.2, 3.8, 2.8] },
-  { name: 'class-wall-middle', p: [1, 1.9, 0], s: [0.2, 3.8, 7.6] },
-  { name: 'class-wall-back', p: [1, 1.9, 7.6], s: [0.2, 3.8, 2.8] },
-  { name: 'stair-wall', p: [5, 1.9, -3], s: [0.2, 3.8, 12] },
-  { name: 'platform-wall', p: [5, 1.9, 8], s: [0.2, 3.8, 2] },
-] satisfies Array<{ name: string; p: V3; s: V3 }>;
-function obstacle(id: string, x: number, z: number, w: number, d: number, height = 1.8): ObstacleAabb {
-  return { id, minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, height };
+/** 脚底导航点、楼层高度与交互锚点分开管理；所有坐标单位为米。 */
+export const INTERIOR_LOCATIONS = {
+  floors: {
+    f1: FLOOR1_Y,
+    landing: LANDING_Y,
+    f2: FLOOR2_Y,
+  },
+  spawns: {
+    // C2：2F 高一(3)班教室后门内侧，面向教室内与林夏
+    C2: { x: -0.1, y: FLOOR2_Y, z: 5, yaw: Math.PI / 2, pitchDeg: -6 },
+    // C3：2F 走廊教室外，面向东侧楼梯口，引导玩家走下双跑楼梯前往 1F 辅导员办公室找周老师
+    C3: { x: 2.8, y: FLOOR2_Y, z: 5.2, yaw: -Math.PI * 0.32, pitchDeg: -5 },
+    // C4：刚从 1F 辅导员办公室出来走到 1F 楼梯厅前，听见楼梯间拐角（1.5F 休息平台）动静
+    C4: { x: 3.0, y: FLOOR1_Y, z: 4.8, yaw: -Math.PI * 0.45, pitchDeg: -3 },
+    // C5：2F 走廊南段，寻找发布者
+    C5: { x: 2.7, y: FLOOR2_Y, z: 6.5, yaw: 0, pitchDeg: -3 },
+    // C6：夜晚 2F 走廊，走向双跑楼梯拐角（1.5F 休息平台）看见夜色中的橙色手机壳
+    C6: { x: 3.0, y: FLOOR2_Y, z: 3.5, yaw: -Math.PI / 2, pitchDeg: -4 },
+    // D1：放学后 2F 侧楼梯口，走近夕阳下的 2F 侧楼梯观景平台遇到阿远
+    D1: { x: 6.4, y: FLOOR2_Y, z: 2.0, yaw: Math.PI, pitchDeg: -3 },
+    // D6：傍晚 2F 走廊南段，走向北侧窗边找林夏
+    D6: { x: 3.0, y: FLOOR2_Y, z: 5.0, yaw: 0, pitchDeg: -3 },
+  },
+  seats: [
+    { id: 'seat-beside', x: -4, y: FLOOR2_Y + 0.48, z: 4.75, approach: { x: -5.3, y: FLOOR2_Y, z: 4.75 } },
+    { id: 'seat-front', x: -7, y: FLOOR2_Y + 0.48, z: 1.75, approach: { x: -5.3, y: FLOOR2_Y, z: 1.75 } },
+    { id: 'seat-far', x: -4, y: FLOOR2_Y + 0.48, z: -4.25, approach: { x: -2.5, y: FLOOR2_Y, z: -4.25 } },
+  ],
+  students: [
+    // 2F 教室前侧过道（沉默旁观女同学）：四处张望/抱臂/拘谨
+    {
+      id: 'student-1', modelId: 'studentFemale4' as CharacterModelId,
+      x: -1.5, y: FLOOR2_Y, z: -6.2, yaw: 0.32,
+      approach: { x: -1.1, y: FLOOR2_Y, z: -4.8 }, lightOffset: { x: 0.14, z: 0.48 },
+      clips: ['look_around', 'fold_arms', 'afraid'] as const,
+    },
+    // 2F 走廊北侧靠墙（理性正派男同学，手抱书本）：接电话/点头/张望
+    {
+      id: 'student-2', modelId: 'studentMale4' as CharacterModelId,
+      x: 4.15, y: FLOOR2_Y, z: -4, yaw: -Math.PI / 2,
+      approach: { x: 2.7, y: FLOOR2_Y, z: -4 }, lightOffset: { x: -0.5, z: 0 },
+      clips: ['make_a_call_02', 'agree', 'look_around'] as const,
+    },
+    // 2F 教室后侧过道（冷嘲热讽女同学，背书包）：窃笑/附和/拘谨
+    {
+      id: 'student-3', modelId: 'studentFemale3' as CharacterModelId,
+      x: -1.5, y: FLOOR2_Y, z: 2.6, yaw: 0.18,
+      approach: { x: -1.3, y: FLOOR2_Y, z: 4.1 }, lightOffset: { x: 0.07, z: 0.5 },
+      clips: ['laugh_01', 'agree', 'afraid'] as const,
+    },
+    // 2F 侧楼梯观景平台窗边（阿远，橙色手机壳线索）：低头看手机
+    {
+      id: 'student-4', modelId: 'ayuan' as CharacterModelId,
+      x: 8.35, y: FLOOR2_Y, z: 2.8, yaw: -Math.PI / 2,
+      approach: { x: 6.9, y: FLOOR2_Y, z: 2.8 }, lightOffset: { x: -0.5, z: 0 },
+      clips: [] as const,
+    },
+    // 2F 走廊中段教室门边（围观看热闹男同学）：起哄/待机/拿手机
+    {
+      id: 'student-5', modelId: 'studentMale3' as CharacterModelId,
+      x: 1.9, y: FLOOR2_Y, z: 0.4, yaw: Math.PI / 2,
+      approach: { x: 3.3, y: FLOOR2_Y, z: 0.4 }, lightOffset: { x: 0.5, z: 0 },
+      clips: ['cheer', 'wait', 'make_a_call_02'] as const,
+    },
+    // 2F 侧楼梯平台南侧靠栏杆窗边（发帖起哄/键盘侠男同学）：急躁/嗤笑/待机
+    {
+      id: 'student-6', modelId: 'studentMale2' as CharacterModelId,
+      x: 8.2, y: FLOOR2_Y, z: 6.4, yaw: -Math.PI * 0.72,
+      approach: { x: 6.9, y: FLOOR2_Y, z: 5.7 }, lightOffset: { x: -0.44, z: -0.24 },
+      clips: ['angry_01', 'laugh_02', 'wait'] as const,
+    },
+  ],
+  linxiaDesk: { x: -7, y: FLOOR2_Y, z: 4.75 },
+  // 1.5F 双跑折返楼梯中间休息平台（C4 林夏靠东北窗打电话、C6 夜晚阿远手机微光；不堵上下楼折返通路）
+  stairwell: { x: 7.2, y: LANDING_Y, z: -6.5 },
+  stairwellActor: { x: 8.85, y: LANDING_Y, z: -7.2 },
+  // 2F 侧楼梯夕阳观景平台（D1 遇到阿远）
+  platform: { x: 7.0, y: FLOOR2_Y, z: 5.4 },
+  platformActor: { x: 8.4, y: FLOOR2_Y, z: 5.4 },
+  // 2F 走廊北段（D6 傍晚林夏与阿远）
+  corridor: { x: 2.8, y: FLOOR2_Y, z: -4.0 },
+  corridorLinxia: { x: 4.15, y: FLOOR2_Y, z: -4.0 },
+  corridorAyuan: { x: 4.15, y: FLOOR2_Y, z: -1.2 },
+  classroomDoor: { x: 1.0, y: FLOOR2_Y, z: 5.0 },
+  stairwellDoor: { x: 5.0, y: FLOOR2_Y, z: 3.4 },
+  // 1F 辅导员办公室（C3 走下双跑楼梯并进入 1F 办公室与周老师对话）
+  teacherOfficeEntry: { x: 1.0, y: FLOOR1_Y, z: -2.2 },
+  teacherOfficeActor: { x: -3.2, y: FLOOR1_Y, z: -4.4 },
+  teacherOfficeDoor: { x: -2.1, y: FLOOR1_Y + 1.12, z: -3.55 },
+  teacherOfficeApproach: { x: -0.9, y: FLOOR1_Y, z: -2.5 },
+} as const;
+
+const DESKS_2F = [-7, -4].flatMap((x) => [-5, -2, 1, 4].map((z) => ({ x, z })));
+const OFFICE_DESKS_1F = [
+  { x: -3.4, z: -5.4, yaw: 0 },
+  { x: -6.8, z: -5.4, yaw: 0 },
+  { x: -6.8, z: -2.0, yaw: Math.PI / 2 },
+] as const;
+const STUDY_TABLES_1F = [
+  { x: -4.8, z: 3.2 },
+  { x: -4.8, z: 6.4 },
+] as const;
+
+// 窗外庭院三型香樟树位表（刻意在西窗 z∈[-2.8, +2.6] 与东窗 z∈[-1.8, +4.4] 留出透天与远楼呼吸空窗！）
+interface CourtyardTreeSpec {
+  variant: 'A' | 'B' | 'C';
+  x: number;
+  z: number;
+  scale: number;
+  yaw: number;
 }
-function navigation(scene: InteriorScene): WorldSceneDefinition['nav'] {
-  const people = scene === 'C5' ? INTERIOR_LOCATIONS.students : scene === 'C4' || scene === 'C6'
-    ? [INTERIOR_LOCATIONS.stairwellActor] : scene === 'D1' ? [INTERIOR_LOCATIONS.platformActor]
-      : scene === 'D6' ? [INTERIOR_LOCATIONS.corridorLinxia, INTERIOR_LOCATIONS.corridorAyuan] : [];
+const COURTYARD_TREES: readonly CourtyardTreeSpec[] = [
+  // 西侧庭院（教室与 1F 办公室窗外）
+  { variant: 'A', x: -12.1, z: -6.9, scale: 1.26, yaw: 0.38 },
+  { variant: 'C', x: -13.7, z: -3.3, scale: 1.32, yaw: -0.65 },
+  { variant: 'B', x: -12.3, z: 3.1, scale: 1.28, yaw: 2.45 },
+  { variant: 'A', x: -14.1, z: 7.1, scale: 1.18, yaw: 1.72 },
+  // 东侧庭院（双跑楼梯平台与 2F 观景台窗外）
+  { variant: 'B', x: 12.8, z: -6.6, scale: 1.24, yaw: -0.58 },
+  { variant: 'C', x: 14.2, z: -2.3, scale: 1.28, yaw: 0.88 },
+  { variant: 'A', x: 13.1, z: 5.9, scale: 1.25, yaw: -2.08 },
+];
+
+// 双跑折返楼梯坡度常量
+const STAIR_Z_START = 0.4;
+const STAIR_Z_END = -4.4;
+const STAIR_RUN_LEN = STAIR_Z_START - STAIR_Z_END; // 4.8m
+const STAIR_SLOPE = LANDING_Y / STAIR_RUN_LEN;
+
+const FLOOR_SURFACES: readonly GroundSurface[] = [
+  { id: 'floor-1f', minX: -9, maxX: 10, minZ: -9, maxZ: 9, height: FLOOR1_Y },
+  { id: 'floor-2f-main', minX: -9, maxX: 5.1, minZ: -9, maxZ: 9, height: FLOOR2_Y },
+  { id: 'floor-2f-platform', minX: 5.0, maxX: 10, minZ: STAIR_Z_START, maxZ: 9, height: FLOOR2_Y },
+  {
+    id: 'stair-run-upper',
+    minX: 5.1, maxX: 7.4, minZ: STAIR_Z_END, maxZ: STAIR_Z_START,
+    height: LANDING_Y, slopeZ: STAIR_SLOPE,
+  },
+  {
+    id: 'stair-landing',
+    minX: 5.1, maxX: 9.8, minZ: -8.6, maxZ: STAIR_Z_END,
+    height: LANDING_Y,
+  },
+  {
+    id: 'stair-run-lower',
+    minX: 7.6, maxX: 9.8, minZ: STAIR_Z_END, maxZ: STAIR_Z_START,
+    height: LANDING_Y, slopeZ: -STAIR_SLOPE,
+  },
+];
+
+const WALK_BOUNDS: readonly RectBounds[] = [
+  // 1F 全区域（辅导员办公室 + 1F 阅览室 + 1F 走廊 + 1F 楼梯厅）
+  { minX: -8.5, maxX: 9.5, minZ: -8.5, maxZ: 8.5, maxY: 1.55 },
+  // 2F 全区域（2F 高一(3)班教室 + 2F 走廊 + 2F 侧楼梯观景平台）
+  { minX: -8.5, maxX: 9.5, minZ: -8.5, maxZ: 8.5, minY: 2.25 },
+  // 双跑楼梯井全高连通带：保障上下两层在楼梯口衔接处零卡顿
+  { minX: 5.15, maxX: 9.5, minZ: -8.5, maxZ: 1.0 },
+];
+
+interface WallSegment {
+  name: string;
+  p: V3;
+  s: V3;
+  minY?: number;
+  maxY?: number;
+}
+
+// 2F 隔墙（x=1 教室前门 z=-5、后门 z=5 宽 2.4m；x=5 楼梯井分隔墙 z∈[-9, 0.4]，南端墙柱 z∈[7.2, 9]）
+const PARTITIONS_2F: readonly WallSegment[] = [
+  { name: 'f2-class-wall-front', p: [1, FLOOR2_Y + 1.9, -7.6], s: [0.22, 3.8, 2.8], minY: FLOOR2_Y, maxY: FLOOR2_Y + 3.8 },
+  { name: 'f2-class-wall-middle', p: [1, FLOOR2_Y + 1.9, 0], s: [0.22, 3.8, 7.6], minY: FLOOR2_Y, maxY: FLOOR2_Y + 3.8 },
+  { name: 'f2-class-wall-back', p: [1, FLOOR2_Y + 1.9, 7.6], s: [0.22, 3.8, 2.8], minY: FLOOR2_Y, maxY: FLOOR2_Y + 3.8 },
+  { name: 'f2-stair-wall-north', p: [5, FLOOR2_Y + 1.9, -4.3], s: [0.22, 3.8, 9.4], minY: FLOOR2_Y, maxY: FLOOR2_Y + 3.8 },
+  { name: 'f2-stair-wall-south', p: [5, FLOOR2_Y + 1.9, 8.1], s: [0.22, 3.8, 1.8], minY: FLOOR2_Y, maxY: FLOOR2_Y + 3.8 },
+];
+
+// 1F 隔墙（顶高 3.66m 止于 2F 楼板底面，绝不穿透 3.80m 二楼木地面产生共面白线！）
+const PARTITIONS_1F: readonly WallSegment[] = [
+  { name: 'f1-office-wall-north', p: [1, 1.83, -6.2], s: [0.22, 3.66, 5.6], minY: 0, maxY: 3.66 },
+  { name: 'f1-office-wall-mid', p: [1, 1.83, 1.4], s: [0.22, 3.66, 4.8], minY: 0, maxY: 3.66 },
+  { name: 'f1-study-wall-south', p: [1, 1.83, 7.6], s: [0.22, 3.66, 2.8], minY: 0, maxY: 3.66 },
+  { name: 'f1-west-room-divider', p: [-4.0, 1.83, 0.2], s: [10.0, 3.66, 0.22], minY: 0, maxY: 3.66 },
+  { name: 'f1-stair-wall-north', p: [5, 1.83, -4.3], s: [0.22, 3.66, 9.4], minY: 0, maxY: 3.66 },
+  { name: 'f1-stair-wall-south', p: [5, 1.83, 8.1], s: [0.22, 3.66, 1.8], minY: 0, maxY: 3.66 },
+];
+
+function obstacle(
+  id: string, x: number, z: number, w: number, d: number,
+  height = 1.8, minY?: number, maxY?: number,
+): ObstacleAabb {
   return {
-    groundY: 0,
-    // 边界已内缩玩家半径，窗台不会穿入镜头。
-    bounds: { minX: -8.5, maxX: 9.5, minZ: -8.5, maxZ: 8.5 },
+    id,
+    minX: x - w / 2,
+    maxX: x + w / 2,
+    minZ: z - d / 2,
+    maxZ: z + d / 2,
+    height,
+    ...(minY !== undefined ? { minY } : {}),
+    ...(maxY !== undefined ? { maxY } : {}),
+  };
+}
+
+function navigation(scene: InteriorScene): WorldSceneDefinition['nav'] {
+  const people: Array<{ x: number; y: number; z: number }> =
+    scene === 'C5' ? [...INTERIOR_LOCATIONS.students]
+      : scene === 'C3' ? [INTERIOR_LOCATIONS.teacherOfficeActor]
+        : scene === 'C4' || scene === 'C6' ? [INTERIOR_LOCATIONS.stairwellActor]
+          : scene === 'D1' ? [INTERIOR_LOCATIONS.platformActor]
+            : scene === 'D6' ? [INTERIOR_LOCATIONS.corridorLinxia, INTERIOR_LOCATIONS.corridorAyuan]
+              : [];
+
+  return {
+    groundY: FLOOR1_Y,
+    surfaces: FLOOR_SURFACES.map((surface) => ({ ...surface })),
+    bounds: WALK_BOUNDS.map((rect) => ({ ...rect })),
     obstacles: [
-      ...PARTITIONS.map(({ name, p, s }) => obstacle(name, p[0], p[2], s[0], s[2], s[1])),
-      ...DESKS.map(({ x, z }, i) => obstacle(`desk-${i}`, x, z + 0.35, 1.45, 1.5, 1)),
-      obstacle('podium', -4.5, -7.7, 3, 1, 1.05),
-      obstacle('stairs-and-rail', 8.55, -6, 2.1, 5.2, 2.5),
-      ...people.map(({ x, z }, i) => obstacle(`person-${i}`, x, z, 0.8, 0.8)),
+      // 分层隔墙
+      ...PARTITIONS_2F.map(({ name, p, s, minY, maxY }) => obstacle(name, p[0], p[2], s[0], s[2], s[1], minY, maxY)),
+      ...PARTITIONS_1F.map(({ name, p, s, minY, maxY }) => obstacle(name, p[0], p[2], s[0], s[2], s[1], minY, maxY)),
+      // 双跑楼梯中隔实心护墙
+      obstacle('stair-center-divider', 7.5, -2.0, 0.24, STAIR_RUN_LEN, 4.2, 0.2, FLOOR2_Y + 1.2),
+      // 2F 东侧楼梯井边缘安全护栏
+      obstacle('f2-stairwell-guard', 8.7, STAIR_Z_START, 2.6, 0.22, 1.2, FLOOR2_Y - 0.1, FLOOR2_Y + 1.5),
+      // 1F 上段梯段 A 下方封堵与休息平台下方死区封堵
+      obstacle('f1-under-upper-flight', 6.25, -2.0, 2.5, STAIR_RUN_LEN, 2.0, 0, 1.55),
+      obstacle('f1-under-landing', 7.5, -6.6, 4.8, 4.4, 1.8, 0, 1.55),
+      // 1F 玄关鞋柜与两层走廊储物矮柜/高柜碰撞盒（防穿柜）
+      obstacle('f1-shoe-lockers', 9.38, 7.2, 0.65, 2.4, 1.3, 0, 1.4),
+      ...CORRIDOR_LAYOUT.f1LowLockersZ.map((lz, i) => obstacle(`f1-low-locker-${i}`, 1.32, lz, 0.4, 1.38, 0.92, 0, 1.1)),
+      ...CORRIDOR_LAYOUT.f2LowLockersZ.map((lz, i) => obstacle(`f2-low-locker-${i}`, 1.32, lz, 0.4, 1.38, 0.92, FLOOR2_Y, FLOOR2_Y + 1.1)),
+      obstacle('f1-tall-locker', 4.65, -7.25, 0.46, 0.95, 1.94, 0, 2.0),
+      obstacle('f2-tall-locker', 4.65, -7.25, 0.46, 0.95, 1.94, FLOOR2_Y, FLOOR2_Y + 2.0),
+      // 2F 教室课桌椅、讲台与后排书包柜
+      ...DESKS_2F.map(({ x, z }, i) => obstacle(`desk-${i}`, x, z + 0.35, 1.45, 1.5, 1.0, FLOOR2_Y, FLOOR2_Y + 1.2)),
+      obstacle('podium', -4.5, -7.7, 3.0, 1.1, 1.15, FLOOR2_Y, FLOOR2_Y + 1.3),
+      obstacle('class-rear-cubby', -4.6, 8.62, 5.4, 0.48, 1.05, FLOOR2_Y, FLOOR2_Y + 1.2),
+      // 1F 辅导员办公室办公桌与档案柜
+      ...OFFICE_DESKS_1F.map(({ x, z, yaw }, i) => obstacle(
+        `office-desk-${i}`, x, z, yaw === 0 ? 1.66 : 0.86, yaw === 0 ? 0.86 : 1.66, 0.9, 0, 1.1,
+      )),
+      obstacle('office-file-cabinets', -4.5, -8.55, 5.0, 0.55, 1.95, 0, 2.1),
+      // 1F 阅览室长桌与靠墙书架
+      ...STUDY_TABLES_1F.map(({ x, z }, i) => obstacle(`study-table-${i}`, x, z, 2.8, 1.25, 0.9, 0, 1.1)),
+      obstacle('study-bookshelf', -4.6, 8.6, 5.2, 0.48, 2.1, 0, 2.2),
+      // 当场可见角色占位
+      ...people.map(({ x, y, z }, i) => obstacle(`person-${i}`, x, z, 0.8, 0.8, 1.7, y, y + 1.75)),
     ],
   };
 }
+
 function group(parent: THREE.Object3D, name: string): THREE.Group {
   const result = new THREE.Group();
   result.name = name;
@@ -100,113 +322,230 @@ function group(parent: THREE.Object3D, name: string): THREE.Group {
   return result;
 }
 
-/** 仅本次 build 内共享；纹理由所属材质释放，实例缓冲由所属几何释放一次。 */
+function isBrowserRuntime(): boolean {
+  return typeof window !== 'undefined'
+    && typeof document !== 'undefined'
+    && typeof document.baseURI === 'string'
+    && /^https?:/i.test(document.baseURI);
+}
+
+/** 仅本次 build 内共享；所有贴图、材质与实例缓冲都在本 build 释放时完整清理，不污染全局缓存。 */
 function details() {
   const cube = new THREE.BoxGeometry(1, 1, 1);
-  const palette = new Map<number, THREE.MeshStandardMaterial>();
-  function material(color: number): THREE.MeshStandardMaterial {
-    let m = palette.get(color);
+  const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
+  const palette = new Map<string, THREE.MeshStandardMaterial>();
+  function material(color: number, roughness = 0.78, metalness = 0, envMapIntensity = 0.36): THREE.MeshStandardMaterial {
+    const key = `${color}:${roughness}:${metalness}:${envMapIntensity}`;
+    let m = palette.get(key);
     if (!m) {
-      m = new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0, envMapIntensity: 0.35 });
-      palette.set(color, m);
+      m = new THREE.MeshStandardMaterial({ color, roughness, metalness, envMapIntensity });
+      palette.set(key, m);
     }
     return m;
   }
-  function box(parent: THREE.Object3D, name: string, p: V3, s: V3, m: THREE.Material | number): THREE.Mesh {
+  function box(parent: THREE.Object3D, name: string, p: V3, s: V3, m: THREE.Material | number, r?: V3): THREE.Mesh {
     const mesh = new THREE.Mesh(cube, typeof m === 'number' ? material(m) : m);
     mesh.name = name;
     mesh.position.set(...p);
     mesh.scale.set(...s);
+    if (r) mesh.rotation.set(...r);
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
     parent.add(mesh);
     return mesh;
   }
-  function batch(parent: THREE.Object3D, name: string, parts: Array<{ p: V3; s: V3 }>, color: number) {
-    const mesh = new THREE.InstancedMesh(cube, material(color), parts.length);
+  function batch(
+    parent: THREE.Object3D,
+    name: string,
+    parts: BoxPart[],
+    m: THREE.Material | number,
+    geometry: THREE.BufferGeometry = cube,
+  ): THREE.InstancedMesh {
+    const mat = typeof m === 'number' ? material(m) : m;
+    const mesh = new THREE.InstancedMesh(geometry, mat, Math.max(1, parts.length));
     mesh.name = name;
     const transform = new THREE.Object3D();
-    parts.forEach(({ p, s }, i) => {
+    const color = new THREE.Color();
+    let hasColor = false;
+    parts.forEach(({ p, s, r, color: hex }, i) => {
       transform.position.set(...p);
+      transform.rotation.set(r ? r[0] : 0, r ? r[1] : 0, r ? r[2] : 0);
       transform.scale.set(...s);
       transform.updateMatrix();
       mesh.setMatrixAt(i, transform.matrix);
+      if (hex !== undefined) {
+        hasColor = true;
+        mesh.setColorAt(i, color.setHex(hex));
+      }
     });
     mesh.instanceMatrix.needsUpdate = true;
+    if (hasColor && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingBox();
     mesh.computeBoundingSphere();
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
-    const release = (): void => { mesh.dispose(); cube.removeEventListener('dispose', release); };
-    cube.addEventListener('dispose', release);
+    const release = (): void => { mesh.dispose(); geometry.removeEventListener('dispose', release); };
+    geometry.addEventListener('dispose', release);
     parent.add(mesh);
     return mesh;
   }
-  return { box, batch, material };
+  return { box, batch, material, cube, cyl };
 }
 type Details = ReturnType<typeof details>;
-function sign(parent: THREE.Object3D, text: string, p: V3, yaw = 0, width = 1.4): void {
-  const mesh = createTextSign(text, width, 0.32, { background: '#e1e5da', foreground: '#485e56' });
+
+function sign(
+  parent: THREE.Object3D,
+  text: string,
+  p: V3,
+  yaw = 0,
+  width = 1.4,
+  height = 0.34,
+  palette: { background: string; foreground: string } = { background: '#efe8d8', foreground: '#3d352e' },
+): THREE.Mesh {
+  const mesh = createTextSign(text, width, height, palette);
   mesh.name = `sign-${text}`;
   mesh.position.set(...p);
   mesh.rotation.y = yaw;
   mesh.castShadow = false;
   parent.add(mesh);
+  return mesh;
 }
-function floorMaterial(): THREE.MeshStandardMaterial {
-  const size = 128;
+
+/**
+ * 审查第 3 节走廊/教室暖木条形地板（#9E7E5D，roughness 0.60）：
+ * 纹理严格顺板长（Z 向）铺设、错缝收口，仅保留细腻板缝与轻柔木纹，彻底杜绝镜面地板高光冲白（P0-02）。
+ */
+function plankFloorMaterial(repeatX = 9, repeatY = 5.5): THREE.MeshStandardMaterial {
+  const size = 256;
   const pixels = new Uint8Array(size * size * 4);
-  let seed = 224;
-  for (let y = 0; y < size; y += 1) for (let x = 0; x < size; x += 1) {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    const seam = x < 1 || y < 1;
-    const n = seed % 100;
-    const shade = seam ? -30 : n < 7 ? -42 : n < 18 ? -16 : n % 7;
-    // 清冷微灰水磨石底色（去暖黄），突出教学楼整洁偏压抑的冷静空间感
-    pixels.set([213 + shade, 218 + shade, 220 + shade, 255], (y * size + x) * 4);
+  const planksAcross = 8;
+  const plankWidthPx = size / planksAcross; // 32px 一块条木板
+  const hash = (a: number, b: number): number => {
+    let h = Math.imul(a, 374761393) ^ Math.imul(b, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  };
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const col = Math.floor(x / plankWidthPx);
+      const lx = x % plankWidthPx;
+      // 相邻木板沿纵向（y）错开半板端头接缝
+      const buttOffset = (col * 91) % size;
+      const ly = (y + buttOffset) % size;
+      const seg = ly < 128 ? 0 : 1;
+      const inButt = ly === 0 || ly === 128;
+      const inLongSeam = lx === 0;
+      const boardSeed = hash(col * 19 + 3, seg * 37 + 11);
+      const grainWave = Math.sin(lx * 0.52 + Math.sin(y * 0.085 + boardSeed * 9.0) * 1.65) * 0.5 + 0.5;
+      const fine = hash(x + col * 13, Math.floor(y / 3));
+      const tone = inLongSeam ? 0.62
+        : inButt ? 0.68
+          : 0.90 + (boardSeed - 0.5) * 0.12 + grainWave * 0.06 + (fine - 0.5) * 0.03;
+      const r = Math.min(255, Math.round(158 * tone));
+      const g = Math.min(255, Math.round(126 * tone));
+      const b = Math.min(255, Math.round(93 * tone));
+      pixels.set([r, g, b, 255], (y * size + x) * 4);
+    }
   }
   const texture = new THREE.DataTexture(pixels, size, size);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(19, 18);
+  texture.repeat.set(repeatX, repeatY);
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
-  const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.36, metalness: 0.06, envMapIntensity: 0.45 });
+  const material = new THREE.MeshStandardMaterial({
+    map: texture,
+    roughness: 0.6,
+    metalness: 0.02,
+    envMapIntensity: 0.34,
+  });
   const release = (): void => { texture.dispose(); material.removeEventListener('dispose', release); };
   material.addEventListener('dispose', release);
   return material;
 }
 
-/** 细腻粉刷肌理墙面：低对比冷灰白逐像素噪点，随材质释放贴图，不产生全局共享标记。 */
+/** 审查第 3 节米灰乳胶漆上墙（#DAD7CC，低对比细颗粒，roughness 0.85）。 */
 function wallMaterial(): THREE.MeshStandardMaterial {
   const size = 128;
   const pixels = new Uint8Array(size * size * 4);
+  const baseR = (COL_WALL_UPPER >> 16) & 0xff;
+  const baseG = (COL_WALL_UPPER >> 8) & 0xff;
+  const baseB = COL_WALL_UPPER & 0xff;
   let seed = 991;
   for (let y = 0; y < size; y += 1) for (let x = 0; x < size; x += 1) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     const n = seed % 100;
-    const shade = n < 6 ? -9 : n < 16 ? -4 : n < 34 ? 3 : n % 6;
-    pixels.set([226 + shade, 231 + shade, 234 + shade, 255], (y * size + x) * 4);
+    const shade = n < 8 ? -4 : n < 22 ? -2 : n < 42 ? 2 : (n % 3) - 1;
+    pixels.set([baseR + shade, baseG + shade, baseB + shade, 255], (y * size + x) * 4);
   }
   const texture = new THREE.DataTexture(pixels, size, size);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(8, 7);
+  texture.repeat.set(6, 3);
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
-  const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.93, envMapIntensity: 0.3 });
+  const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.85, envMapIntensity: 0.3 });
+  const release = (): void => { texture.dispose(); material.removeEventListener('dispose', release); };
+  material.addEventListener('dispose', release);
+  return material;
+}
+
+/** 柔和米灰矿棉吸音板吊顶（收紧网格反差与纹理尺度）。 */
+function ceilingTileMaterial(): THREE.MeshStandardMaterial {
+  const size = 128;
+  const pixels = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) for (let x = 0; x < size; x += 1) {
+    const gx = x % 32;
+    const gy = y % 32;
+    const seam = gx === 0 || gy === 0;
+    const dot = !seam && (gx % 8 === 4) && (gy % 8 === 4);
+    const base = seam ? 192 : dot ? 208 : 221;
+    pixels.set([base, base - 2, base - 8, 255], (y * size + x) * 4);
+  }
+  const texture = new THREE.DataTexture(pixels, size, size);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(11, 11);
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.88, metalness: 0.01, envMapIntensity: 0.28 });
   const release = (): void => { texture.dispose(); material.removeEventListener('dispose', release); };
   material.addEventListener('dispose', release);
   return material;
 }
 
 interface FoliagePart { p: V3; s: V3; color: number }
-/** 多簇自然树冠：球体实例 + 逐实例颜色，单批绘制；几何/材质均为本 build 自有资源。 */
-function instancedFoliage(parent: THREE.Object3D, name: string, parts: FoliagePart[]): THREE.InstancedMesh {
-  const geometry = new THREE.SphereGeometry(1, 9, 6);
-  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, envMapIntensity: 0.35 });
+/** 窗外程序化兜底绿植（异步三型香樟树 GLB 到位前提供层次与风摆）。 */
+function instancedFoliage(
+  parent: THREE.Object3D,
+  name: string,
+  parts: FoliagePart[],
+  windTime: { value: number },
+): THREE.InstancedMesh {
+  const geometry = new THREE.IcosahedronGeometry(1, 1);
+  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.86, metalness: 0, envMapIntensity: 0.34 });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = windTime;
+    shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        float swayPhase = instanceMatrix[3][0] * 0.63 + instanceMatrix[3][2] * 0.79 + instanceMatrix[3][1] * 0.41;
+      #else
+        float swayPhase = 0.0;
+      #endif
+      float swayAmp = clamp((position.y + 1.0) * 0.5, 0.0, 1.0) * 0.055;
+      transformed.x += sin(uTime * 1.32 + swayPhase) * swayAmp;
+      transformed.z += cos(uTime * 1.04 + swayPhase * 1.18) * swayAmp * 0.7;`,
+    );
+  };
+  material.customProgramCacheKey = () => 'school-interior-foliage-fallback-v2';
   const mesh = new THREE.InstancedMesh(geometry, material, parts.length);
   mesh.name = name;
   const transform = new THREE.Object3D();
@@ -220,6 +559,7 @@ function instancedFoliage(parent: THREE.Object3D, name: string, parts: FoliagePa
   });
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.castShadow = false;
   mesh.receiveShadow = true;
   mesh.computeBoundingBox();
   mesh.computeBoundingSphere();
@@ -230,9 +570,19 @@ function instancedFoliage(parent: THREE.Object3D, name: string, parts: FoliagePa
 }
 
 type BeamQuad = [V3, V3, V3, V3];
-/** 斜射柔光光束：单网格、加色混合、逐顶点亮度衰减，零贴图零额外光源。 */
-function createSoftLightBeam(quads: BeamQuad[], baseColor: number, opacity: number): THREE.Mesh {
-  const columns = 3;
+/**
+ * 窗格柔边光带网格（P0-02 修复）：
+ * 支持 4 分量 RGBA 顶点色与 NormalBlending，使地面窗光温柔染色而不把木板纹理冲成 255 纯白斑！
+ */
+function createWindowLightMesh(
+  name: string,
+  quads: BeamQuad[],
+  baseColor: number,
+  opacity: number,
+  blending: THREE.Blending,
+  renderOrder = 1,
+): THREE.Mesh {
+  const columns = 4;
   const rows = 6;
   const positions: number[] = [];
   const colors: number[] = [];
@@ -251,8 +601,15 @@ function createSoftLightBeam(quads: BeamQuad[], baseColor: number, opacity: numb
         const farY = fl[1] + (fr[1] - fl[1]) * u;
         const farZ = fl[2] + (fr[2] - fl[2]) * u;
         positions.push(nearX + (farX - nearX) * v, nearY + (farY - nearY) * v, nearZ + (farZ - nearZ) * v);
-        const falloff = Math.sin(Math.PI * u) * Math.sin(Math.PI * v);
-        colors.push(base.r * falloff, base.g * falloff, base.b * falloff);
+        // 靠窗侧略清朗、向室内自然衰减，两侧与窗梃对齐柔化
+        const edgeU = Math.sin(Math.PI * u) ** 0.75;
+        const edgeV = Math.sin(Math.PI * v) * (1 - v * 0.35);
+        const weight = Math.max(0, Math.min(1, edgeU * edgeV));
+        if (blending === THREE.AdditiveBlending) {
+          colors.push(base.r * weight, base.g * weight, base.b * weight, 1);
+        } else {
+          colors.push(base.r, base.g, base.b, weight);
+        }
       }
     }
     for (let row = 0; row < rows; row += 1) for (let col = 0; col < columns; col += 1) {
@@ -265,298 +622,1308 @@ function createSoftLightBeam(quads: BeamQuad[], baseColor: number, opacity: numb
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   const material = new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, opacity, depthWrite: false,
-    blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexColors: true,
+    transparent: true,
+    opacity,
+    depthWrite: false,
+    blending,
+    side: THREE.DoubleSide,
   });
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = 'corridor-light-beam';
+  mesh.name = name;
+  mesh.renderOrder = renderOrder;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.raycast = () => {};
   return mesh;
 }
-function architecture(root: THREE.Group, d: Details, occluders: THREE.Object3D[]) {
-  const walls = group(root, 'interior-walls');
-  const cream = 0xe2e7ea;
-  const sage = 0x768989;
-  const trim = 0x586b6e;
-  const baseboard = 0x424a4c;
-  const plaster = wallMaterial();
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(19, 18), floorMaterial());
-  floor.name = 'interior-terrazzo-floor';
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.x = 0.5;
-  floor.receiveShadow = true;
-  root.add(floor);
-  d.box(walls, 'roof', [0.5, 3.88, 0], [19.25, 0.16, 18.25], cream);
-  for (const z of [-9, 9]) {
-    d.box(walls, 'end-wall', [0.5, 1.9, z], [19.25, 3.8, 0.22], plaster);
-    d.box(walls, 'end-wainscot', [0.5, 0.48, z - Math.sign(z) * 0.13], [19, 0.96, 0.04], sage);
-    d.box(walls, 'end-baseboard', [0.5, 0.06, z - Math.sign(z) * 0.15], [19, 0.12, 0.02], baseboard);
-  }
-  for (const { name, p, s } of PARTITIONS) {
-    d.box(walls, name, p, s, plaster);
-    d.box(walls, `${name}-skirting`, [p[0], 0.4, p[2]], [s[0] + 0.025, 0.8, s[2]], sage);
-    d.box(walls, `${name}-baseboard`, [p[0], 0.06, p[2]], [s[0] + 0.02, 0.12, s[2]], baseboard);
-  }
-  const frosted = new THREE.MeshStandardMaterial({ color: 0xe3ece8, roughness: 0.85,
-    transparent: true, opacity: 0.55, depthWrite: false, envMapIntensity: 0.35 });
-  for (const z of [-5, 5]) {
-    d.box(walls, 'class-door-lintel', [1, 3.25, z], [0.22, 1.1, 2.4], cream);
-    // 门扇贴墙停靠，不跨越通行门洞（青蓝色双扇推拉门画风）。
-    d.box(walls, 'open-class-door', [0.85, 1.34, z + 1.72], [0.07, 2.68, 0.95], 0x1c7894);
-    for (const jz of [-1.2, 1.2]) d.box(walls, 'class-door-jamb', [1, 1.34, z + jz], [0.24, 2.7, 0.06], trim);
-    d.box(walls, 'class-door-transom', [1, 2.86, z], [0.18, 0.34, 2.4], frosted);
-    d.box(walls, 'class-door-handle', [0.83, 1.15, z + 1.78], [0.05, 0.24, 0.02], 0xd2d8de);
-    sign(root, '二楼 · 教室', [1.14, 2.95, z], Math.PI / 2);
-    sign(root, '高一(3)班', [1.12, 2.36, z + 0.55], Math.PI / 2, 0.9);
-  }
-  d.box(walls, 'stair-door-lintel', [5, 3.35, 5], [0.22, 0.9, 4], cream);
-  sign(root, '侧楼梯 · 平台', [4.86, 3.12, 5], -Math.PI / 2, 2);
-  // 年级办公室门（装饰，不承担通行逻辑）。
-  d.box(walls, 'office-door-frame', [5, 1.4, 0], [0.08, 2.7, 1.05], trim);
-  d.box(walls, 'office-door-leaf', [4.92, 1.35, 0], [0.03, 2.55, 0.95], 0x8d7a58);
-  d.box(walls, 'office-door-transom', [5, 2.9, 0], [0.06, 0.4, 1.05], frosted);
-  d.box(walls, 'office-door-handle', [4.88, 1.1, 0.32], [0.02, 0.14, 0.05], 0x4b5450);
-  sign(root, '年级办公室', [5.12, 2.34, 0], -Math.PI / 2, 1.6);
-  // 走廊北尽头的辅导员办公室门（C3 交互入口）。
-  d.box(walls, 'teacher-office-frame', [3.0, 1.4, -8.86], [1.16, 2.7, 0.08], trim);
-  d.box(walls, 'teacher-office-leaf', [3.0, 1.35, -8.82], [1.04, 2.55, 0.04], 0x8d7a58);
-  d.box(walls, 'teacher-office-transom', [3.0, 2.9, -8.86], [1.16, 0.4, 0.06], frosted);
-  d.box(walls, 'teacher-office-handle', [3.34, 1.1, -8.78], [0.05, 0.14, 0.03], 0x4b5450);
-  sign(root, '辅导员办公室', [3.0, 2.42, -8.79], 0, 1.5);
-  const glass = new THREE.MeshStandardMaterial({ color: 0xb6c9c5, transparent: true, opacity: 0.18,
-    roughness: 0.2, metalness: 0.3, depthWrite: false, envMapIntensity: 0.5 });
-  for (const x of [-9, 10]) {
-    d.box(walls, 'window-parapet', [x, 0.46, 0], [0.22, 0.92, 18], sage);
-    d.box(walls, 'window-header', [x, 3.5, 0], [0.22, 0.6, 18], cream);
-    for (let z = -7.5; z <= 7.5; z += 3) {
-      d.box(walls, 'window-pane', [x, 2.04, z], [0.045, 2.24, 2.92], glass);
-      d.box(walls, 'window-mullion', [x, 2.06, z - 1.5], [0.24, 2.3, 0.08], trim);
-    }
-    for (const y of [0.94, 2.5, 3.2]) d.box(walls, 'window-rail', [x, y, 0], [0.25, 0.06, 18], trim);
-    d.box(walls, 'window-sill', [x, 0.95, 0], [0.36, 0.08, 18], cream);
-    d.box(walls, 'window-sill-board', [x, 0.9, 0], [0.42, 0.03, 18], 0xd6cdb8);
-  }
-  // 走廊宣传栏与消防栓箱（克制、无文字）。
-  d.box(walls, 'corridor-board-frame', [1.14, 1.7, -2], [0.05, 1.1, 1.5], 0x5a6a62);
-  d.box(walls, 'corridor-board-panel', [1.12, 1.7, -2], [0.02, 0.96, 1.36], 0x9fb6a8);
-  d.box(walls, 'corridor-board-frame-2', [1.14, 1.7, 2], [0.05, 1.1, 1.5], 0x5a6a62);
-  d.box(walls, 'corridor-board-panel-2', [1.12, 1.7, 2], [0.02, 0.96, 1.36], 0xb4a68c);
-  d.box(walls, 'fire-hydrant-box', [1.1, 1.1, -6.4], [0.12, 0.8, 0.55], 0x9c4a3c);
 
-  // 视频同款校园元素：走廊黄色地面导引线、青蓝双管吊灯、安全出口吊挂灯箱、壁挂音箱
-  d.box(walls, 'corridor-yellow-guide', [4.55, 0.008, -0.5], [0.09, 0.008, 15.6], 0xf2c94c);
-  for (const lz of [-6, -1.5, 3, 7]) {
-    d.box(walls, 'corridor-lamp-hood', [3.0, 3.74, lz], [0.34, 0.06, 1.35], 0x1f6e8c);
-    d.box(walls, 'corridor-lamp-bulb', [3.0, 3.7, lz], [0.22, 0.03, 1.25], 0xfff3d8);
-  }
-  d.box(walls, 'corridor-hanging-exit', [3.0, 3.25, -3.8], [0.68, 0.24, 0.07], 0x268a5c);
-  d.box(walls, 'corridor-speaker-n', [1.14, 3.05, -3.5], [0.16, 0.24, 0.22], 0x6b523d);
-  d.box(walls, 'corridor-speaker-s', [1.14, 3.05, 3.5], [0.16, 0.24, 0.22], 0x6b523d);
-  // 白框橙门矮柜 + 蓝框粉门矮柜（贴西墙放置）+ 柜顶书包/收纳桶
-  for (const [idx, cz] of [-2.0, 2.0].entries()) {
-    const isPink = idx === 1;
-    d.box(walls, `corridor-locker-frame-${idx}`, [1.28, 0.44, cz], [0.36, 0.88, 1.56], isPink ? 0x7cb2d9 : 0xedf1f6);
-    for (const dz of [-0.52, 0, 0.52]) {
-      d.box(walls, `corridor-locker-door-${idx}`, [1.465, 0.44, cz + dz], [0.02, 0.78, 0.46], isPink ? 0xe8b3c2 : 0xe06e3b);
-      d.box(walls, `corridor-locker-lock-${idx}`, [1.48, 0.48, cz + dz + 0.14], [0.015, 0.06, 0.05], 0x262d3d);
+/** 有金属外框、低自发光墨绿底板与白色箭头/人形标识的安全出口牌（P1-05：只让图形略亮于底板，告别刺眼纯绿块）。 */
+function buildExitSignUnit(
+  parent: THREE.Object3D,
+  d: Details,
+  name: string,
+  p: V3,
+  yaw: number,
+  width: number,
+  height: number,
+  housingMat: THREE.Material,
+  greenBackMat: THREE.Material,
+  glyphMat: THREE.Material,
+  hanging = false,
+): void {
+  const unit = group(parent, `${name}-group`);
+  unit.position.set(...p);
+  unit.rotation.y = yaw;
+  // 深灰铝壳底座 + 正面墨绿面板
+  const core = d.box(unit, name, [0, 0, 0], [width, height, 0.044], housingMat);
+  core.castShadow = false;
+  if (hanging) {
+    for (const sx of [-width * 0.34, width * 0.34]) {
+      d.box(unit, `${name}-rod`, [sx, height * 0.5 + 0.16, 0], [0.018, 0.32, 0.018], housingMat);
     }
-    d.box(walls, `corridor-locker-top-bag-${idx}`, [1.28, 1.0, cz - 0.3], [0.28, 0.24, 0.36], 0x2e5b99);
-    if (isPink) d.box(walls, 'corridor-locker-bin', [1.28, 0.99, cz + 0.35], [0.24, 0.22, 0.24], 0x3b6796);
   }
-  // 走廊南端灰蓝高铁皮柜 + 并排灭火器 + 配电箱 + 雨伞架
-  d.box(walls, 'corridor-tall-cabinet', [4.72, 0.95, -7.2], [0.42, 1.9, 1.15], 0x7c90a6);
-  d.box(walls, 'corridor-electric-box', [4.88, 1.45, -1.6], [0.12, 0.62, 0.46], 0xe8edf5);
-  d.box(walls, 'corridor-umbrella-rack', [4.7, 0.42, 7.6], [0.44, 0.84, 0.36], 0x4b5669);
-  for (const ez of [-6.0, -6.32]) {
-    const ext = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.5, 10), d.material(0xc23329));
-    ext.name = 'corridor-extinguisher';
-    ext.position.set(1.22, 0.25, ez);
-    ext.castShadow = false;
-    walls.add(ext);
+  const faces = hanging ? [-1, 1] : [1];
+  for (const side of faces) {
+    const fz = side * 0.024;
+    const gz = side * 0.028;
+    d.box(unit, `${name}-face`, [0, 0, fz], [width - 0.03, height - 0.03, 0.004], greenBackMat);
+    // 白色细内框
+    d.box(unit, `${name}-rim-t`, [0, (height - 0.05) * 0.5, gz], [width - 0.05, 0.012, 0.004], glyphMat);
+    d.box(unit, `${name}-rim-b`, [0, -(height - 0.05) * 0.5, gz], [width - 0.05, 0.012, 0.004], glyphMat);
+    // 方向箭头 + 奔跑人形简影
+    const dir = side;
+    d.box(unit, `${name}-arrow-bar`, [-width * 0.14 * dir, 0, gz], [width * 0.24, 0.022, 0.005], glyphMat);
+    d.box(unit, `${name}-arrow-up`, [-width * 0.23 * dir, 0.028, gz], [0.065, 0.018, 0.005], glyphMat, [0, 0, -0.65 * dir]);
+    d.box(unit, `${name}-arrow-dn`, [-width * 0.23 * dir, -0.028, gz], [0.065, 0.018, 0.005], glyphMat, [0, 0, 0.65 * dir]);
+    d.box(unit, `${name}-door-icon`, [width * 0.22 * dir, -0.005, gz], [width * 0.14, height * 0.56, 0.004], glyphMat);
+    d.box(unit, `${name}-runner`, [width * 0.06 * dir, -0.01, gz], [0.028, height * 0.42, 0.005], glyphMat, [0, 0, 0.24 * dir]);
   }
-  occluders.push(walls);
-  const stairs = group(root, 'stairwell-flight');
-  for (let i = 0; i < 10; i += 1) {
-    const h = (i + 1) * 0.18;
-    d.box(stairs, `stair-${i}`, [8.55, h / 2, -3.6 - i * 0.5], [1.9, h, 0.5], 0xb3b6aa);
-    d.box(stairs, 'stair-edge', [8.55, h + 0.008, -3.36 - i * 0.5], [1.9, 0.016, 0.035], 0x8a918a);
-    d.box(stairs, 'stair-baluster', [7.55, h + 0.45, -3.6 - i * 0.5], [0.035, 0.9, 0.035], 0x4b5450);
-    d.box(stairs, 'stair-riser-strip', [8.55, h - 0.09, -3.6 - i * 0.5], [1.92, 0.03, 0.015], 0x3c433f);
+}
+
+/** 楼梯口墙面立体金属质地 1F / 2F 浮雕字（复刻参考视频远景一眼可读的楼层锚点）。 */
+function build3DFloorNumeral(
+  parent: THREE.Object3D,
+  d: Details,
+  floorNum: 1 | 2,
+  p: V3,
+  yaw: number,
+  mat: THREE.Material,
+): void {
+  const holder = group(parent, `floor-3d-${floorNum}F`);
+  holder.position.set(...p);
+  holder.rotation.y = yaw;
+  const thick = 0.026;
+  if (floorNum === 1) {
+    d.box(holder, 'num-1-stem', [-0.20, 0.02, 0], [0.072, 0.52, thick], mat);
+    d.box(holder, 'num-1-beak', [-0.26, 0.21, 0], [0.09, 0.058, thick], mat, [0, 0, 0.52]);
+    d.box(holder, 'num-1-base', [-0.20, -0.22, 0], [0.19, 0.056, thick], mat);
+  } else {
+    d.box(holder, 'num-2-top', [-0.22, 0.25, 0], [0.25, 0.062, thick], mat);
+    d.box(holder, 'num-2-r', [-0.125, 0.145, 0], [0.062, 0.21, thick], mat);
+    d.box(holder, 'num-2-mid', [-0.22, 0.03, 0], [0.25, 0.06, thick], mat);
+    d.box(holder, 'num-2-l', [-0.315, -0.095, 0], [0.062, 0.21, thick], mat);
+    d.box(holder, 'num-2-bot', [-0.22, -0.22, 0], [0.25, 0.062, thick], mat);
   }
-  const rail = d.box(stairs, 'stair-handrail', [7.55, 1.89, -5.85], [0.07, 0.07, 5.3], 0x4b5450);
-  rail.rotation.x = Math.atan(0.36);
-  // 上行楼层暂未开放，楼梯占地整体禁入；本层转角和侧平台均为连续平地。
-  d.box(stairs, 'flight-guard', [8.55, 0.62, -3.43], [2.1, 1.24, 0.045], trim);
-  sign(stairs, '上楼请止步', [8.55, 1.3, -3.39], 0, 1.7);
-  sign(stairs, '1F / 2F', [7.2, 1.7, -3.2], 0, 1.2);
-  occluders.push(stairs);
-  const garden = group(root, 'window-greenery');
-  for (const x of [-12, 13]) {
-    const sgn = Math.sign(x);
-    d.box(garden, 'garden-ground', [x, -0.14, 0], [7, 0.2, 24], 0x8f9b7b);
-    d.box(garden, 'garden-backdrop', [x + sgn * 2.8, 3, 0], [0.2, 6, 24], 0xaabdb0);
-    const farX = x + sgn * 4.6;
-    const farA: Array<{ p: V3; s: V3 }> = [
-      { p: [farX, 2.4, -8], s: [0.6, 4.8, 4] },
-      { p: [farX, 2.9, 0], s: [0.6, 5.8, 4] },
-      { p: [farX, 2.1, 8], s: [0.6, 4.2, 4] },
-    ];
-    const farB: Array<{ p: V3; s: V3 }> = [
-      { p: [farX + sgn * 1.1, 3.4, -3.5], s: [0.6, 6.8, 3.2] },
-      { p: [farX + sgn * 1.1, 3.4, 4.5], s: [0.6, 6.8, 3.2] },
-    ];
-    d.batch(garden, 'garden-far-building-a', farA, 0x7f8b93);
-    d.batch(garden, 'garden-far-building-b', farB, 0x8b97a0);
-    const trunks: Array<{ p: V3; s: V3 }> = [];
-    const foliage: FoliagePart[] = [];
-    const shrubs: FoliagePart[] = [];
-    let treeIndex = 0;
-    for (let z = -9; z <= 9; z += 3) {
-      const jitter = (treeIndex % 3) - 1;
-      const tx = x + jitter * 0.4;
-      const h = 3.0 + (treeIndex % 3) * 0.3;
-      trunks.push({ p: [tx, h / 2, z], s: [0.13, h, 0.13] });
-      foliage.push(
-        { p: [tx, h + 1.0, z], s: [1.5, 1.6, 1.35], color: treeIndex % 2 ? 0x7c9a68 : 0x86a173 },
-        { p: [tx + 0.55, h + 0.45, z + 0.3], s: [1.0, 1.05, 0.95], color: 0x9ab582 },
-        { p: [tx - 0.5, h + 0.3, z - 0.25], s: [0.95, 0.95, 0.9], color: 0x6f8f64 },
-        { p: [tx, h + 1.55, z], s: [0.85, 0.85, 0.8], color: 0x8fae7b },
+  // 右下侧 65% 字高立体 F 字母（与数字拉开清晰字距）
+  d.box(holder, 'char-f-stem', [0.08, -0.05, 0], [0.06, 0.36, thick], mat);
+  d.box(holder, 'char-f-top', [0.165, 0.10, 0], [0.21, 0.054, thick], mat);
+  d.box(holder, 'char-f-mid', [0.15, -0.04, 0], [0.17, 0.048, thick], mat);
+  d.box(holder, 'floor-rule', [-0.03, -0.33, 0], [0.6, 0.02, thick * 0.7], mat);
+}
+
+/** 构建带立体门套、门槛收口、滑轨、门扇分框与磨砂视窗的标准教室/办公室门（P0-02 & P1-05）。 */
+function buildRoomDoorway(
+  walls: THREE.Object3D,
+  root: THREE.Object3D,
+  d: Details,
+  floorY: number,
+  z: number,
+  leafParkOffsetZ: number,
+  title: string,
+  plate: string,
+  plaster: THREE.Material,
+  frosted: THREE.Material,
+  woodFrame: THREE.Material,
+  doorMat: THREE.Material,
+  hardwareMat: THREE.Material,
+  thresholdMat: THREE.Material,
+): void {
+  // 门洞上墙与两格高气窗（木窗框不透明，气窗嵌入框内）
+  d.box(walls, 'class-door-lintel', [1, floorY + 3.45, z], [0.22, 0.7, 2.4], plaster);
+  d.box(walls, 'class-door-transom-frame-top', [1, floorY + 3.1, z], [0.25, 0.06, 2.44], woodFrame);
+  d.box(walls, 'class-door-transom-frame-bot', [1, floorY + 2.52, z], [0.25, 0.06, 2.44], woodFrame);
+  d.box(walls, 'class-door-transom-mid', [1, floorY + 2.81, z], [0.24, 0.54, 0.06], woodFrame);
+  for (const tz of [-0.58, 0.58]) {
+    d.box(walls, 'class-door-transom', [1, floorY + 2.81, z + tz], [0.03, 0.5, 1.1], frosted);
+  }
+  // 两侧厚实倒角感双阶门套立梃 + 地面实木门槛压条（P0-02 清晰标定门洞边界）
+  for (const jz of [-1.21, 1.21]) {
+    d.box(walls, 'class-door-jamb', [1, floorY + 1.56, z + jz], [0.27, 3.12, 0.08], woodFrame);
+  }
+  d.box(walls, 'class-door-threshold', [1, floorY + 0.005, z], [0.25, 0.01, 2.34], thresholdMat);
+
+  // 敞开停靠于室内墙侧的推拉门扇：滑轨罩 + 四周门梃 + 下裙芯板 + 上磨砂视窗 + 金属竖拉手与锁片
+  const leafZ = z + leafParkOffsetZ;
+  d.box(walls, 'class-door-track', [0.84, floorY + 2.5, z + leafParkOffsetZ * 0.5], [0.06, 0.055, 2.35], hardwareMat);
+  // 门扇上下横档与左右立梃（消除大色块感）
+  d.box(walls, 'open-class-door', [0.84, floorY + 0.62, leafZ], [0.048, 1.22, 0.94], doorMat);
+  d.box(walls, 'open-class-door-kick', [0.84, floorY + 0.14, leafZ], [0.054, 0.24, 0.94], hardwareMat);
+  d.box(walls, 'open-class-door-top-rail', [0.84, floorY + 2.38, leafZ], [0.052, 0.18, 0.94], doorMat);
+  d.box(walls, 'open-class-door-mid-rail', [0.84, floorY + 1.24, leafZ], [0.054, 0.11, 0.94], doorMat);
+  for (const sz of [-0.41, 0.41]) {
+    d.box(walls, 'open-class-door-stile', [0.84, floorY + 1.82, leafZ + sz], [0.052, 1.08, 0.12], doorMat);
+  }
+  d.box(walls, 'open-class-door-window', [0.84, floorY + 1.82, leafZ], [0.024, 1.02, 0.7], frosted);
+  const handleZ = leafZ - Math.sign(leafParkOffsetZ) * 0.36;
+  d.box(walls, 'class-door-escutcheon', [0.87, floorY + 1.12, handleZ], [0.016, 0.28, 0.048], hardwareMat);
+  d.box(walls, 'class-door-handle', [0.892, floorY + 1.12, handleZ], [0.026, 0.2, 0.024], 0xcfd5d9);
+
+  // 统一制式门楣牌与垂直挑出木框双面室牌
+  const signZ = z - Math.sign(leafParkOffsetZ || 1) * 1.28;
+  sign(root, title, [1.145, floorY + 3.36, z], Math.PI / 2, 1.42, 0.3, { background: '#edeae0', foreground: '#2c3a40' });
+  d.box(walls, 'door-hanging-bracket', [1.33, floorY + 2.46, signZ], [0.44, 0.22, 0.04], woodFrame);
+  sign(root, plate, [1.33, floorY + 2.46, signZ + 0.024], 0, 0.4, 0.18, { background: '#f2ead9', foreground: '#3b2e22' });
+  sign(root, plate, [1.33, floorY + 2.46, signZ - 0.024], Math.PI, 0.4, 0.18, { background: '#f2ead9', foreground: '#3b2e22' });
+}
+
+/**
+ * 1F / 2F 走廊标准墙跨道具（P0-01 彻底修复）：
+ * 立柱固定在 CORRIDOR_PILLAR_Z = [-6.65, 0.2, 6.65]，公告栏与矮柜严格落在各自完整墙跨凹间中央，
+ * 离立柱边与门套边均留出 ≥140mm～900mm 净空，绝无木框被柱截断或门扇碰撞。
+ */
+function buildCorridorProps(
+  walls: THREE.Object3D,
+  d: Details,
+  floorY: number,
+  prefix: string,
+  plaster: THREE.Material,
+  wainscot: THREE.Material,
+  baseboard: THREE.Material,
+  woodFrame: THREE.Material,
+  hardwareMat: THREE.Material,
+  exitGreenMat: THREE.Material,
+  exitGlyphMat: THREE.Material,
+): void {
+  const isF2 = floorY > 1;
+  const bulletinsZ = isF2 ? CORRIDOR_LAYOUT.f2BulletinsZ : CORRIDOR_LAYOUT.f1BulletinsZ;
+  const lockersZ = isF2 ? CORRIDOR_LAYOUT.f2LowLockersZ : CORRIDOR_LAYOUT.f1LowLockersZ;
+
+  // 走廊东侧克制暖黄导引带
+  d.box(walls, `${prefix}-yellow-guide`, [4.58, floorY + 0.006, -0.4], [0.09, 0.004, 16.2], COL_GUIDE_OCHRE);
+
+  // 走廊北端双开木框防火门（z = -8.84，居中 x = 3.0，带防撞腰带与把手）
+  const fireDoorParts: BoxPart[] = [
+    { p: [1.75, floorY + 1.5, -8.84], s: [0.11, 3.0, 0.14] },
+    { p: [4.25, floorY + 1.5, -8.84], s: [0.11, 3.0, 0.14] },
+    { p: [3.0, floorY + 2.95, -8.84], s: [2.61, 0.11, 0.14] },
+    { p: [3.0, floorY + 1.45, -8.84], s: [0.08, 2.9, 0.1] },
+    { p: [3.0, floorY + 1.05, -8.83], s: [2.42, 0.14, 0.09] },
+    { p: [3.0, floorY + 0.14, -8.83], s: [2.42, 0.24, 0.09] },
+  ];
+  d.batch(walls, `${prefix}-fire-door-wood`, fireDoorParts, woodFrame);
+
+  // 走廊承重矩形立柱（宽 0.32m，突出墙面 11cm，墙裙与踢脚随柱转角完整包回）+ 贴梁顶横梁
+  for (const pz of CORRIDOR_PILLAR_Z) {
+    d.box(walls, `${prefix}-pillar-w`, [1.14, floorY + 1.84, pz], [0.16, 3.68, 0.32], plaster);
+    d.box(walls, `${prefix}-pillar-w-wainscot`, [1.15, floorY + 0.575, pz], [0.18, 1.15, 0.34], wainscot);
+    d.box(walls, `${prefix}-pillar-w-cap`, [1.155, floorY + 1.16, pz], [0.19, 0.03, 0.35], woodFrame);
+    d.box(walls, `${prefix}-pillar-w-base`, [1.158, floorY + 0.06, pz], [0.2, 0.12, 0.36], baseboard);
+    d.box(walls, `${prefix}-beam`, [0.5, floorY + 3.55, pz], [19.1, 0.24, 0.28], plaster);
+  }
+
+  // 程序化兜底公告栏（Blender 套件到位后整组隐藏，坐标与套件 1:1 对齐：宽 1.28m，离墙 4mm 装配缝）
+  const fallbackBoards = group(walls, `${prefix}-bulletin-fallback`);
+  const boardWood: BoxPart[] = [];
+  const boardPapers: BoxPart[] = [];
+  for (const bz of bulletinsZ) {
+    boardWood.push(
+      { p: [1.142, floorY + 1.344, bz], s: [0.046, 0.048, 1.28] },
+      { p: [1.142, floorY + 2.336, bz], s: [0.046, 0.048, 1.28] },
+      { p: [1.142, floorY + 1.84, bz - 0.616], s: [0.046, 0.94, 0.048] },
+      { p: [1.142, floorY + 1.84, bz + 0.616], s: [0.046, 0.94, 0.048] },
+    );
+    d.box(fallbackBoards, `${prefix}-board-${bz}`, [1.132, floorY + 1.84, bz], [0.022, 0.95, 1.2], COL_EXIT_GREEN);
+    boardPapers.push(
+      { p: [1.148, floorY + 1.98, bz - 0.32], s: [0.006, 0.3, 0.38], color: 0xefead8 },
+      { p: [1.149, floorY + 1.95, bz + 0.06], s: [0.006, 0.35, 0.25], color: 0xe8d6c8 },
+      { p: [1.148, floorY + 1.97, bz + 0.38], s: [0.006, 0.31, 0.27], color: 0xd7e2e8 },
+      { p: [1.148, floorY + 1.62, bz - 0.22], s: [0.006, 0.19, 0.26], color: 0xefead8 },
+    );
+  }
+  d.batch(fallbackBoards, `${prefix}-board-frames`, boardWood, woodFrame);
+  d.batch(fallbackBoards, `${prefix}-board-papers`, boardPapers, d.material(0xffffff, 0.82));
+
+  // 程序化兜底八门百叶矮柜 + 书包（克制灰暖白 #C9C2B4 + 局部陶土 #A97862，Blender 套件到位后整组隐藏）
+  const fallbackLockers = group(walls, `${prefix}-locker-fallback`);
+  const lockerBodies: BoxPart[] = [];
+  const lockerDoors: BoxPart[] = [];
+  const lockerLocks: BoxPart[] = [];
+  for (const lz of lockersZ) {
+    lockerBodies.push(
+      { p: [1.325, floorY + 0.03, lz], s: [0.35, 0.06, 1.36], color: 0x7b7870 },
+      { p: [1.325, floorY + 0.48, lz], s: [0.36, 0.84, 1.38], color: COL_LOCKER_CREAM },
+    );
+    for (let r = 0; r < 2; r += 1) {
+      const dy = 0.288 + r * 0.384;
+      for (let c = 0; c < 4; c += 1) {
+        const dz = -0.486 + c * 0.324;
+        const isTerra = (r + c) % 2 === 1;
+        lockerDoors.push({
+          p: [1.51, floorY + dy, lz + dz],
+          s: [0.018, 0.368, 0.312],
+          color: isTerra ? COL_LOCKER_TERRA : COL_LOCKER_CREAM,
+        });
+        lockerLocks.push({ p: [1.522, floorY + dy, lz + dz + 0.1], s: [0.01, 0.06, 0.026] });
+      }
+    }
+  }
+  // 柜顶书包兜底
+  for (const bagZ of [lockersZ[0] - 0.22, lockersZ[lockersZ.length - 1] - 0.18]) {
+    d.box(fallbackLockers, `${prefix}-locker-bag-${bagZ}`, [1.33, floorY + 1.04, bagZ], [0.22, 0.28, 0.36], 0x2b4363);
+  }
+  d.batch(fallbackLockers, `${prefix}-locker-bodies`, lockerBodies, d.material(0xffffff, 0.68));
+  d.batch(fallbackLockers, `${prefix}-locker-doors`, lockerDoors, d.material(0xffffff, 0.62));
+  d.batch(fallbackLockers, `${prefix}-locker-locks`, lockerLocks, hardwareMat);
+
+  // 靠东墙北端高柜兜底 + 分类垃圾桶
+  const tallFallback = d.box(walls, `${prefix}-tall-locker-fallback`, [4.65, floorY + 0.96, -7.25], [0.43, 1.92, 0.92],
+    d.material(0x5c7585, 0.52, 0.22));
+  tallFallback.castShadow = false;
+  const binBodies: BoxPart[] = [];
+  const binRims: BoxPart[] = [];
+  for (const gz of [0, -0.38]) {
+    binBodies.push({ p: [4.7, floorY + 0.28, -5.5 + gz], s: [0.32, 0.56, 0.32] });
+    binRims.push({ p: [4.7, floorY + 0.57, -5.5 + gz], s: [0.34, 0.04, 0.34] });
+  }
+  d.batch(walls, `${prefix}-trash-bodies`, binBodies, d.material(0xd2d0c8, 0.7));
+  d.batch(walls, `${prefix}-trash-rims`, binRims, hardwareMat);
+
+  // 壁挂广播音箱兜底（Blender 圆网罩音箱到位后隐藏）
+  const spkFallback = group(walls, `${prefix}-speaker-fallback`);
+  const spkZ = isF2 ? [-3.35, 3.35] : [-6.15, 3.35];
+  for (const sz of spkZ) {
+    d.box(spkFallback, `${prefix}-spk-${sz}`, [1.18, floorY + 2.96, sz], [0.14, 0.31, 0.23], hardwareMat);
+  }
+
+  // 带白边与箭头人形的导视出口牌（低位实贴东侧楼梯隔墙 z=-0.35 绝不悬挑出墙角 + 走廊悬吊式）
+  buildExitSignUnit(walls, d, `${prefix}-exit-low`, [4.865, floorY + 0.3, -0.35], -Math.PI / 2,
+    0.42, 0.18, hardwareMat, exitGreenMat, exitGlyphMat, false);
+  buildExitSignUnit(walls, d, `${prefix}-exit-hang`, [3.0, floorY + 3.22, 0.65], 0,
+    0.58, 0.2, hardwareMat, exitGreenMat, exitGlyphMat, true);
+
+  // 走廊吸顶式双管灯架（贴顶安装，与横梁错开不打架）
+  const lampHoods: BoxPart[] = [];
+  const lampTubes: BoxPart[] = [];
+  for (const lz of [-4.6, -1.6, 2.2, 5.0]) {
+    lampHoods.push({ p: [3.0, floorY + 3.63, lz], s: [0.28, 0.06, 1.32] });
+    lampTubes.push({ p: [3.0, floorY + 3.59, lz], s: [0.18, 0.025, 1.22] });
+  }
+  d.batch(walls, `${prefix}-lamp-hoods`, lampHoods, hardwareMat);
+  d.batch(walls, `${prefix}-lamp-tubes`, lampTubes, d.material(0xf2efe6, 0.42));
+}
+
+function architecture(root: THREE.Group, d: Details, occluders: THREE.Object3D[], windTime: { value: number }) {
+  const walls = group(root, 'interior-walls');
+  const plaster = wallMaterial();
+  const ceilingMat = ceilingTileMaterial();
+  const plank1F = plankFloorMaterial(9, 5.5);
+  const plank2F = plankFloorMaterial(7, 5.5);
+  const wainscot = d.material(COL_WAINSCOT, 0.72, 0.02);
+  const baseboard = d.material(COL_BASEBOARD, 0.66, 0.02);
+  const woodFrame = d.material(COL_WOOD_FRAME, 0.58, 0.04);
+  const hardwareMat = d.material(COL_HARDWARE, 0.44, 0.35);
+  const doorMat = d.material(COL_CLASS_DOOR, 0.52, 0.06);
+  const thresholdMat = d.material(0x786048, 0.58, 0.02);
+  const stairPadMat = d.material(COL_STAIR_PAD, 0.54, 0.04, 0.36);
+  const stairStepMat = d.material(0xc7c6be, 0.64, 0.04);
+  const stairEdgeMat = d.material(0x3f5659, 0.54, 0.12);
+  const brassRailMat = d.material(0x9e8444, 0.38, 0.55, 0.62);
+  const numeralMat = d.material(0x9b6e32, 0.42, 0.35, 0.55);
+
+  const exitGreenMat = new THREE.MeshStandardMaterial({
+    color: COL_EXIT_GREEN, emissive: COL_EXIT_GREEN, emissiveIntensity: 0.12, roughness: 0.56,
+  });
+  const exitGlyphMat = new THREE.MeshStandardMaterial({
+    color: 0xf0f5f1, emissive: 0xdff0e6, emissiveIntensity: 0.52, roughness: 0.4,
+  });
+  const frosted = new THREE.MeshStandardMaterial({
+    color: 0xd6e0e4, roughness: 0.52, metalness: 0.04,
+    transparent: true, opacity: 0.42, depthWrite: false, envMapIntensity: 0.4,
+  });
+  // P0-03：单层浅灰蓝微透玻璃（opacity 0.13，不抢景、不偏深蓝块）
+  const glass = new THREE.MeshStandardMaterial({
+    color: 0xb8cdd8, transparent: true, opacity: 0.13,
+    roughness: 0.18, metalness: 0.12, depthWrite: false, envMapIntensity: 0.52,
+  });
+
+  // 1F 主地面（保留 interior-terrazzo-floor 契约节点名，升级为哑光顺纹条木地板）
+  const floor1 = new THREE.Mesh(new THREE.PlaneGeometry(19, 18), plank1F);
+  floor1.name = 'interior-terrazzo-floor';
+  floor1.rotation.x = -Math.PI / 2;
+  floor1.position.set(0.5, FLOOR1_Y, 0);
+  floor1.castShadow = false;
+  floor1.receiveShadow = true;
+  root.add(floor1);
+
+  // 2F 实心楼板（楼梯井 x∈[5, 10], z∈[-9, 0.4] 完整挑空）
+  const floor2Main = new THREE.Mesh(new THREE.PlaneGeometry(14, 18), plank2F);
+  floor2Main.name = 'floor-2f-main-surface';
+  floor2Main.rotation.x = -Math.PI / 2;
+  floor2Main.position.set(-2.0, FLOOR2_Y, 0);
+  floor2Main.castShadow = false;
+  floor2Main.receiveShadow = true;
+  root.add(floor2Main);
+
+  const floor2Plat = new THREE.Mesh(new THREE.PlaneGeometry(5, 8.6), plank2F);
+  floor2Plat.name = 'floor-2f-platform-surface';
+  floor2Plat.rotation.x = -Math.PI / 2;
+  floor2Plat.position.set(7.5, FLOOR2_Y, 4.7);
+  floor2Plat.castShadow = false;
+  floor2Plat.receiveShadow = true;
+  root.add(floor2Plat);
+
+  // 2F 楼板底吸音吊顶（下沉 3cm 避开浅视角深度精度抖动）与走廊—楼梯厅实木分界压条
+  d.box(walls, 'slab-2f-main', [-2.0, FLOOR2_Y - SLAB_THICK / 2 - 0.03, 0], [14.02, SLAB_THICK, 18.02], ceilingMat);
+  d.box(walls, 'slab-2f-platform', [7.52, FLOOR2_Y - SLAB_THICK / 2 - 0.03, 4.7], [4.98, SLAB_THICK, 8.62], ceilingMat);
+  d.box(walls, 'f2-platform-transition-strip', [5.0, FLOOR2_Y + 0.005, 3.8], [0.12, 0.006, 6.8], thresholdMat);
+  d.box(walls, 'f1-platform-transition-strip', [5.0, FLOOR1_Y + 0.005, 3.8], [0.12, 0.006, 6.8], thresholdMat);
+  d.box(walls, 'roof', [0.5, ROOF_Y, 0], [19.25, 0.16, 18.25], ceilingMat);
+
+  // 1F & 2F 楼梯厅哑光青灰防滑胶面与导引边线
+  for (const [idx, fy] of [FLOOR1_Y, FLOOR2_Y].entries()) {
+    d.box(walls, `f${idx + 1}-stair-cyan-pad`, [7.5, fy + 0.005, 2.35], [4.75, 0.006, 3.8], stairPadMat);
+    d.box(walls, `f${idx + 1}-stair-cyan-line-s`, [7.5, fy + 0.009, 4.25], [4.75, 0.004, 0.075], COL_GUIDE_OCHRE);
+    d.box(walls, `f${idx + 1}-stair-cyan-line-w`, [5.16, fy + 0.009, 2.35], [0.075, 0.004, 3.8], COL_GUIDE_OCHRE);
+  }
+
+  // 1F 南侧门厅磨石地面交界 + 成组换鞋柜兜底
+  d.box(walls, 'f1-genkan-tile', [8.4, 0.006, 6.8], [3.0, 0.008, 4.1], d.material(0x7c8284, 0.68, 0.03));
+  d.box(walls, 'f1-genkan-border', [6.9, 0.009, 6.8], [0.06, 0.006, 4.1], thresholdMat);
+  const shoeFallback = group(walls, 'f1-shoe-locker-fallback');
+  d.box(shoeFallback, 'f1-shoe-cabinet-frame', [9.45, 0.62, 7.2], [0.46, 1.24, 2.4], COL_LOCKER_CREAM);
+  const shoeDoors: BoxPart[] = [];
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 4; col += 1) {
+      shoeDoors.push({
+        p: [9.21, 0.24 + row * 0.38, 6.32 + col * 0.58],
+        s: [0.018, 0.34, 0.52],
+        color: (row + col) % 2 === 0 ? COL_LOCKER_CREAM : COL_LOCKER_TERRA,
+      });
+    }
+  }
+  d.batch(shoeFallback, 'f1-shoe-doors', shoeDoors, d.material(0xffffff, 0.62));
+
+  // 楼梯口立体浮雕 1F / 2F 大字 + 契约兼容导视牌
+  build3DFloorNumeral(walls, d, 1, [5.125, 2.42, -0.35], Math.PI / 2, numeralMat);
+  build3DFloorNumeral(walls, d, 1, [4.875, 2.42, -0.35], -Math.PI / 2, numeralMat);
+  build3DFloorNumeral(walls, d, 2, [5.125, FLOOR2_Y + 2.42, -0.35], Math.PI / 2, numeralMat);
+  build3DFloorNumeral(walls, d, 2, [4.875, FLOOR2_Y + 2.42, -0.35], -Math.PI / 2, numeralMat);
+  sign(root, '1F', [5.13, 1.52, 0.12], Math.PI / 2, 0.44, 0.24, { background: '#dad7cc', foreground: '#7a5624' });
+  sign(root, '2F', [5.13, FLOOR2_Y + 1.52, 0.12], Math.PI / 2, 0.44, 0.24, { background: '#dad7cc', foreground: '#7a5624' });
+  sign(root, '侧楼梯 · 平台', [4.87, FLOOR2_Y + 3.18, 4.2], -Math.PI / 2, 1.85, 0.32, { background: '#edeae0', foreground: '#2c3a40' });
+  sign(root, '下楼 · 一楼办公室', [5.13, FLOOR2_Y + 1.52, 1.2], Math.PI / 2, 1.48, 0.3, { background: '#f2ead9', foreground: '#5c3f22' });
+
+  // 南北双层端墙（全高 7.6m，统一 1.15m 蓝灰墙裙 + 压顶木线 + 暖木踢脚）
+  for (const z of [-9, 9]) {
+    d.box(walls, 'end-wall', [0.5, 3.8, z], [19.25, 7.65, 0.22], plaster);
+    for (const fy of [FLOOR1_Y, FLOOR2_Y]) {
+      const innerZ = z - Math.sign(z) * 0.12;
+      d.box(walls, 'end-wainscot', [0.5, fy + 0.575, innerZ], [19, 1.15, 0.025], wainscot);
+      d.box(walls, 'end-wainscot-cap', [0.5, fy + 1.16, innerZ - Math.sign(z) * 0.008], [19, 0.03, 0.036], woodFrame);
+      d.box(walls, 'end-baseboard', [0.5, fy + 0.06, innerZ - Math.sign(z) * 0.01], [19, 0.12, 0.032], baseboard);
+    }
+  }
+
+  // 1F & 2F 内部隔墙（2F 教室中段墙分设为「北侧双跨走廊窗 + 中央实体公告栏墙 + 南侧走廊窗」，彻底消除公告栏穿窗穿柱！）
+  const interiorGlassParts: BoxPart[] = [];
+  const interiorMullionParts: BoxPart[] = [];
+  for (const seg of [...PARTITIONS_2F, ...PARTITIONS_1F]) {
+    const fy = (seg.minY ?? 0) >= FLOOR2_Y ? FLOOR2_Y : FLOOR1_Y;
+    const isHorizontal = seg.s[0] > seg.s[2];
+    if (seg.name === 'f2-class-wall-middle') {
+      // 下部统一 1.24m 矮墙（兼容 0.90m 矮柜 + 0.337m 柜顶书包不挡窗玻璃！）
+      d.box(walls, `${seg.name}-lower`, [1, fy + 0.62, 0], [0.22, 1.24, 7.6], wainscot);
+      d.box(walls, `${seg.name}-base`, [1, fy + 0.06, 0], [0.25, 0.12, 7.6], baseboard);
+      d.box(walls, `${seg.name}-upper`, [1, fy + 3.45, 0], [0.22, 0.7, 7.6], plaster);
+      // 中段实体公告栏墙段 z ∈ [0.04, 2.26]（供 z=1.25 公告栏稳固居中挂装）
+      d.box(walls, `${seg.name}-solid-bay`, [1, fy + 2.17, 1.15], [0.22, 1.86, 2.24], plaster);
+      d.box(walls, `${seg.name}-solid-cap`, [1, fy + 1.24, 1.15], [0.25, 0.035, 2.24], woodFrame);
+      // 北侧双窗跨 z ∈ [-3.80, 0.04]
+      interiorMullionParts.push(
+        { p: [1, fy + 1.25, -1.88], s: [0.3, 0.05, 3.84] },
+        { p: [1, fy + 2.62, -1.88], s: [0.24, 0.06, 3.84] },
+        { p: [1, fy + 3.08, -1.88], s: [0.24, 0.06, 3.84] },
+        { p: [1, fy + 2.17, -3.76], s: [0.24, 1.86, 0.08] },
+        { p: [1, fy + 2.17, -1.88], s: [0.24, 1.86, 0.08] },
+        { p: [1, fy + 2.17, -0.02], s: [0.24, 1.86, 0.08] },
       );
-      shrubs.push({ p: [tx + 1.15, 0.42, z + 0.8], s: [1.05, 0.78, 0.68], color: 0x6b8d67 });
-      treeIndex += 1;
+      for (const wz of [-2.82, -0.95]) {
+        interiorGlassParts.push(
+          { p: [1, fy + 1.94, wz], s: [0.024, 1.32, 1.82] },
+          { p: [1, fy + 2.85, wz], s: [0.024, 0.4, 1.82] },
+        );
+      }
+      // 南侧单窗跨 z ∈ [2.26, 3.80]
+      interiorMullionParts.push(
+        { p: [1, fy + 1.25, 3.03], s: [0.3, 0.05, 1.56] },
+        { p: [1, fy + 2.62, 3.03], s: [0.24, 0.06, 1.56] },
+        { p: [1, fy + 3.08, 3.03], s: [0.24, 0.06, 1.56] },
+        { p: [1, fy + 2.17, 2.28], s: [0.24, 1.86, 0.08] },
+        { p: [1, fy + 2.17, 3.76], s: [0.24, 1.86, 0.08] },
+      );
+      interiorGlassParts.push(
+        { p: [1, fy + 1.94, 3.02], s: [0.024, 1.32, 1.42] },
+        { p: [1, fy + 2.85, 3.02], s: [0.024, 0.4, 1.42] },
+      );
+      continue;
     }
-    d.batch(garden, 'garden-tree-trunks', trunks, 0x817661);
-    instancedFoliage(garden, 'garden-tree-foliage', foliage);
-    instancedFoliage(garden, 'garden-shrubs', shrubs);
+    d.box(walls, seg.name, seg.p, seg.s, plaster);
+    d.box(walls, `${seg.name}-wainscot`, [seg.p[0], fy + 0.575, seg.p[2]],
+      [seg.s[0] + (isHorizontal ? 0 : 0.026), 1.15, seg.s[2] + (isHorizontal ? 0.026 : 0)], wainscot);
+    d.box(walls, `${seg.name}-wainscot-cap`, [seg.p[0], fy + 1.16, seg.p[2]],
+      [seg.s[0] + (isHorizontal ? 0 : 0.036), 0.03, seg.s[2] + (isHorizontal ? 0.036 : 0)], woodFrame);
+    d.box(walls, `${seg.name}-baseboard`, [seg.p[0], fy + 0.06, seg.p[2]],
+      [seg.s[0] + (isHorizontal ? 0 : 0.04), 0.12, seg.s[2] + (isHorizontal ? 0.04 : 0)], baseboard);
   }
-  const lamp = d.material(0xeef5fa);
-  lamp.emissive.setHex(0xd6e8f4);
-  lamp.emissiveIntensity = 0.52;
-  for (const x of [-6, -2, 3, 7]) for (const z of [-6, 0, 6])
-    d.box(root, 'ceiling-lamp', [x, 3.73, z], [1.2, 0.06, 0.32], lamp);
-  for (const z of [-7.6, -3.6, 3.6, 7.6]) d.box(root, 'ceiling-beam', [0.5, 3.8, z], [19.25, 0.06, 0.2], 0xc9d0d4);
-  // 斜射窗光光束（日间冷白清透、黄昏由 runtime 切为微暖残阳）：单网格加色混合，零额外光源、零贴图。
+  d.batch(walls, 'class-corridor-glass-batch', interiorGlassParts, glass);
+  d.batch(walls, 'class-corridor-mullion-batch', interiorMullionParts, woodFrame);
+
+  // 2F 教室前后门与 1F 辅导员办公室门、阅览室门（门扇各自停靠在实墙侧，绝不碰撞柜柱）
+  buildRoomDoorway(walls, root, d, FLOOR2_Y, -5, -1.68, '二楼 · 教室', '高一(3)班',
+    plaster, frosted, woodFrame, doorMat, hardwareMat, thresholdMat);
+  buildRoomDoorway(walls, root, d, FLOOR2_Y, 5, 1.68, '二楼 · 教室', '高一(3)班',
+    plaster, frosted, woodFrame, doorMat, hardwareMat, thresholdMat);
+  buildRoomDoorway(walls, root, d, FLOOR1_Y, -2.2, -1.68, '辅导员办公室', '1F 办公室',
+    plaster, frosted, woodFrame, doorMat, hardwareMat, thresholdMat);
+  buildRoomDoorway(walls, root, d, FLOOR1_Y, 5.0, 1.68, '一楼 · 阅览室', '1F 阅览室',
+    plaster, frosted, woodFrame, doorMat, hardwareMat, thresholdMat);
+
+  // 1F & 2F 楼梯厅过梁
+  for (const fy of [FLOOR1_Y, FLOOR2_Y]) {
+    d.box(walls, 'stair-door-lintel', [5, fy + 3.4, 3.8], [0.24, 0.8, 6.8], plaster);
+  }
+
+  // ==================== 东西两侧外立面采光窗墙（P0-03 彻底修复：每窗格独立单层嵌入玻璃，零重叠！） ====================
+  const windowPanes: BoxPart[] = [];
+  const windowMullions: BoxPart[] = [];
+  let namedPanePlaced = false;
+  for (const x of [-9, 10]) {
+    for (const fy of [FLOOR1_Y, FLOOR2_Y]) {
+      d.box(walls, 'window-parapet', [x, fy + 0.52, 0], [0.22, 1.04, 18.2], wainscot);
+      d.box(walls, 'window-baseboard', [x - Math.sign(x) * 0.13, fy + 0.06, 0], [0.03, 0.12, 18], baseboard);
+      d.box(walls, 'window-header', [x, fy + 3.45, 0], [0.22, 0.7, 18.2], plaster);
+      d.box(walls, 'window-sill', [x, fy + 1.05, 0], [0.34, 0.06, 18.1], woodFrame);
+      // 横向窗框（下框 1.09、中横梃 2.57、上框 3.10）+ 两侧收边立梃
+      for (const wy of [1.09, 2.57, 3.1]) {
+        windowMullions.push({ p: [x, fy + wy, 0], s: [0.24, 0.065, 18.1] });
+      }
+      windowMullions.push({ p: [x, fy + 2.09, 9.0], s: [0.24, 2.08, 0.1] });
+
+      for (let z = -7.5; z <= 7.5; z += 3) {
+        // 主窗柱（z - 1.5）与中央推拉竖梃（z）
+        windowMullions.push(
+          { p: [x, fy + 2.09, z - 1.5], s: [0.24, 2.08, 0.1] },
+          { p: [x, fy + 1.83, z], s: [0.12, 1.44, 0.06] },
+        );
+        // 左开扇玻璃、右开扇玻璃、上亮窗玻璃——三块各自嵌入木框槽内，互不重叠！
+        const leftSpec: BoxPart = { p: [x, fy + 1.83, z - 0.74], s: [0.024, 1.44, 1.44] };
+        const rightSpec: BoxPart = { p: [x, fy + 1.83, z + 0.74], s: [0.024, 1.44, 1.44] };
+        const topSpec: BoxPart = { p: [x, fy + 2.835, z], s: [0.024, 0.48, 2.92] };
+
+        // 单独拆出一扇真实窗格命名为 window-pane 满足契约，不再额外叠放第二块同位玻璃！
+        if (!namedPanePlaced && x === -9 && fy === FLOOR2_Y && z === -1.5) {
+          d.box(walls, 'window-pane', leftSpec.p, leftSpec.s, glass);
+          namedPanePlaced = true;
+        } else {
+          windowPanes.push(leftSpec);
+        }
+        windowPanes.push(rightSpec, topSpec);
+      }
+      // 东侧楼梯平台窗内防坠金属横杆（带立柱墙托连接）
+      if (x > 0) {
+        d.box(walls, 'window-safety-rail', [x - 0.18, fy + 1.36, 0], [0.04, 0.04, 17.6], brassRailMat);
+        for (let rz = -7.5; rz <= 7.5; rz += 3) {
+          windowMullions.push({ p: [x - 0.11, fy + 1.36, rz - 1.5], s: [0.14, 0.045, 0.045] });
+        }
+      }
+    }
+  }
+  d.batch(walls, 'window-panes-batch', windowPanes, glass);
+  d.batch(walls, 'window-mullions-batch', windowMullions, woodFrame);
+
+  // 1F & 2F 走廊标配道具
+  buildCorridorProps(walls, d, FLOOR1_Y, 'f1-corridor', plaster, wainscot, baseboard, woodFrame, hardwareMat, exitGreenMat, exitGlyphMat);
+  buildCorridorProps(walls, d, FLOOR2_Y, 'f2-corridor', plaster, wainscot, baseboard, woodFrame, hardwareMat, exitGreenMat, exitGlyphMat);
+
+  // ==================== 双跑折返楼梯（踏步防滑前缘 + 中央明晰导引线 + 接地扶手基座） ====================
+  const stairs = group(root, 'stairwell-flight');
+  const stepParts: BoxPart[] = [];
+  const edgeParts: BoxPart[] = [];
+  const yellowMarks: BoxPart[] = [];
+  const stepsPerFlight = 12;
+  const stepDepth = STAIR_RUN_LEN / stepsPerFlight;
+  const stepRise = LANDING_Y / stepsPerFlight;
+
+  // 上段梯段 A
+  for (let i = 0; i < stepsPerFlight; i += 1) {
+    const zCenter = STAIR_Z_END + (i + 0.5) * stepDepth;
+    const topY = LANDING_Y + (i + 1) * stepRise;
+    stepParts.push({ p: [6.26, topY - 0.14, zCenter], s: [2.22, 0.28, stepDepth + 0.02] });
+    edgeParts.push({ p: [6.26, topY + 0.008, zCenter - stepDepth / 2 + 0.026], s: [2.2, 0.016, 0.048] });
+    yellowMarks.push({ p: [6.26, topY + 0.01, zCenter], s: [0.11, 0.005, stepDepth - 0.04] });
+  }
+  d.box(stairs, 'f1-under-upper-wall', [6.26, 1.85, STAIR_Z_START], [2.26, 3.7, 0.18], wainscot);
+  d.box(stairs, 'f1-under-upper-base', [6.26, 0.06, STAIR_Z_START + 0.1], [2.28, 0.12, 0.04], baseboard);
+
+  // 1.5F 中间休息平台
+  d.box(stairs, 'stair-landing-slab', [7.5, LANDING_Y - 0.12, -6.65], [4.8, 0.24, 4.5], stairStepMat);
+  d.box(stairs, 'stair-landing-cyan', [7.5, LANDING_Y + 0.005, -6.65], [4.65, 0.006, 4.25], stairPadMat);
+  d.box(stairs, 'stair-landing-yellow-n', [7.5, LANDING_Y + 0.009, -8.55], [4.5, 0.004, 0.075], COL_GUIDE_OCHRE);
+  d.box(stairs, 'stair-landing-yellow-e', [9.65, LANDING_Y + 0.009, -6.65], [0.075, 0.004, 4.0], COL_GUIDE_OCHRE);
+
+  // 休息平台角落双灭火器（含底座箱托）+ 带箭头安全出口牌 + 广播音箱兜底
+  d.box(stairs, 'landing-extinguisher-tray', [9.5, LANDING_Y + 0.025, -8.52], [0.56, 0.05, 0.26], hardwareMat);
+  for (const ex of [9.36, 9.64]) {
+    const body = new THREE.Mesh(d.cyl, d.material(0xb5342c, 0.42, 0.18));
+    body.name = 'landing-extinguisher';
+    body.position.set(ex, LANDING_Y + 0.3, -8.52);
+    body.scale.set(0.15, 0.52, 0.15);
+    body.castShadow = false;
+    stairs.add(body);
+    d.box(stairs, 'landing-extinguisher-cap', [ex, LANDING_Y + 0.6, -8.52], [0.07, 0.08, 0.07], hardwareMat);
+  }
+  buildExitSignUnit(stairs, d, 'landing-exit-sign', [9.83, LANDING_Y + 0.34, -7.8], -Math.PI / 2,
+    0.44, 0.18, hardwareMat, exitGreenMat, exitGlyphMat, false);
+  d.box(stairs, 'landing-speaker-fallback', [9.78, LANDING_Y + 2.6, -8.25], [0.15, 0.31, 0.23], hardwareMat);
+  d.box(stairs, 'landing-rail-window', [9.78, LANDING_Y + 1.05, -6.65], [0.04, 0.04, 4.2], brassRailMat);
+
+  // 下段梯段 B
+  for (let i = 0; i < stepsPerFlight; i += 1) {
+    const zCenter = STAIR_Z_END + (i + 0.5) * stepDepth;
+    const topY = LANDING_Y - (i + 0.5) * stepRise;
+    const h = Math.max(0.14, topY);
+    stepParts.push({ p: [8.74, h / 2, zCenter], s: [2.22, h, stepDepth + 0.02] });
+    edgeParts.push({ p: [8.74, topY + 0.008, zCenter + stepDepth / 2 - 0.026], s: [2.2, 0.016, 0.048] });
+    yellowMarks.push({ p: [8.74, topY + 0.01, zCenter], s: [0.11, 0.005, stepDepth - 0.04] });
+  }
+  d.batch(stairs, 'stair-steps-batch', stepParts, stairStepMat);
+  d.batch(stairs, 'stair-edges-batch', edgeParts, stairEdgeMat);
+  d.batch(stairs, 'stair-yellow-marks', yellowMarks, COL_GUIDE_OCHRE);
+
+  // 中隔蓝灰斜坡实心护墙 + 暖木压顶扶手盖板 + 带墙面连接法兰座的圆管扶手
+  const slopeAngle = Math.atan(STAIR_SLOPE);
+  const slopeLen = Math.hypot(STAIR_RUN_LEN, LANDING_Y);
+  const dividerMat = d.material(0x758892, 0.72, 0.03);
+  const upperWallShape = new THREE.Shape();
+  upperWallShape.moveTo(STAIR_Z_END, LANDING_Y - 0.2);
+  upperWallShape.lineTo(STAIR_Z_START, FLOOR2_Y - 0.2);
+  upperWallShape.lineTo(STAIR_Z_START, FLOOR2_Y + 0.92);
+  upperWallShape.lineTo(STAIR_Z_END, LANDING_Y + 0.92);
+  upperWallShape.closePath();
+  const upperWallGeo = new THREE.ExtrudeGeometry(upperWallShape, { depth: 0.2, bevelEnabled: false });
+  upperWallGeo.rotateY(-Math.PI / 2);
+  const upperWall = new THREE.Mesh(upperWallGeo, dividerMat);
+  upperWall.name = 'stair-divider-wall-upper';
+  upperWall.position.set(7.6, 0, 0);
+  upperWall.castShadow = false;
+  upperWall.receiveShadow = true;
+  stairs.add(upperWall);
+
+  const lowerWallShape = new THREE.Shape();
+  lowerWallShape.moveTo(STAIR_Z_END, 0);
+  lowerWallShape.lineTo(STAIR_Z_START, 0);
+  lowerWallShape.lineTo(STAIR_Z_START, 0.92);
+  lowerWallShape.lineTo(STAIR_Z_END, LANDING_Y + 0.92);
+  lowerWallShape.closePath();
+  const lowerWallGeo = new THREE.ExtrudeGeometry(lowerWallShape, { depth: 0.2, bevelEnabled: false });
+  lowerWallGeo.rotateY(-Math.PI / 2);
+  const lowerWall = new THREE.Mesh(lowerWallGeo, dividerMat);
+  lowerWall.name = 'stair-divider-wall-lower';
+  lowerWall.position.set(7.6, 0, 0);
+  lowerWall.castShadow = false;
+  lowerWall.receiveShadow = true;
+  stairs.add(lowerWall);
+
+  d.box(stairs, 'stair-divider-cap-upper', [7.5, LANDING_Y + 1.9, -2.0], [0.24, 0.075, slopeLen], woodFrame, [-slopeAngle, 0, 0]);
+  d.box(stairs, 'stair-divider-cap-lower', [7.5, LANDING_Y / 2 + 0.95, -2.0], [0.24, 0.075, slopeLen], woodFrame, [slopeAngle, 0, 0]);
+  d.box(stairs, 'stair-divider-newel', [7.5, LANDING_Y + 0.5, STAIR_Z_END - 0.05], [0.26, 1.04, 0.24], woodFrame);
+  d.box(stairs, 'stair-handrail-upper', [5.18, LANDING_Y + 1.87, -2.0], [0.045, 0.045, slopeLen], brassRailMat, [-slopeAngle, 0, 0]);
+  d.box(stairs, 'stair-handrail-lower', [9.82, LANDING_Y / 2 + 0.92, -2.0], [0.045, 0.045, slopeLen], brassRailMat, [slopeAngle, 0, 0]);
+  // 扶手与墙体真实连接支座
+  const railBrackets: BoxPart[] = [];
+  for (const t of [0.12, 0.5, 0.88]) {
+    const uz = STAIR_Z_END + t * STAIR_RUN_LEN;
+    railBrackets.push(
+      { p: [5.14, LANDING_Y + t * LANDING_Y + 0.9, uz], s: [0.08, 0.04, 0.04] },
+      { p: [9.86, LANDING_Y * (1 - t) + 0.9, uz], s: [0.08, 0.04, 0.04] },
+    );
+  }
+  d.batch(stairs, 'stair-rail-brackets', railBrackets, hardwareMat);
+
+  // 2F 楼梯井安全护墙
+  d.box(stairs, 'f2-stairwell-balustrade', [8.68, FLOOR2_Y + 0.52, STAIR_Z_START + 0.06], [2.56, 1.04, 0.16], dividerMat);
+  d.box(stairs, 'f2-stairwell-balustrade-cap', [8.68, FLOOR2_Y + 1.06, STAIR_Z_START + 0.06], [2.62, 0.07, 0.24], woodFrame);
+  d.box(stairs, 'f2-stairwell-balustrade-base', [8.68, FLOOR2_Y + 0.06, STAIR_Z_START + 0.15], [2.56, 0.12, 0.04], baseboard);
+
+  occluders.push(walls, stairs);
+
+  // ==================== 窗外庭院铺装、树池、对侧楼体与错落香樟树景（P1-04 修复） ====================
+  const garden = group(root, 'window-greenery');
+  const planterFrames: BoxPart[] = [];
+  const planterSoils: BoxPart[] = [];
+  const fallbackTrunks: BoxPart[] = [];
+  const fallbackFoliage: FoliagePart[] = [];
+  const shrubs: FoliagePart[] = [];
+
+  for (const x of [-14, 15]) {
+    const sgn = Math.sign(x);
+    const wallEdgeX = x < 0 ? -9.2 : 10.2;
+    // 近窗石材散水步道 + 路缘石 + 庭院草坪 + 中庭地面，明确交待树池扎根层次
+    d.box(garden, 'garden-walkway', [wallEdgeX + sgn * 1.1, -0.08, 0], [2.2, 0.16, 26], d.material(0x9b988e, 0.86));
+    d.box(garden, 'garden-curb', [wallEdgeX + sgn * 2.24, -0.04, 0], [0.14, 0.22, 26], d.material(0xb3afa4, 0.82));
+    d.box(garden, 'garden-lawn', [x, -0.11, 0], [5.8, 0.16, 26], d.material(0x586d4f, 0.92));
+    d.box(garden, 'garden-ground', [x + sgn * 3.8, -0.14, 0], [6.0, 0.18, 28], d.material(0x768287, 0.85));
+
+    // 对侧四层教学楼立面（米灰外墙 + 层间腰线 + 带窗台阴影与宽窄节奏变化的凹窗）
+    const farX = x + sgn * 6.4;
+    const faceX = farX - sgn * 0.92;
+    const farBuildings: BoxPart[] = [
+      { p: [farX, 5.8, -7.8], s: [1.8, 11.6, 6.2] },
+      { p: [farX, 6.4, 0.0], s: [1.8, 12.8, 8.2] },
+      { p: [farX, 5.6, 8.0], s: [1.8, 11.2, 6.2] },
+    ];
+    d.batch(garden, 'garden-far-buildings', farBuildings, d.material(0xd5d1c6, 0.86));
+
+    const farBands: BoxPart[] = [];
+    const farWins: BoxPart[] = [];
+    const farSills: BoxPart[] = [];
+    for (const fy of [1.7, 4.6, 7.5, 10.4]) {
+      farBands.push({ p: [faceX, fy - 0.92, 0], s: [0.12, 0.14, 21.8] });
+      // 宽教室窗与窄楼梯竖窗交替排布，赋予远楼真实立面节奏
+      const winLayout: ReadonlyArray<{ z: number; w: number }> = [
+        { z: -9.2, w: 1.75 }, { z: -6.8, w: 1.75 }, { z: -4.6, w: 0.82 },
+        { z: -2.2, w: 1.95 }, { z: 0.4, w: 1.95 }, { z: 2.8, w: 0.82 },
+        { z: 5.1, w: 1.75 }, { z: 7.5, w: 1.75 }, { z: 9.6, w: 1.2 },
+      ];
+      for (const { z: wz, w } of winLayout) {
+        farWins.push({ p: [faceX, fy, wz], s: [0.06, 1.42, w] });
+        farSills.push(
+          { p: [faceX - sgn * 0.06, fy - 0.74, wz], s: [0.16, 0.08, w + 0.16], color: 0xaba69b },
+          { p: [faceX - sgn * 0.03, fy - 0.82, wz], s: [0.08, 0.08, w + 0.1], color: 0x7d7a72 },
+        );
+      }
+    }
+    d.batch(garden, 'garden-far-bands', farBands, d.material(0xb7b3a8, 0.84));
+    d.batch(garden, 'garden-far-windows', farWins, d.material(0x435763, 0.36, 0.2));
+    d.batch(garden, 'garden-far-sills', farSills, d.material(0xffffff, 0.82));
+  }
+
+  // 为每株庭院香樟树建造石砌树池与深褐种植土，并放置程序化兜底树冠
+  COURTYARD_TREES.forEach((tree, idx) => {
+    planterFrames.push(
+      { p: [tree.x, 0.08, tree.z - 0.68], s: [1.48, 0.24, 0.12] },
+      { p: [tree.x, 0.08, tree.z + 0.68], s: [1.48, 0.24, 0.12] },
+      { p: [tree.x - 0.68, 0.08, tree.z], s: [0.12, 0.24, 1.24] },
+      { p: [tree.x + 0.68, 0.08, tree.z], s: [0.12, 0.24, 1.24] },
+    );
+    planterSoils.push({ p: [tree.x, 0.04, tree.z], s: [1.26, 0.12, 1.26] });
+
+    const h = 4.5 * tree.scale;
+    fallbackTrunks.push({ p: [tree.x, h * 0.34, tree.z], s: [0.24 * tree.scale, h * 0.68, 0.24 * tree.scale] });
+    fallbackFoliage.push(
+      { p: [tree.x - 0.55, h * 0.74, tree.z - 0.35], s: [0.95 * tree.scale, 0.62 * tree.scale, 0.86 * tree.scale], color: 0x445d46 },
+      { p: [tree.x + 0.62, h * 0.78, tree.z + 0.38], s: [0.92 * tree.scale, 0.58 * tree.scale, 0.82 * tree.scale], color: 0x647a50 },
+      { p: [tree.x + 0.08, h * 0.92, tree.z], s: [0.88 * tree.scale, 0.52 * tree.scale, 0.78 * tree.scale], color: 0x81915d },
+    );
+    shrubs.push({
+      p: [tree.x + (idx % 2 === 0 ? 1.15 : -1.1), 0.32, tree.z + 1.05],
+      s: [0.85, 0.48, 0.72],
+      color: idx % 2 === 0 ? 0x4d6649 : 0x607852,
+    });
+  });
+  d.batch(garden, 'garden-tree-planters', planterFrames, d.material(0xa4a095, 0.84));
+  d.batch(garden, 'garden-tree-soils', planterSoils, d.material(0x4a3f34, 0.94));
+  const fallbackTrunkMesh = d.batch(garden, 'garden-tree-trunks', fallbackTrunks, d.material(0x54493e, 0.9), d.cyl);
+  const fallbackFoliageMesh = instancedFoliage(garden, 'garden-tree-foliage', fallbackFoliage, windTime);
+  fallbackTrunkMesh.name = 'garden-tree-trunks-fallback';
+  fallbackFoliageMesh.name = 'garden-tree-foliage-fallback';
+  instancedFoliage(garden, 'garden-shrubs', shrubs, windTime);
+
+  // ==================== 与窗格对齐的柔边条形窗光（P0-02 修复：NormalBlending + 避开门洞门槛） ====================
   const beams = group(root, 'corridor-light-beams');
-  const platformBeams: BeamQuad[] = [
-    [[9.85, 3.05, 3.6], [9.85, 3.05, 4.4], [5.4, 0.04, 2.4], [5.4, 0.04, 5.4]],
-    [[9.85, 3.05, 5.2], [9.85, 3.05, 6.0], [5.4, 0.04, 4.2], [5.4, 0.04, 7.2]],
-    [[9.85, 3.05, 1.8], [9.85, 3.05, 2.6], [6.2, 0.04, 0.8], [6.2, 0.04, 3.6]],
+  const beamQuads: BeamQuad[] = [
+    // 2F 东侧平台与 1.5F 休息平台窗边轻薄斜光幕
+    [[9.75, FLOOR2_Y + 2.85, 3.3], [9.75, FLOOR2_Y + 2.85, 4.4], [6.4, FLOOR2_Y + 0.05, 2.5], [6.4, FLOOR2_Y + 0.05, 4.9]],
+    [[9.75, FLOOR2_Y + 2.85, 5.2], [9.75, FLOOR2_Y + 2.85, 6.3], [6.4, FLOOR2_Y + 0.05, 4.4], [6.4, FLOOR2_Y + 0.05, 6.8]],
+    [[9.75, LANDING_Y + 2.6, -7.1], [9.75, LANDING_Y + 2.6, -5.8], [6.4, LANDING_Y + 0.05, -7.5], [6.4, LANDING_Y + 0.05, -5.4]],
+    // 2F 教室西窗靠窗轻薄晨光束
+    [[-8.75, FLOOR2_Y + 2.85, -4.2], [-8.75, FLOOR2_Y + 2.85, -3.1], [-5.2, FLOOR2_Y + 0.05, -4.6], [-5.2, FLOOR2_Y + 0.05, -2.7]],
+    [[-8.75, FLOOR2_Y + 2.85, 1.8], [-8.75, FLOOR2_Y + 2.85, 2.9], [-5.2, FLOOR2_Y + 0.05, 1.4], [-5.2, FLOOR2_Y + 0.05, 3.3]],
   ];
-  const classBeams: BeamQuad[] = [
-    [[-8.85, 2.9, 2.8], [-8.85, 2.9, 3.6], [-3.8, 0.04, 1.8], [-3.8, 0.04, 4.6]],
+  // 地面窗格柔光带：严格按 3m 窗跨分段留出窗梃暗缝，且停留在靠窗区域，绝不跨过 x=1.0 教室/办公室门槛冲淡木纹！
+  const floorPatches: BeamQuad[] = [
+    // 2F 教室西窗下成排条形窗光（x ∈ [-8.65, -5.35]）
+    [[-8.65, FLOOR2_Y + 0.012, -5.6], [-8.65, FLOOR2_Y + 0.012, -3.4], [-5.35, FLOOR2_Y + 0.012, -5.8], [-5.35, FLOOR2_Y + 0.012, -3.2]],
+    [[-8.65, FLOOR2_Y + 0.012, -2.6], [-8.65, FLOOR2_Y + 0.012, -0.4], [-5.35, FLOOR2_Y + 0.012, -2.8], [-5.35, FLOOR2_Y + 0.012, -0.2]],
+    [[-8.65, FLOOR2_Y + 0.012, 0.4], [-8.65, FLOOR2_Y + 0.012, 2.6], [-5.35, FLOOR2_Y + 0.012, 0.2], [-5.35, FLOOR2_Y + 0.012, 2.8]],
+    [[-8.65, FLOOR2_Y + 0.012, 3.4], [-8.65, FLOOR2_Y + 0.012, 5.6], [-5.35, FLOOR2_Y + 0.012, 3.2], [-5.35, FLOOR2_Y + 0.012, 5.8]],
+    // 2F 东侧观景平台与走廊柔边条形窗光（分段对齐窗框，且止于 x=1.9 绝不跨过 x=1.0 门槛！）
+    [[9.6, FLOOR2_Y + 0.014, 0.7], [9.6, FLOOR2_Y + 0.014, 2.7], [2.0, FLOOR2_Y + 0.014, 0.3], [2.0, FLOOR2_Y + 0.014, 2.9]],
+    [[9.6, FLOOR2_Y + 0.014, 3.5], [9.6, FLOOR2_Y + 0.014, 5.7], [2.2, FLOOR2_Y + 0.014, 3.1], [2.2, FLOOR2_Y + 0.014, 5.9]],
+    // 1F 走廊东窗柔光带与办公室西窗柔光带
+    [[9.6, FLOOR1_Y + 0.014, 0.8], [9.6, FLOOR1_Y + 0.014, 2.8], [2.1, FLOOR1_Y + 0.014, 0.4], [2.1, FLOOR1_Y + 0.014, 3.0]],
+    [[-8.6, FLOOR1_Y + 0.012, -5.6], [-8.6, FLOOR1_Y + 0.012, -3.4], [-5.4, FLOOR1_Y + 0.012, -5.8], [-5.4, FLOOR1_Y + 0.012, -3.2]],
   ];
-  beams.add(createSoftLightBeam(platformBeams, 0xd8e8f2, 0.14));
-  beams.add(createSoftLightBeam(classBeams, 0xe0edf5, 0.11));
-  const fill = new THREE.HemisphereLight(0xe0eaf1, 0x738288, 1.12);
+  beams.add(createWindowLightMesh('corridor-light-beam', beamQuads, 0xffe2b0, 0.06, THREE.AdditiveBlending, 2));
+  beams.add(createWindowLightMesh('corridor-sun-patches', floorPatches, 0xffdfa8, 0.2, THREE.NormalBlending, 1));
+
+  // 克制平衡的室内三路照明（P0-02：夕照点光从 22 降至 enter 时的 5.2，保留脸部与门槛木纹层次）
+  const fill = new THREE.HemisphereLight(0xaac2d8, 0x5c636b, 0.88);
   fill.name = 'interior-fill';
   root.add(fill);
-  const sunset = new THREE.PointLight(0xffb477, 0, 16, 2);
+  const sunKey = new THREE.DirectionalLight(0xffd9a4, 1.02);
+  sunKey.name = 'interior-sun-key';
+  sunKey.position.set(14, 11, 4);
+  sunKey.castShadow = false;
+  root.add(sunKey);
+  const sunset = new THREE.PointLight(0xffa65c, 0, 15, 2.0);
   sunset.name = 'interior-sunset';
-  sunset.position.set(9.2, 2.7, 5);
+  sunset.position.set(8.8, FLOOR2_Y + 2.5, 5.2);
   root.add(sunset);
-  return { fill, sunset, garden, beams };
+
+  return { fill, sunKey, sunset, garden, beams };
 }
-function furniture(root: THREE.Group, d: Details, occluders: THREE.Object3D[]) {
+
+/** 2F 高一(3)班教室精装（审查第 3 节：暖木与灰蓝喷涂钢管课桌椅、黑板粉笔槽与挂钟、不透明褶皱窗帘、林夏速写本）。 */
+function buildClassroom2F(root: THREE.Group, d: Details, occluders: THREE.Object3D[], windTime: { value: number }) {
+  const fy = FLOOR2_Y;
   const furniture = group(root, 'classroom-furniture');
-  const legs: Array<{ p: V3; s: V3 }> = [];
-  DESKS.forEach(({ x, z }, i) => {
-    d.box(furniture, `desk-${i}`, [x, 0.76, z], [1.4, 0.07, 0.7], 0xc4ae87);
-    d.box(furniture, 'desk-drawer', [x, 0.64, z], [1.18, 0.15, 0.48], 0xa29d8b);
-    d.box(furniture, 'chair-seat', [x, 0.46, z + 0.75], [0.48, 0.05, 0.45], 0x91a297);
-    d.box(furniture, 'chair-back', [x, 0.77, z + 0.97], [0.48, 0.55, 0.045], 0x91a297);
-    for (const dx of [-0.57, 0.57]) for (const dz of [-0.25, 0.25]) legs.push({ p: [x + dx, 0.36, z + dz], s: [0.045, 0.72, 0.045] });
-    for (const dx of [-0.18, 0.18]) for (const dz of [-0.17, 0.17]) legs.push({ p: [x + dx, 0.22, z + 0.75 + dz], s: [0.035, 0.44, 0.035] });
+  const steelFrames: BoxPart[] = [];
+  const woodTops: BoxPart[] = [];
+  const woodChairs: BoxPart[] = [];
+  const metalBins: BoxPart[] = [];
+
+  DESKS_2F.forEach(({ x, z }) => {
+    // 桌面顶高严格对齐 0.750m（与 prop_school_desk_unit 高度一致，确保速写本与课本无缝贴桌）
+    woodTops.push({ p: [x, fy + 0.736, z], s: [1.36, 0.028, 0.62] });
+    metalBins.push({ p: [x, fy + 0.65, z + 0.02], s: [1.14, 0.11, 0.44] });
+    woodChairs.push(
+      { p: [x, fy + 0.445, z + 0.74], s: [0.43, 0.022, 0.4] },
+      { p: [x, fy + 0.745, z + 0.93], s: [0.43, 0.19, 0.02] },
+    );
+    for (const dx of [-0.58, 0.58]) {
+      for (const dz of [-0.23, 0.23]) {
+        steelFrames.push({ p: [x + dx, fy + 0.365, z + dz], s: [0.03, 0.73, 0.03] });
+      }
+      steelFrames.push({ p: [x + dx, fy + 0.17, z], s: [0.024, 0.024, 0.46] });
+    }
+    for (const dx of [-0.175, 0.175]) {
+      for (const dz of [-0.16, 0.16]) {
+        steelFrames.push({ p: [x + dx, fy + 0.22, z + 0.74 + dz], s: [0.024, 0.44, 0.024] });
+      }
+      steelFrames.push({ p: [x + dx, fy + 0.62, z + 0.93], s: [0.022, 0.34, 0.022] });
+    }
   });
-  d.batch(furniture, 'desk-chair-legs', legs, 0x677972);
-  d.box(furniture, 'podium', [-4.5, 0.51, -7.7], [3, 1.02, 1], 0xa3987c);
-  // 讲台小物件：黄色大三角尺 + 粉笔盒 + 黑板擦 + 教案本
-  d.box(furniture, 'podium-triangle-ruler', [-4.1, 1.03, -7.6], [0.46, 0.025, 0.28], 0xf2c94c);
-  d.box(furniture, 'podium-chalk-box', [-4.95, 1.05, -7.65], [0.22, 0.07, 0.15], 0xe8dec5);
-  d.box(furniture, 'podium-book', [-5.3, 1.04, -7.55], [0.32, 0.035, 0.24], 0x4f756b);
-  d.box(root, 'blackboard-frame', [-4.5, 2.1, -8.85], [5.8, 1.48, 0.1], 0xb6ac93);
-  d.box(root, 'blackboard', [-4.5, 2.1, -8.78], [5.6, 1.3, 0.045], 0x395b52);
-  // 教室墙角高立柜 + 黑板旁蓝底公告栏 + 后墙 24 格书包柜与垃圾桶扫把
-  d.box(root, 'class-front-cabinet', [-8.4, 1.0, -8.4], [0.85, 2.0, 0.55], 0x9b7958);
-  d.box(root, 'class-side-blue-board', [-0.6, 2.0, -8.84], [1.4, 0.96, 0.05], 0x3b6796);
-  d.box(root, 'class-back-cubby', [-4.6, 0.52, 8.65], [5.0, 1.04, 0.42], 0xb88f64);
-  d.box(root, 'class-back-cubby-bag', [-5.6, 1.18, 8.65], [0.36, 0.26, 0.28], 0x2e5b99);
-  d.box(root, 'class-back-metal-locker', [0.55, 1.0, 8.6], [0.48, 2.0, 0.5], 0x3b6796);
-  d.box(root, 'class-back-trashbin', [-0.25, 0.32, 8.65], [0.34, 0.64, 0.34], 0x325e9e);
-  d.box(root, 'class-back-broom-stick', [0.12, 0.72, 8.75], [0.035, 1.4, 0.035], 0x9c7b56);
-  d.box(root, 'class-back-broom-head', [0.12, 0.08, 8.75], [0.22, 0.14, 0.08], 0xd8c394);
-  // 教室吊装青蓝荧光灯
+  d.batch(furniture, 'desk-wood-tops', woodTops, d.material(COL_DESK_WOOD, 0.54, 0.02));
+  d.batch(furniture, 'desk-book-boxes', metalBins, d.material(COL_DESK_STEEL, 0.52, 0.2));
+  d.batch(furniture, 'chair-wood-parts', woodChairs, d.material(COL_DESK_WOOD, 0.52, 0.02));
+  d.batch(furniture, 'desk-chair-legs', steelFrames, d.material(COL_DESK_STEEL, 0.5, 0.22));
+
+  // 抬高 16cm 木质讲台地台 + 立式讲桌兜底（保留 'podium' 契约节点名）
+  d.box(furniture, 'podium-stage', [-4.5, fy + 0.08, -7.85], [6.4, 0.16, 1.9], d.material(0x705d49, 0.6, 0.02));
+  d.box(furniture, 'podium-stage-edge', [-4.5, fy + 0.155, -6.91], [6.42, 0.02, 0.04], d.material(COL_WOOD_FRAME, 0.52));
+  d.box(furniture, 'podium', [-4.5, fy + 0.68, -7.65], [1.1, 1.04, 0.62], d.material(0xd2cec4, 0.56, 0.04));
+  d.box(furniture, 'podium-top-slope', [-4.5, fy + 1.21, -7.65], [1.14, 0.04, 0.64], d.material(COL_WOOD_FRAME, 0.52), [0.08, 0, 0]);
+
+  // 前墙中心：木框墨绿黑板（#314943，roughness 0.82）+ 粉笔槽与粉灰擦痕 + 班级训言 + 圆形挂钟 + 广播音箱兜底
+  const woodTrim = d.material(COL_WOOD_FRAME, 0.6, 0.03);
+  const boardGreen = d.material(COL_CHALKBOARD, 0.82, 0.01);
+  d.box(root, 'blackboard-frame', [-4.5, fy + 2.1, -8.85], [5.8, 1.5, 0.09], woodTrim);
+  d.box(root, 'blackboard', [-4.5, fy + 2.1, -8.79], [5.58, 1.3, 0.04], boardGreen);
+  d.box(root, 'chalk-tray', [-4.5, fy + 1.36, -8.69], [5.8, 0.038, 0.16], d.material(0x55605d, 0.62, 0.15));
+  d.box(root, 'blackboard-eraser', [-3.4, fy + 1.4, -8.64], [0.18, 0.045, 0.075], 0xc9c1ae);
+  d.box(root, 'chalk-sticks', [-4.15, fy + 1.39, -8.65], [0.12, 0.014, 0.04], 0xefece2);
+  sign(root, '新生活 · 新开始', [-4.5, fy + 3.22, -8.76], 0, 3.2, 0.34, { background: '#edeae0', foreground: '#2e3d42' });
+
+  // 前墙圆形校园挂钟
+  const clockGroup = group(root, 'classroom-wall-clock');
+  clockGroup.position.set(-1.1, fy + 3.02, -8.84);
+  const clockRim = new THREE.Mesh(d.cyl, d.material(COL_HARDWARE, 0.46, 0.3));
+  clockRim.rotation.x = Math.PI / 2;
+  clockRim.scale.set(0.38, 0.05, 0.38);
+  clockRim.castShadow = false;
+  clockGroup.add(clockRim);
+  const clockFace = new THREE.Mesh(d.cyl, d.material(0xf2eee4, 0.78));
+  clockFace.rotation.x = Math.PI / 2;
+  clockFace.position.z = 0.012;
+  clockFace.scale.set(0.33, 0.035, 0.33);
+  clockFace.castShadow = false;
+  clockGroup.add(clockFace);
+  d.box(clockGroup, 'clock-hand-h', [0.035, 0.03, 0.034], [0.095, 0.014, 0.006], COL_HARDWARE, [0, 0, 0.62]);
+  d.box(clockGroup, 'clock-hand-m', [-0.01, 0.055, 0.036], [0.012, 0.13, 0.006], COL_HARDWARE, [0, 0, 0.12]);
+
+  d.box(root, 'class-front-speaker-fallback', [-8.25, fy + 3.08, -8.76], [0.23, 0.31, 0.15], COL_HARDWARE);
+
+  // 后墙：板报黑板 + 分件清晰的双层开放式书包柜（内凹暗背板 + 层板 + 立隔板 + 踢脚，消除图 2 棕色大块感！）
+  d.box(root, 'back-blackboard-frame', [-4.6, fy + 2.16, 8.84], [5.4, 1.4, 0.08], woodTrim);
+  d.box(root, 'back-blackboard', [-4.6, fy + 2.16, 8.79], [5.18, 1.22, 0.04], boardGreen);
+  const rearCubby = group(root, 'class-back-cubby');
+  d.box(rearCubby, 'cubby-plinth', [-4.6, fy + 0.04, 8.64], [5.36, 0.08, 0.38], woodTrim);
+  d.box(rearCubby, 'cubby-back', [-4.6, fy + 0.52, 8.82], [5.36, 0.96, 0.03], d.material(0x63503e, 0.78));
+  const cubbyBoards: BoxPart[] = [
+    { p: [-4.6, fy + 0.09, 8.63], s: [5.4, 0.028, 0.42] },
+    { p: [-4.6, fy + 0.53, 8.63], s: [5.36, 0.026, 0.4] },
+    { p: [-4.6, fy + 0.99, 8.62], s: [5.44, 0.032, 0.44] },
+  ];
+  for (let i = 0; i <= 8; i += 1) {
+    cubbyBoards.push({ p: [-7.26 + i * 0.665, fy + 0.54, 8.63], s: [0.028, 0.88, 0.4] });
+  }
+  d.batch(rearCubby, 'class-back-cubby-grid', cubbyBoards, d.material(COL_DESK_WOOD, 0.6));
+  d.box(root, 'class-back-locker-fallback', [-8.35, fy + 0.96, 8.52], [0.9, 1.92, 0.43], d.material(0x5c7585, 0.52, 0.22));
+  d.box(root, 'class-front-trashbin', [0.48, fy + 0.28, -8.45], [0.34, 0.56, 0.34], d.material(0x959ea3, 0.66));
+
+  // 教室吊杆式双管日光灯
+  const lampParts: BoxPart[] = [];
   for (const lx of [-6.0, -2.5]) {
     for (const lz of [-4.0, 2.0]) {
-      d.box(root, 'class-lamp-hood', [lx, 3.68, lz], [0.32, 0.07, 1.35], 0x1f6e8c);
-      d.box(root, 'class-lamp-bulb', [lx, 3.64, lz], [0.2, 0.03, 1.25], 0xfff3d8);
+      lampParts.push(
+        { p: [lx, fy + 3.45, lz - 0.5], s: [0.022, 0.44, 0.022] },
+        { p: [lx, fy + 3.45, lz + 0.5], s: [0.022, 0.44, 0.022] },
+        { p: [lx, fy + 3.22, lz], s: [0.3, 0.06, 1.38] },
+      );
+      d.box(root, 'class-lamp-tube', [lx, fy + 3.18, lz], [0.2, 0.025, 1.3], d.material(0xf3f0e6, 0.4));
     }
   }
-  sign(root, '新生活 · 新开始', [-4.5, 3.23, -8.75], 0, 3.5);
-  d.box(root, 'chalk-tray', [-4.5, 1.38, -8.68], [5.8, 0.035, 0.2], 0x677972);
-  // 黑板擦、克制板书痕迹、石英挂钟与国旗。
-  d.box(root, 'blackboard-eraser', [-3.4, 1.42, -8.6], [0.3, 0.05, 0.1], 0xc8bfa8);
-  const chalkMarks: Array<{ p: V3; s: V3 }> = [];
-  for (let i = 0; i < 6; i += 1) chalkMarks.push({ p: [-5.8 + i * 0.55, 2.16 + (i % 3) * 0.06, -8.74], s: [0.4, 0.012, 0.006] });
-  d.batch(root, 'blackboard-chalk-marks', chalkMarks, 0xf2efe4);
-  const clock = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.05, 20), d.material(0xeee9dc));
-  clock.name = 'classroom-clock'; clock.position.set(-1.9, 3.12, -8.75); clock.rotation.x = Math.PI / 2;
-  clock.castShadow = false; root.add(clock);
-  d.box(root, 'classroom-clock-face', [-1.9, 3.12, -8.72], [0.26, 0.26, 0.01], 0xfbf7ec);
-  d.box(root, 'classroom-flag-pole', [-6.5, 2.9, -8.8], [0.03, 0.6, 0.03], 0x8a7a5c);
-  d.box(root, 'classroom-flag', [-6.35, 3.12, -8.8], [0.28, 0.16, 0.01], 0xb03a2e);
-  const sketch = group(root, 'linxia-sketchbook');
-  d.box(sketch, 'sketchbook-cover', [-7, 0.807, 4], [0.57, 0.018, 0.4], 0x8b947e);
-  for (const dx of [-0.14, 0.14]) d.box(sketch, 'sketchbook-page', [-7 + dx, 0.82, 4], [0.27, 0.012, 0.38], 0xf0eadb);
-  const lines: Array<{ p: V3; s: V3 }> = [];
-  for (let i = 0; i < 5; i += 1) lines.push({ p: [-7.21 + i * 0.09, 0.828, 3.97], s: [0.002, 0.001, 0.21] });
-  for (const z of [3.88, 4.07]) lines.push({ p: [-7.03, 0.828, z], s: [0.38, 0.001, 0.002] });
-  d.batch(sketch, 'pencilled-window-study', lines, 0x777c72);
-  const pencil = d.box(sketch, 'pencil', [-6.84, 0.843, 4.18], [0.008, 0.008, 0.18], 0xb28c50);
-  pencil.rotation.y = -0.3;
-  d.box(sketch, 'pencil-tip', [-6.815, 0.841, 4.095], [0.005, 0.005, 0.015], 0x53544d);
-  d.box(sketch, 'pencil-case', [-7.48, 0.825, 4], [0.12, 0.055, 0.3], 0x8e9c96);
-  // 教室吊扇 + 窗侧微垂半透明窗帘 + 桌面散落课本/文具盒（稀疏点缀，不遮选座光点）。
-  const fan = group(root, 'classroom-ceiling-fan');
-  fan.position.set(-2, 3.55, 1);
-  d.box(fan, 'fan-rod', [0, -0.15, 0], [0.04, 0.3, 0.04], 0x6b7370);
-  d.box(fan, 'fan-hub', [0, -0.32, 0], [0.18, 0.06, 0.18], 0x6b7370);
-  for (let b = 0; b < 3; b += 1) {
-    const angle = (b / 3) * Math.PI * 2;
-    const blade = d.box(fan, 'fan-blade', [Math.cos(angle) * 0.45, -0.34, Math.sin(angle) * 0.45], [0.85, 0.02, 0.16], 0x9aa69c);
-    blade.rotation.y = -angle;
+  d.batch(root, 'class-lamp-rigs', lampParts, d.material(COL_HARDWARE, 0.46, 0.28));
+
+  // 西窗不透明规则褶皱棉麻窗帘（审查第 2/3 节：密实帘布走不透明通道防半透明排序闪烁，带轻微风动）
+  const curtainGeo = new THREE.PlaneGeometry(0.92, 2.14, 12, 6);
+  const posAttr = curtainGeo.getAttribute('position');
+  for (let i = 0; i < posAttr.count; i += 1) {
+    const ux = posAttr.getX(i);
+    const uy = posAttr.getY(i);
+    const pleat = Math.sin(ux * 22.0) * 0.032 * (0.65 + (1.07 - uy) * 0.22);
+    posAttr.setZ(i, pleat);
   }
-  const curtainMat = new THREE.MeshStandardMaterial({ color: 0x4e7aa8, roughness: 0.9,
-    transparent: true, opacity: 0.72, depthWrite: false, side: THREE.DoubleSide });
-  for (const z of [-4, 2]) {
-    const curtain = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.1, 8, 10), curtainMat);
+  curtainGeo.computeVertexNormals();
+  const curtainMat = new THREE.MeshStandardMaterial({
+    color: 0xc8c3b6, roughness: 0.9, metalness: 0, side: THREE.DoubleSide,
+  });
+  curtainMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = windTime;
+    shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      float curtainWeight = clamp((1.07 - position.y) / 2.14, 0.0, 1.0);
+      transformed.z += sin(uTime * 1.15 + position.x * 3.0) * 0.018 * curtainWeight * curtainWeight;`,
+    );
+  };
+  curtainMat.customProgramCacheKey = () => 'school-curtain-breeze-v1';
+  for (const [idx, z] of [-6.05, -0.05, 5.95].entries()) {
+    const geo = idx === 0 ? curtainGeo : curtainGeo.clone();
+    const curtain = new THREE.Mesh(geo, curtainMat);
     curtain.name = 'classroom-curtain';
-    curtain.position.set(-8.86, 2.02, z);
+    curtain.position.set(-8.8, fy + 2.04, z);
+    curtain.rotation.y = Math.PI / 2;
     curtain.castShadow = false;
     curtain.receiveShadow = true;
     root.add(curtain);
   }
-  const booksA: Array<{ p: V3; s: V3 }> = [];
-  const booksB: Array<{ p: V3; s: V3 }> = [];
-  const pencilCases: Array<{ p: V3; s: V3 }> = [];
-  DESKS.forEach(({ x, z }, i) => {
+
+  // 林夏窗边课桌上的速写本、铅笔与透明感笔袋（贴合 0.750m 桌面，绝不悬空！）
+  const sketch = group(root, 'linxia-sketchbook');
+  d.box(sketch, 'sketchbook-cover', [-7, fy + 0.759, 4], [0.55, 0.018, 0.38], 0x838d78);
+  for (const dx of [-0.135, 0.135]) {
+    d.box(sketch, 'sketchbook-page', [-7 + dx, fy + 0.772, 4], [0.26, 0.012, 0.36], 0xf2ecdc);
+  }
+  const lines: BoxPart[] = [];
+  for (let i = 0; i < 5; i += 1) lines.push({ p: [-7.2 + i * 0.088, fy + 0.78, 3.97], s: [0.002, 0.001, 0.2] });
+  for (const z of [3.88, 4.07]) lines.push({ p: [-7.03, fy + 0.78, z], s: [0.36, 0.001, 0.002] });
+  d.batch(sketch, 'pencilled-window-study', lines, 0x6f756b);
+  const pencil = d.box(sketch, 'pencil', [-6.84, fy + 0.784, 4.17], [0.008, 0.008, 0.18], 0xb28c50);
+  pencil.rotation.y = -0.3;
+  d.box(sketch, 'pencil-tip', [-6.815, fy + 0.783, 4.085], [0.005, 0.005, 0.015], 0x4c4d47);
+  d.box(sketch, 'pencil-case', [-7.46, fy + 0.776, 4], [0.11, 0.05, 0.28], 0x9aa8a4);
+
+  // 少数桌面点缀课本与卷角练习册（贴合 0.750m 桌面）
+  const booksA: BoxPart[] = [];
+  const booksB: BoxPart[] = [];
+  DESKS_2F.forEach(({ x, z }, i) => {
     if (i % 3 !== 0) return;
-    booksA.push({ p: [x + 0.35, 0.81, z - 0.1], s: [0.3, 0.035, 0.22] });
-    booksB.push({ p: [x + 0.42, 0.845, z - 0.06], s: [0.22, 0.03, 0.18] });
-    pencilCases.push({ p: [x - 0.4, 0.815, z + 0.1], s: [0.16, 0.05, 0.26] });
+    booksA.push({ p: [x + 0.35, fy + 0.766, z - 0.1], s: [0.27, 0.03, 0.19] });
+    booksB.push({ p: [x + 0.39, fy + 0.793, z - 0.07], s: [0.22, 0.024, 0.15], r: [0, 0.08, 0] });
   });
-  d.batch(furniture, 'desk-books-a', booksA, 0x8d5f4b);
-  d.batch(furniture, 'desk-books-b', booksB, 0x4f6f7a);
-  d.batch(furniture, 'desk-pencil-cases', pencilCases, 0x8e9c96);
+  d.batch(furniture, 'desk-books-a', booksA, 0x8b624f);
+  d.batch(furniture, 'desk-books-b', booksB, 0x4b6a7c);
+
   occluders.push(furniture);
-  const shade = new THREE.MeshBasicMaterial({ color: 0x394238, transparent: true, opacity: 0.065, depthWrite: false });
-  for (const { x, z } of DESKS) d.box(root, 'desk-contact-shade', [x, 0.004, z + 0.3], [1.44, 0.002, 1.48], shade);
   return sketch;
+}
+
+/** 1F 辅导员办公室（突出周老师交流工位、台灯与分节档案柜）+ 1F 阅览室（多层书架与高矮书脊 + 阅读工作灯）。 */
+function buildFloor1Rooms(root: THREE.Group, d: Details, occluders: THREE.Object3D[]) {
+  const office = group(root, 'teacher-office-furniture');
+  const walnut = d.material(0x6b4e37, 0.5, 0.03);
+  const metalGray = d.material(0x7a868e, 0.52, 0.22);
+  const monitorDark = d.material(COL_HARDWARE, 0.42, 0.2);
+  const chairMat = d.material(0x3a434a, 0.68, 0.08);
+
+  // 1F 辅导员办公桌程序化兜底（Blender 胡桃木办公桌到位后隐藏）
+  const officeDeskFallback = group(office, 'office-desks-fallback');
+  const deskTops: BoxPart[] = [];
+  const drawers: BoxPart[] = [];
+  const monitors: BoxPart[] = [];
+  OFFICE_DESKS_1F.forEach(({ x, z, yaw }) => {
+    const sx = yaw === 0 ? 1.6 : 0.78;
+    const sz = yaw === 0 ? 0.78 : 1.6;
+    deskTops.push({ p: [x, 0.732, z], s: [sx, 0.036, sz] });
+    drawers.push({ p: [x - (yaw === 0 ? 0.52 : 0), 0.365, z - (yaw === 0 ? 0 : 0.52)], s: [0.44, 0.7, 0.68] });
+    monitors.push({ p: [x + 0.22, 0.96, z - 0.08], s: [0.5, 0.3, 0.03] });
+  });
+  d.batch(officeDeskFallback, 'office-desk-tops', deskTops, walnut);
+  d.batch(officeDeskFallback, 'office-desk-drawers', drawers, metalGray);
+  d.batch(officeDeskFallback, 'office-monitors', monitors, monitorDark);
+
+  // 教师办公椅与周老师桌前访谈学生圆凳（从走廊门口一眼认出交流站位）
+  OFFICE_DESKS_1F.forEach(({ x, z, yaw }, idx) => {
+    const ox = yaw === 0 ? x : x - 0.68;
+    const oz = yaw === 0 ? z - 0.68 : z;
+    d.box(office, `office-chair-seat-${idx}`, [ox, 0.45, oz], [0.48, 0.055, 0.46], chairMat);
+    d.box(office, `office-chair-back-${idx}`, [ox - (yaw === 0 ? 0 : 0.2), 0.78, oz - (yaw === 0 ? 0.2 : 0)],
+      [yaw === 0 ? 0.46 : 0.05, 0.58, yaw === 0 ? 0.05 : 0.46], chairMat);
+    d.box(office, `office-chair-stem-${idx}`, [ox, 0.22, oz], [0.055, 0.44, 0.055], monitorDark);
+  });
+  // 周老师办公桌前四脚木圆凳（不挡导航，真实接地结构点明交流位）
+  const stoolWood = d.material(COL_DESK_WOOD, 0.54);
+  const guestStool = new THREE.Mesh(d.cyl, stoolWood);
+  guestStool.name = 'office-visitor-stool';
+  guestStool.position.set(-2.45, 0.44, -4.65);
+  guestStool.scale.set(0.35, 0.032, 0.35);
+  guestStool.castShadow = false;
+  office.add(guestStool);
+  for (const [lx, lz] of [[-0.1, -0.1], [0.1, -0.1], [-0.1, 0.1], [0.1, 0.1]] as const) {
+    d.box(office, 'office-visitor-stool-leg', [-2.45 + lx, 0.215, -4.65 + lz], [0.032, 0.43, 0.032], stoolWood);
+  }
+
+  // 周老师桌面台灯微暖光晕（柔和不刺眼）
+  const lampGlow = new THREE.PointLight(0xffd296, 0.65, 3.6, 2.0);
+  lampGlow.name = 'teacher-desk-lamp-light';
+  lampGlow.position.set(-3.95, 1.06, -5.2);
+  office.add(lampGlow);
+
+  // 北墙一排五组上玻下铁档案柜程序化兜底（Blender 档案柜到位后隐藏，零透明闪烁）
+  const cabFallback = group(office, 'office-cabinets-fallback');
+  const cabBodies: BoxPart[] = [];
+  for (const cx of [-6.4, -5.45, -4.5, -3.55, -2.6]) {
+    cabBodies.push({ p: [cx, 0.97, -8.55], s: [0.9, 1.94, 0.42] });
+  }
+  d.batch(cabFallback, 'office-file-cabinets', cabBodies, metalGray);
+
+  // 办公室墙面值班行事白板、饮水机与绿植
+  d.box(office, 'office-whiteboard-frame', [0.85, 1.82, -6.1], [0.04, 1.18, 2.05], woodFrameMaterial(d));
+  d.box(office, 'office-whiteboard', [0.825, 1.82, -6.1], [0.02, 1.08, 1.94], d.material(0xefeee8, 0.52));
+  d.box(office, 'office-dispenser-body', [0.46, 0.52, -0.35], [0.38, 1.04, 0.38], d.material(0xe2dfd6, 0.62));
+  d.box(office, 'office-dispenser-jug', [0.46, 1.22, -0.35], [0.26, 0.34, 0.26], d.material(0x7ba4b8, 0.32));
+  d.box(office, 'office-plant-pot', [-8.3, 0.24, -0.55], [0.36, 0.48, 0.36], d.material(COL_LOCKER_TERRA, 0.76));
+  d.box(office, 'office-plant-leaf', [-8.3, 0.76, -0.55], [0.58, 0.66, 0.58], d.material(0x4c6848, 0.86));
+
+  for (const lz of [-6.0, -2.2]) {
+    d.box(office, 'office-lamp-hood', [-4.2, 3.62, lz], [0.3, 0.06, 1.36], monitorDark);
+    d.box(office, 'office-lamp-bulb', [-4.2, 3.58, lz], [0.2, 0.025, 1.26], d.material(0xf5efe0, 0.4));
+  }
+
+  // ==================== 1F 阅览室（多层开放式书架 + 错落高矮书脊 + 阅览工作灯，明显区别于教室！） ====================
+  STUDY_TABLES_1F.forEach(({ x, z }, i) => {
+    d.box(office, `study-table-top-${i}`, [x, 0.74, z], [2.72, 0.045, 1.1], d.material(COL_DESK_WOOD, 0.52));
+    d.box(office, `study-table-apron-${i}`, [x, 0.69, z], [2.56, 0.055, 0.94], woodFrameMaterial(d));
+    for (const dx of [-1.18, 1.18]) for (const dz of [-0.44, 0.44]) {
+      d.box(office, 'study-table-leg', [x + dx, 0.36, z + dz], [0.055, 0.72, 0.055], monitorDark);
+    }
+    // 阅览桌中央绿色罩银行式工作阅读灯
+    d.box(office, `study-lamp-stand-${i}`, [x, 0.92, z], [0.04, 0.32, 0.04], d.material(0x9b7e46, 0.4, 0.5));
+    d.box(office, `study-lamp-shade-${i}`, [x, 1.08, z], [0.46, 0.07, 0.2],
+      new THREE.MeshStandardMaterial({ color: 0x35634d, emissive: 0x2c5942, emissiveIntensity: 0.25, roughness: 0.42 }));
+  });
+
+  // 阅览室南墙五层分格实木书架 + 多组高矮错落书脊（彻底消除原先单块棕色大盒！）
+  const shelfGroup = group(office, 'study-bookshelf');
+  const shelfWood = woodFrameMaterial(d);
+  d.box(shelfGroup, 'bookshelf-back', [-4.6, 1.05, 8.79], [5.16, 2.06, 0.03], d.material(0x4f3e30, 0.82));
+  d.box(shelfGroup, 'bookshelf-plinth', [-4.6, 0.05, 8.6], [5.2, 0.1, 0.4], shelfWood);
+  const shelfBoards: BoxPart[] = [];
+  for (const sy of [0.11, 0.56, 1.01, 1.46, 1.91, 2.08]) {
+    shelfBoards.push({ p: [-4.6, sy, 8.6], s: [5.2, 0.032, 0.42] });
+  }
+  for (let c = 0; c <= 5; c += 1) {
+    shelfBoards.push({ p: [-7.16 + c * 1.024, 1.09, 8.6], s: [0.034, 1.96, 0.4] });
+  }
+  d.batch(shelfGroup, 'bookshelf-frame-batch', shelfBoards, d.material(0x7c6045, 0.64));
+
+  const bookSpines: BoxPart[] = [];
+  const spinePalette = [0x466375, 0x8c5e4b, 0x5c7358, 0xc7bea8, 0x735b69, 0x9e8458];
+  for (let row = 0; row < 4; row += 1) {
+    const baseY = 0.13 + row * 0.45;
+    for (let bay = 0; bay < 5; bay += 1) {
+      const bayLeft = -7.08 + bay * 1.024;
+      for (let b = 0; b < 9; b += 1) {
+        if ((row + bay + b) % 7 === 0) continue; // 留出自然抽空缺口
+        const bh = 0.24 + ((row * 5 + bay * 3 + b * 7) % 4) * 0.035;
+        bookSpines.push({
+          p: [bayLeft + 0.06 + b * 0.088, baseY + bh / 2, 8.58],
+          s: [0.068, bh, 0.24],
+          color: spinePalette[(row * 3 + bay * 2 + b) % spinePalette.length],
+        });
+      }
+    }
+  }
+  d.batch(shelfGroup, 'bookshelf-spines-batch', bookSpines, d.material(0xffffff, 0.76));
+
+  for (const lz of [2.6, 6.2]) {
+    d.box(office, 'study-lamp-hood', [-4.5, 3.62, lz], [0.3, 0.06, 1.35], monitorDark);
+    d.box(office, 'study-lamp-bulb', [-4.5, 3.58, lz], [0.2, 0.025, 1.25], d.material(0xf2efe4, 0.4));
+  }
+
+  occluders.push(office);
+}
+
+function woodFrameMaterial(d: Details): THREE.MeshStandardMaterial {
+  return d.material(COL_WOOD_FRAME, 0.6, 0.03);
+}
+
+// ==================== Blender 13 件低模套件异步热替换（与 canteen.ts 生命周期同构） ====================
+let interiorGeneration = 0;
+const interiorPropMeshes: THREE.InstancedMesh[] = [];
+const interiorOwnedMaterials: THREE.Material[] = [];
+
+interface KitPlacement {
+  x: number;
+  y?: number;
+  z: number;
+  yaw?: number;
+  scale?: number;
+  tintScalar?: number;
+}
+
+function createTreeWindMaterial(baseMaterial: THREE.Material, windTime: { value: number }, keySuffix: string): THREE.Material {
+  const cloned = baseMaterial.clone();
+  cloned.userData = { ...baseMaterial.userData, sharedResource: false };
+  if (cloned instanceof THREE.MeshStandardMaterial) {
+    cloned.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = windTime;
+      shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          float treePhase = instanceMatrix[3][0] * 0.47 + instanceMatrix[3][2] * 0.61;
+        #else
+          float treePhase = 0.0;
+        #endif
+        float crownWeight = clamp((position.y - 1.35) / 3.2, 0.0, 1.0);
+        crownWeight = crownWeight * crownWeight;
+        transformed.x += sin(uTime * 1.18 + treePhase + position.z * 0.5) * 0.075 * crownWeight;
+        transformed.z += cos(uTime * 0.94 + treePhase * 1.3 + position.x * 0.5) * 0.055 * crownWeight;`,
+      );
+    };
+    cloned.customProgramCacheKey = () => `school-camphor-wind-${keySuffix}`;
+  }
+  interiorOwnedMaterials.push(cloned);
+  return cloned;
+}
+
+function mountSchoolKitProps(root: THREE.Group, garden: THREE.Group, windTime: { value: number }): void {
+  if (!isBrowserRuntime()) return;
+  const generation = interiorGeneration;
+
+  const place = (
+    parent: THREE.Object3D,
+    id: PropModelId,
+    name: string,
+    specs: readonly KitPlacement[],
+    hideNames: readonly string[] = [],
+    customMat?: (asset: PropModelAsset) => THREE.Material,
+  ): void => {
+    void loadPropModel(id).then((asset) => {
+      if (!asset || generation !== interiorGeneration || specs.length === 0) return;
+      const mat = customMat ? customMat(asset) : asset.material;
+      const mesh = new THREE.InstancedMesh(asset.geometry, mat, specs.length);
+      const transform = new THREE.Object3D();
+      const color = new THREE.Color();
+      specs.forEach((spec, index) => {
+        const s = spec.scale ?? 1;
+        transform.position.set(spec.x, spec.y ?? 0, spec.z);
+        transform.rotation.set(0, spec.yaw ?? 0, 0);
+        transform.scale.set(s, s, s);
+        transform.updateMatrix();
+        mesh.setMatrixAt(index, transform.matrix);
+        const jitter = spec.tintScalar ?? (1 + (((index * 5) % 5) - 2) * 0.018);
+        mesh.setColorAt(index, color.setScalar(jitter));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.name = name;
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      mesh.computeBoundingBox();
+      mesh.computeBoundingSphere();
+      parent.add(mesh);
+      interiorPropMeshes.push(mesh);
+      for (const target of hideNames) {
+        const node = root.getObjectByName(target);
+        if (node) node.visible = false;
+      }
+    });
+  };
+
+  // 1. 2F 教室双人倒角暖木课桌 + 微弧胶合板弯管课椅（非交互椅带极微自然错位）
+  const seatInteractiveCoords = new Set(INTERIOR_LOCATIONS.seats.map((s) => `${s.x}:${s.z}`));
+  place(
+    root,
+    'schoolDeskUnit',
+    'school-desk-unit-props',
+    DESKS_2F.map(({ x, z }) => ({ x, y: FLOOR2_Y, z, yaw: 0 })),
+    ['desk-wood-tops', 'desk-book-boxes', 'desk-chair-legs'],
+  );
+  place(
+    root,
+    'schoolChairUnit',
+    'school-chair-unit-props',
+    DESKS_2F.map(({ x, z }, i) => {
+      const isSpecial = (x === -7 && z === 4) || seatInteractiveCoords.has(`${x}:${z + 0.75}`);
+      const yawJitter = isSpecial ? 0 : ((i % 3) - 1) * 0.04;
+      return { x, y: FLOOR2_Y, z: z + 0.74, yaw: yawJitter };
+    }),
+    ['chair-wood-parts'],
+  );
+
+  // 2. 2F 教室斜顶围边讲桌（置于 0.16m 讲台地台上）
+  place(
+    root,
+    'schoolPodium',
+    'school-podium-props',
+    [{ x: -4.5, y: FLOOR2_Y + 0.16, z: -7.65, yaw: 0, tintScalar: 1 }],
+    ['podium', 'podium-top-slope'],
+  );
+
+  // 3. 1F/2F 走廊与玄关八门百叶矮柜
+  const lowLockerSpecs: KitPlacement[] = [
+    ...CORRIDOR_LAYOUT.f1LowLockersZ.map((z) => ({ x: 1.325, y: FLOOR1_Y, z, yaw: Math.PI / 2 })),
+    ...CORRIDOR_LAYOUT.f2LowLockersZ.map((z) => ({ x: 1.325, y: FLOOR2_Y, z, yaw: Math.PI / 2 })),
+    { x: 9.42, y: FLOOR1_Y, z: 6.55, yaw: -Math.PI / 2 },
+    { x: 9.42, y: FLOOR1_Y, z: 7.98, yaw: -Math.PI / 2 },
+  ];
+  place(
+    root,
+    'schoolLowLocker',
+    'school-low-locker-props',
+    lowLockerSpecs,
+    ['f1-corridor-locker-fallback', 'f2-corridor-locker-fallback', 'f1-shoe-locker-fallback'],
+  );
+
+  // 4. 走廊柜顶、教室桌边挂钩与后排书包格内的通勤书包（高度严格低于 1.25m 走廊窗台）
+  const backpackSpecs: KitPlacement[] = [
+    { x: 1.33, y: FLOOR1_Y + 0.9, z: -8.05, yaw: 1.38 },
+    { x: 1.33, y: FLOOR1_Y + 0.9, z: 2.65, yaw: 1.76 },
+    { x: 1.33, y: FLOOR2_Y + 0.9, z: -2.84, yaw: 1.44 },
+    { x: 1.33, y: FLOOR2_Y + 0.9, z: 2.74, yaw: 1.72 },
+    // 教室后墙开放式书包柜内自然摆放
+    { x: -6.26, y: FLOOR2_Y + 0.105, z: 8.58, yaw: Math.PI - 0.16 },
+    { x: -3.6, y: FLOOR2_Y + 0.545, z: 8.58, yaw: Math.PI + 0.12 },
+    // 靠窗课桌侧钩挂包
+    { x: -7.68, y: FLOOR2_Y + 0.34, z: -2.02, yaw: -Math.PI / 2 },
+  ];
+  place(root, 'schoolBackpack', 'school-backpack-props', backpackSpecs);
+
+  // 5. 双门铁皮百叶储物高柜
+  place(
+    root,
+    'schoolTallLocker',
+    'school-tall-locker-props',
+    [
+      { x: 4.65, y: FLOOR1_Y, z: -7.25, yaw: -Math.PI / 2 },
+      { x: 4.65, y: FLOOR2_Y, z: -7.25, yaw: -Math.PI / 2 },
+      { x: -8.35, y: FLOOR2_Y, z: 8.52, yaw: Math.PI },
+    ],
+    ['f1-corridor-tall-locker-fallback', 'f2-corridor-tall-locker-fallback', 'class-back-locker-fallback'],
+  );
+
+  // 6. 45°斜拼木框墨绿绒布公告栏（带立体课程表、海报、折角通知与图钉）
+  place(
+    root,
+    'schoolBulletin',
+    'school-bulletin-props',
+    [
+      ...CORRIDOR_LAYOUT.f1BulletinsZ.map((z) => ({ x: 1.142, y: FLOOR1_Y + 1.32, z, yaw: Math.PI / 2 })),
+      ...CORRIDOR_LAYOUT.f2BulletinsZ.map((z) => ({ x: 1.142, y: FLOOR2_Y + 1.32, z, yaw: Math.PI / 2 })),
+    ],
+    ['f1-corridor-bulletin-fallback', 'f2-corridor-bulletin-fallback'],
+  );
+
+  // 7. 壁挂前倾圆形网罩校园广播音箱
+  place(
+    root,
+    'schoolSpeaker',
+    'school-speaker-props',
+    [
+      { x: 1.19, y: FLOOR1_Y + 2.82, z: -6.15, yaw: Math.PI / 2 },
+      { x: 1.19, y: FLOOR1_Y + 2.82, z: 3.35, yaw: Math.PI / 2 },
+      { x: 1.19, y: FLOOR2_Y + 2.82, z: -3.35, yaw: Math.PI / 2 },
+      { x: 1.19, y: FLOOR2_Y + 2.82, z: 3.35, yaw: Math.PI / 2 },
+      { x: -8.25, y: FLOOR2_Y + 2.94, z: -8.81, yaw: 0 },
+      { x: 9.81, y: LANDING_Y + 2.48, z: -8.25, yaw: -Math.PI / 2 },
+    ],
+    [
+      'f1-corridor-speaker-fallback',
+      'f2-corridor-speaker-fallback',
+      'class-front-speaker-fallback',
+      'landing-speaker-fallback',
+    ],
+  );
+
+  // 8. 1F 辅导员胡桃木办公桌组合（含黄铜台灯、窄边显示器与文件夹）+ 上玻下铁档案文件柜
+  place(
+    root,
+    'schoolOfficeDesk',
+    'school-office-desk-props',
+    OFFICE_DESKS_1F.map(({ x, z, yaw }) => ({ x, y: FLOOR1_Y, z, yaw })),
+    ['office-desks-fallback'],
+  );
+  place(
+    root,
+    'schoolFileCabinet',
+    'school-file-cabinet-props',
+    [-6.4, -5.45, -4.5, -3.55, -2.6].map((x) => ({ x, y: FLOOR1_Y, z: -8.55, yaw: 0 })),
+    ['office-cabinets-fallback'],
+  );
+
+  // 9. 窗外庭院 A/B/C 三型阔叶香樟树（穿冠枝杈 + 透天空洞 + 异相风摆，挂载于 window-greenery 随日夜显隐）
+  const treesA = COURTYARD_TREES.filter((t) => t.variant === 'A');
+  const treesB = COURTYARD_TREES.filter((t) => t.variant === 'B');
+  const treesC = COURTYARD_TREES.filter((t) => t.variant === 'C');
+  let loadedTreeVariants = 0;
+  const hideFallbackTreesWhenReady = (): void => {
+    loadedTreeVariants += 1;
+    if (loadedTreeVariants >= 3) {
+      for (const name of ['garden-tree-trunks-fallback', 'garden-tree-foliage-fallback']) {
+        const node = garden.getObjectByName(name);
+        if (node) node.visible = false;
+      }
+    }
+  };
+  const mountTreeVariant = (id: PropModelId, key: string, list: readonly CourtyardTreeSpec[]): void => {
+    void loadPropModel(id).then((asset) => {
+      if (!asset || generation !== interiorGeneration || list.length === 0) return;
+      const windMat = createTreeWindMaterial(asset.material, windTime, key);
+      const mesh = new THREE.InstancedMesh(asset.geometry, windMat, list.length);
+      const transform = new THREE.Object3D();
+      const color = new THREE.Color();
+      list.forEach((spec, idx) => {
+        transform.position.set(spec.x, 0.04, spec.z);
+        transform.rotation.set(0, spec.yaw, 0);
+        transform.scale.set(spec.scale, spec.scale, spec.scale);
+        transform.updateMatrix();
+        mesh.setMatrixAt(idx, transform.matrix);
+        mesh.setColorAt(idx, color.setScalar(0.97 + (idx % 3) * 0.03));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.name = `school-tree-${key}-props`;
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      mesh.computeBoundingBox();
+      mesh.computeBoundingSphere();
+      garden.add(mesh);
+      interiorPropMeshes.push(mesh);
+      hideFallbackTreesWhenReady();
+    });
+  };
+  mountTreeVariant('schoolTreeA', 'a', treesA);
+  mountTreeVariant('schoolTreeB', 'b', treesB);
+  mountTreeVariant('schoolTreeC', 'c', treesC);
 }
 
 interface PoseSnapshot { object: THREE.Object3D; position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3 }
@@ -567,17 +1934,28 @@ function resetPose(actor: THREE.Object3D): void {
   }
   poses.delete(actor);
 }
+
 /** 转动实例骨骼，不改共享网格或动画剪辑；适配真实模型的原生轴向。 */
 function poseActor(actor: THREE.Object3D, seated: boolean, phone: boolean): void {
   resetPose(actor);
+  // 必须先刷新外层 actor 的世界矩阵，防止刚设完 actor.rotation 后首条大腿读取到旧朝向矩阵导致双腿前后劈叉！
+  actor.updateWorldMatrix(true, true);
   const saved: PoseSnapshot[] = [];
   const remember = (object: THREE.Object3D): void => {
-    if (!saved.some((p) => p.object === object)) saved.push({ object, position: object.position.clone(), quaternion: object.quaternion.clone(), scale: object.scale.clone() });
+    if (!saved.some((p) => p.object === object)) {
+      saved.push({
+        object,
+        position: object.position.clone(),
+        quaternion: object.quaternion.clone(),
+        scale: object.scale.clone(),
+      });
+    }
   };
   poses.set(actor, saved);
   const model = findActorModelRoot(actor);
   const aim = (name: string, tipName: string, direction: THREE.Vector3): void => {
-    const bone = actor.getObjectByName(name); const tip = actor.getObjectByName(tipName);
+    const bone = actor.getObjectByName(name);
+    const tip = actor.getObjectByName(tipName);
     if (!bone || !tip || !bone.parent) return;
     remember(bone);
     actor.updateWorldMatrix(true, true);
@@ -587,9 +1965,13 @@ function poseActor(actor: THREE.Object3D, seated: boolean, phone: boolean): void
     bone.quaternion.copy(bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(rotation));
   };
   if (model && seated) {
+    const forwardDir = new THREE.Vector3(0, -0.08, 1).transformDirection(actor.matrixWorld);
+    const downDir = new THREE.Vector3(0, -1, 0.08).transformDirection(actor.matrixWorld);
+    const toeDir = new THREE.Vector3(0, -0.05, 1).transformDirection(actor.matrixWorld);
     for (const side of ['L', 'R']) {
-      aim(`${side}_Thigh`, `${side}_Calf`, new THREE.Vector3(0, -0.08, 1).transformDirection(actor.matrixWorld));
-      aim(`${side}_Calf`, `${side}_Foot`, new THREE.Vector3(0, -1, 0).transformDirection(actor.matrixWorld));
+      aim(`${side}_Thigh`, `${side}_Calf`, forwardDir);
+      aim(`${side}_Calf`, `${side}_Foot`, downDir);
+      aim(`${side}_Foot`, `${side}_ToeBase`, toeDir);
     }
     const hip = actor.getObjectByName('Hip');
     const pose = actor.getObjectByName('actor-pose');
@@ -601,8 +1983,8 @@ function poseActor(actor: THREE.Object3D, seated: boolean, phone: boolean): void
     }
   }
   if (model && (phone || seated)) {
-    // 两段手臂 IK：手机在胸前、绘画手落在桌沿，不用缩放整个人伪装坐姿。
-    for (const [side, sign] of [['L', -1], ['R', 1]] as const) {
+    // 角色面向本地 +Z 时，左手 L 在本地 +X、右手 R 在本地 -X（避免双手交叉拧麻花）
+    for (const [side, signVal] of [['L', 1], ['R', -1]] as const) {
       const upper = actor.getObjectByName(`${side}_Upperarm`);
       const lower = actor.getObjectByName(`${side}_Forearm`);
       const hand = actor.getObjectByName(`${side}_Hand`);
@@ -611,15 +1993,20 @@ function poseActor(actor: THREE.Object3D, seated: boolean, phone: boolean): void
       const shoulder = upper.getWorldPosition(new THREE.Vector3());
       const elbow = lower.getWorldPosition(new THREE.Vector3());
       const wrist = hand.getWorldPosition(new THREE.Vector3());
-      const lengthA = shoulder.distanceTo(elbow); const lengthB = elbow.distanceTo(wrist);
+      const lengthA = shoulder.distanceTo(elbow);
+      const lengthB = elbow.distanceTo(wrist);
       const prop = actor.getObjectByName('actor-props')?.children[0];
-      const target = seated ? actor.localToWorld(new THREE.Vector3(sign * 0.14, 0.84, 0.53))
-        : prop ? prop.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sign * 0.045, -0.035, 0).transformDirection(actor.matrixWorld).multiplyScalar(0.04))
-          : actor.localToWorld(new THREE.Vector3(sign * 0.06, 1.17, 0.24));
+      const target = seated
+        ? actor.localToWorld(new THREE.Vector3(signVal * 0.14, 0.8, 0.53))
+        : prop
+          ? prop.getWorldPosition(new THREE.Vector3()).add(
+            new THREE.Vector3(signVal * 0.045, -0.035, 0).transformDirection(actor.matrixWorld).multiplyScalar(0.04),
+          )
+          : actor.localToWorld(new THREE.Vector3(signVal * 0.06, 1.17, 0.24));
       const direction = target.clone().sub(shoulder).normalize();
       const distance = Math.max(0.001, Math.min(shoulder.distanceTo(target), lengthA + lengthB - 0.001));
       const along = (lengthA * lengthA - lengthB * lengthB + distance * distance) / (2 * distance);
-      const bend = new THREE.Vector3(sign, -0.6, 0).transformDirection(actor.matrixWorld);
+      const bend = new THREE.Vector3(signVal, -0.6, 0).transformDirection(actor.matrixWorld);
       bend.addScaledVector(direction, -bend.dot(direction)).normalize();
       const desiredElbow = shoulder.clone().addScaledVector(direction, along)
         .addScaledVector(bend, Math.sqrt(Math.max(0, lengthA * lengthA - along * along)));
@@ -632,7 +2019,8 @@ function poseActor(actor: THREE.Object3D, seated: boolean, phone: boolean): void
   }
   const fallback = actor.getObjectByName('actor-fallback');
   if (fallback && seated) {
-    const body = fallback.children[0]; const head = fallback.children[1];
+    const body = fallback.children[0];
+    const head = fallback.children[1];
     if (body && head) {
       remember(body); remember(head);
       body.scale.y = 0.43; body.position.y = 0.9; head.position.y = 1.3;
@@ -641,26 +2029,53 @@ function poseActor(actor: THREE.Object3D, seated: boolean, phone: boolean): void
   const legs = actor.getObjectByName('seated-fallback-legs');
   if (legs) legs.visible = seated && !model;
 }
+
+function releaseInteriorKitMeshes(): void {
+  for (const mesh of interiorPropMeshes) mesh.dispose();
+  interiorPropMeshes.length = 0;
+  for (const mat of interiorOwnedMaterials) mat.dispose();
+  interiorOwnedMaterials.length = 0;
+}
+
 function buildSchoolInterior(parent: THREE.Object3D) {
+  interiorGeneration += 1;
+  releaseInteriorKitMeshes();
   const root = group(parent, 'school-interior');
+  const windTime = { value: 0 };
+  root.userData.windTime = windTime;
   const d = details();
   const occluders: THREE.Object3D[] = [];
-  const { fill, sunset, garden, beams } = architecture(root, d, occluders);
-  const sketch = furniture(root, d, occluders);
-  const actors: Record<string, THREE.Object3D> = { 'interior-fill': fill, 'interior-sunset': sunset, 'window-greenery': garden, 'corridor-light-beams': beams, 'linxia-sketchbook': sketch };
+  const { fill, sunKey, sunset, garden, beams } = architecture(root, d, occluders, windTime);
+  const sketch = buildClassroom2F(root, d, occluders, windTime);
+  buildFloor1Rooms(root, d, occluders);
+  mountSchoolKitProps(root, garden, windTime);
+
+  const actors: Record<string, THREE.Object3D> = {
+    'interior-root': root,
+    'interior-fill': fill,
+    'interior-sun-key': sunKey,
+    'interior-sunset': sunset,
+    'window-greenery': garden,
+    'corridor-light-beams': beams,
+    'linxia-sketchbook': sketch,
+  };
+
   const create = (id: CharacterModelId, name: string, phoneColor?: number): THREE.Group => {
     const entry = getCharacterModel(id);
-    const actor = createCharacterActor(id, entry.heightM, id === 'linxia' ? 0xa0afa5 : 0x9ca6b2, {
-      castShadow: false, props: phoneColor === undefined ? [] : [{ kind: 'phone', color: phoneColor }],
+    const actor = createCharacterActor(id, entry.heightM, id === 'linxia' ? 0xa0afa5 : id === 'volunteer' ? 0xb08a72 : 0x9ca6b2, {
+      castShadow: false,
+      props: phoneColor === undefined ? [] : [{ kind: 'phone', color: phoneColor }],
     });
     actor.name = name;
     actor.visible = false;
-    root.add(actor); actors[name] = actor;
-    // 所有实例独有的 skeleton（含 boneTexture）跟随本地接触底片销毁，不动缓存模板。
-    const geometry = new THREE.PlaneGeometry(0.7, 0.6);
-    const material = new THREE.MeshBasicMaterial({ color: 0x303c36, transparent: true, opacity: 0.1, depthWrite: false });
+    root.add(actor);
+    actors[name] = actor;
+    const geometry = new THREE.PlaneGeometry(0.72, 0.64);
+    const material = new THREE.MeshBasicMaterial({ color: 0x2c302e, transparent: true, opacity: 0.14, depthWrite: false });
     const contact = new THREE.Mesh(geometry, material);
-    contact.name = 'actor-contact-shade'; contact.rotation.x = -Math.PI / 2; contact.position.y = 0.006;
+    contact.name = 'actor-contact-shade';
+    contact.rotation.x = -Math.PI / 2;
+    contact.position.y = 0.008;
     actor.add(contact);
     const release = (): void => {
       const skeletons = new Set<THREE.Skeleton>();
@@ -670,10 +2085,9 @@ function buildSchoolInterior(parent: THREE.Object3D) {
       geometry.removeEventListener('dispose', release);
     };
     geometry.addEventListener('dispose', release);
-    // 人物由导航占地防穿模。遮挡列表只放静态建筑/家具：Raycaster 不会跳过
-    // invisible 子树，同 key 切场景后不能让隐藏演员留下幽灵遮挡。
     return actor;
   };
+
   const linxia = create('linxia', 'linxia', 0x889994);
   const legs = group(linxia, 'seated-fallback-legs');
   for (const x of [-0.12, 0.12]) {
@@ -681,25 +2095,37 @@ function buildSchoolInterior(parent: THREE.Object3D) {
     d.box(legs, 'seated-calf', [x, 0.27, 0.34], [0.13, 0.48, 0.14], 0x66736e);
   }
   legs.visible = false;
+
   const ayuan = create('ayuan', 'ayuan', ORANGE);
   actors['student-4'] = ayuan;
+
+  // 1F 辅导员办公室周老师
+  create('volunteer', 'teacher');
+
   for (let i = 0; i < INTERIOR_LOCATIONS.students.length; i += 1) {
     if (i === 3) continue;
     const spec = INTERIOR_LOCATIONS.students[i];
-    const actor = create(spec.modelId, spec.id,
-      [0x627b87, 0x998b83, 0x87957e, ORANGE, 0x665d6b, 0x555f65][i]);
+    const actor = create(
+      spec.modelId,
+      spec.id,
+      [0x627b87, 0x998b83, 0x87957e, ORANGE, 0x665d6b, 0x555f65][i],
+    );
     if (i === 1) d.box(actor, 'held-book', [-0.27, 1.05, 0.05], [0.19, 0.3, 0.045], 0x9aa88b);
     if (i === 2) d.box(actor, 'backpack', [0, 1.08, -0.24], [0.32, 0.43, 0.14], 0x7b827e);
   }
-  const hint = new THREE.PointLight(0xffb46e, 0, 1.5, 2);
-  hint.name = 'orange-phone-hint'; hint.position.set(0.02, 1.18, 0.29);
-  ayuan.add(hint); actors['orange-phone-hint'] = hint;
-  // 独立暖光薄片，不篡改可能热替换的共享人物材质。
+
+  const hint = new THREE.PointLight(0xffb46e, 0, 1.6, 2);
+  hint.name = 'orange-phone-hint';
+  hint.position.set(0.02, 1.18, 0.29);
+  ayuan.add(hint);
+  actors['orange-phone-hint'] = hint;
+
   const screen = d.box(ayuan, 'orange-phone-screen', [0.02, 1.1928, 0.216], [0.066, 0.13, 0.003], ORANGE);
   const screenMaterial = screen.material as THREE.MeshStandardMaterial;
   screenMaterial.emissive.setHex(0xffbe78);
   screenMaterial.emissiveIntensity = 0.08;
   actors['orange-phone-screen'] = screen;
+
   return { occluders, actors };
 }
 
@@ -718,23 +2144,30 @@ interface Session {
   unsubscribe: Array<() => void>;
   models: Map<THREE.Object3D, THREE.Object3D | null>;
   rotations: Map<THREE.Object3D, number>;
+  phases: Map<THREE.Object3D, number>;
   studentAnims: Map<THREE.Object3D, StudentAnimState>;
+  windTime: { value: number } | null;
   time: number;
   noticed: boolean;
 }
 let session: Session | null = null;
+
 function studentVisibility(current: Session, ids: readonly string[] = []): void {
   if (session !== current) return;
   for (const { id } of INTERIOR_LOCATIONS.students) current.context.setInteractableVisible(id, ids.includes(id));
 }
+
 function glow(current: Session): void {
   const hint = current.context.actors['orange-phone-hint'];
   const screen = current.context.actors['orange-phone-screen'];
   const night = current.scene === 'C6';
   const noticed = current.scene === 'C5' && current.noticed;
-  if (hint instanceof THREE.PointLight) hint.intensity = night ? 0.32 : noticed ? 0.09 : 0;
-  if (screen instanceof THREE.Mesh) (screen.material as THREE.MeshStandardMaterial).emissiveIntensity = night ? 0.9 : noticed ? 0.32 : 0.08;
+  if (hint instanceof THREE.PointLight) hint.intensity = night ? 0.34 : noticed ? 0.09 : 0;
+  if (screen instanceof THREE.Mesh) {
+    (screen.material as THREE.MeshStandardMaterial).emissiveIntensity = night ? 0.92 : noticed ? 0.32 : 0.08;
+  }
 }
+
 function syncStudentAnimation(state: StudentAnimState, dt: number): boolean {
   if (state.clips.length === 0) return false;
   if (!state.controller) {
@@ -767,41 +2200,54 @@ function syncStudentAnimation(state: StudentAnimState, dt: number): boolean {
   state.controller.update(dt);
   return true;
 }
+
 function clearRuntime(): void {
   const current = session;
   if (!current) return;
   studentVisibility(current);
-  session = null; // 先失效：已经进入事件队列的旧闭包也不能修改新场景。
+  session = null;
   current.unsubscribe.forEach((off) => off());
   for (const state of current.studentAnims.values()) state.controller?.dispose();
   current.studentAnims.clear();
-  for (const [actor, z] of current.rotations) { actor.rotation.z = z; resetPose(actor); }
+  for (const [actor, z] of current.rotations) {
+    actor.rotation.z = z;
+    resetPose(actor);
+  }
 }
+
 export const schoolInteriorRuntime: SceneRuntime = {
   enter(context): void {
     if (session?.context === context && session.scene === context.sceneId) return;
     clearRuntime();
     if (!SCENES.includes(context.sceneId as InteriorScene)) return;
     const scene = context.sceneId as InteriorScene;
+    const root = context.actors['interior-root'];
+    const windTime = (root?.userData.windTime as { value: number } | undefined) ?? null;
     const current: Session = {
-      context, scene, unsubscribe: [], models: new Map(), rotations: new Map(),
-      studentAnims: new Map(), time: 0, noticed: context.storyFlags?.noticedTyper ?? false,
+      context, scene, unsubscribe: [], models: new Map(), rotations: new Map(), phases: new Map(),
+      studentAnims: new Map(), windTime, time: 0, noticed: context.storyFlags?.noticedTyper ?? false,
     };
     session = current;
     studentVisibility(current);
+
+    let phaseCounter = 0;
     const place = (
       name: string,
-      location: { x: number; z: number },
+      location: { x: number; y: number; z: number },
       yaw = -Math.PI / 2,
       animClips: readonly string[] = [],
       switchSec = 7.5,
+      holdPhone?: boolean,
     ): void => {
       const actor = context.actors[name];
       if (!actor) return;
-      actor.visible = true; actor.position.set(location.x, 0, location.z); actor.rotation.set(0, yaw, 0);
+      actor.visible = true;
+      actor.position.set(location.x, location.y, location.z);
+      actor.rotation.set(0, yaw, 0);
       const seated = name === 'linxia' && scene === 'C2';
+      const wantsPhone = holdPhone ?? (!seated && name !== 'teacher');
       const props = actor.getObjectByName('actor-props');
-      if (props) props.visible = !seated;
+      if (props) props.visible = wantsPhone;
       let animated = false;
       if (animClips.length > 0) {
         const animState: StudentAnimState = {
@@ -810,48 +2256,68 @@ export const schoolInteriorRuntime: SceneRuntime = {
         current.studentAnims.set(actor, animState);
         animated = syncStudentAnimation(animState, 0);
       }
-      if (!animated) poseActor(actor, seated, !seated);
+      if (!animated) poseActor(actor, seated, wantsPhone);
       current.models.set(actor, findActorModelRoot(actor)?.root ?? null);
       current.rotations.set(actor, actor.rotation.z);
+      current.phases.set(actor, phaseCounter * 1.37);
+      phaseCounter += 1;
     };
-    for (const name of ['linxia', 'ayuan', ...INTERIOR_LOCATIONS.students.map(({ id }) => id)]) {
-      const actor = context.actors[name]; if (actor) actor.visible = false;
+
+    for (const name of ['linxia', 'ayuan', 'teacher', ...INTERIOR_LOCATIONS.students.map(({ id }) => id)]) {
+      const actor = context.actors[name];
+      if (actor) actor.visible = false;
     }
     if (context.actors['linxia-sketchbook']) context.actors['linxia-sketchbook'].visible = scene === 'C2';
-    if (scene === 'C2') place('linxia', INTERIOR_LOCATIONS.linxiaDesk, Math.PI);
-    if (scene === 'C4') place('linxia', INTERIOR_LOCATIONS.stairwellActor);
+
+    if (scene === 'C2') place('linxia', INTERIOR_LOCATIONS.linxiaDesk, Math.PI, [], 7.5, false);
+    if (scene === 'C3') {
+      place('teacher', INTERIOR_LOCATIONS.teacherOfficeActor, 0.72, ['wait', 'agree'], 8.4, false);
+    }
+    if (scene === 'C4') place('linxia', INTERIOR_LOCATIONS.stairwellActor, -Math.PI / 2);
     if (scene === 'C5') {
       INTERIOR_LOCATIONS.students.forEach((student, index) => {
-        place(student.id, student, student.yaw, student.clips, 7.2 + index * 0.65);
+        place(student.id, student, student.yaw, student.clips, 7.2 + index * 0.85);
       });
     }
-    if (scene === 'C6') place('ayuan', INTERIOR_LOCATIONS.stairwellActor);
-    if (scene === 'D1') place('ayuan', INTERIOR_LOCATIONS.platformActor);
+    if (scene === 'C6') place('ayuan', INTERIOR_LOCATIONS.stairwellActor, -Math.PI / 2);
+    if (scene === 'D1') place('ayuan', INTERIOR_LOCATIONS.platformActor, -Math.PI / 2);
     if (scene === 'D6') {
-      place('linxia', INTERIOR_LOCATIONS.corridorLinxia);
-      place('ayuan', INTERIOR_LOCATIONS.corridorAyuan);
+      place('linxia', INTERIOR_LOCATIONS.corridorLinxia, -Math.PI / 2);
+      place('ayuan', INTERIOR_LOCATIONS.corridorAyuan, -Math.PI / 2);
       if (context.actors.ayuan) context.actors.ayuan.visible = context.storyFlags?.joined ?? false;
     }
+
+    // 氛围光照（P0-02 修复：柔和清晨/午后基准 + 克制夕照，移除过曝 22 强度点光与呼吸闪烁光斑）
     const fill = context.actors['interior-fill'];
+    const sunKey = context.actors['interior-sun-key'];
     const sunset = context.actors['interior-sunset'];
-    const night = scene === 'C6'; const evening = scene === 'D1' || scene === 'D6';
+    const night = scene === 'C6';
+    const evening = scene === 'D1' || scene === 'D6';
     if (fill instanceof THREE.HemisphereLight) {
-      fill.color.setHex(night ? 0x7894c5 : evening ? 0xf4caa2 : 0xe0eaf1);
-      fill.groundColor.setHex(night ? 0x303f60 : evening ? 0x7a8584 : 0x738288);
-      fill.intensity = night ? 0.28 : evening ? 0.78 : 1.12;
+      fill.color.setHex(night ? 0x4d6996 : evening ? 0x9eb0ce : 0xaac2d8);
+      fill.groundColor.setHex(night ? 0x1c2638 : evening ? 0x6a5c5c : 0x5c636b);
+      fill.intensity = night ? 0.3 : evening ? 0.72 : 0.88;
     }
-    if (sunset instanceof THREE.PointLight) sunset.intensity = evening ? 18 : 0;
+    if (sunKey instanceof THREE.DirectionalLight) {
+      sunKey.color.setHex(night ? 0x486490 : evening ? 0xffa663 : 0xffd9a4);
+      sunKey.intensity = night ? 0.14 : evening ? 1.24 : 1.02;
+    }
+    if (sunset instanceof THREE.PointLight) sunset.intensity = evening ? 5.2 : 0;
     if (context.actors['window-greenery']) context.actors['window-greenery'].visible = !night;
     const beamsGroup = context.actors['corridor-light-beams'];
     if (beamsGroup) {
       beamsGroup.visible = !night;
       beamsGroup.traverse((child) => {
         if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial) {
-          child.material.color.setHex(evening ? 0xf6c997 : 0xffffff);
+          child.material.color.setHex(evening ? 0xffb370 : 0xffdfa8);
+          child.material.opacity = child.name === 'corridor-sun-patches'
+            ? (evening ? 0.24 : 0.18)
+            : (evening ? 0.08 : 0.055);
         }
       });
     }
     glow(current);
+
     const active = (): boolean => session === current;
     current.unsubscribe.push(context.bus.on('state:changed', (event) => {
       if (!active() || event.sceneId !== scene) return;
@@ -864,15 +2330,18 @@ export const schoolInteriorRuntime: SceneRuntime = {
     current.unsubscribe.push(context.bus.on('ui:showChoices', ({ stepId, options }) => {
       if (active()) studentVisibility(current, stepId === 'c5-recognize' ? options.map(({ id }) => id) : []);
     }));
-    // 菜单/手机/对话等接管后立即禁用，认错次数上限通过 core 已过滤的 options 呈现。
-    for (const event of ['ui:showPhone', 'ui:showDialogue', 'ui:showArt', 'ui:showMinigame',
-      'ui:showIntertitle', 'scene:cutscene', 'scene:transition'] as const)
+    for (const event of [
+      'ui:showPhone', 'ui:showDialogue', 'ui:showArt', 'ui:showMinigame',
+      'ui:showIntertitle', 'scene:cutscene', 'scene:transition',
+    ] as const) {
       current.unsubscribe.push(context.bus.on(event, hide));
+    }
   },
   tick(dtSeconds): void {
     if (!session || !Number.isFinite(dtSeconds) || dtSeconds <= 0) return;
     const dt = Math.min(dtSeconds, 0.1);
     session.time += dt;
+    if (session.windTime) session.windTime.value += dt;
     for (const [actor, base] of session.rotations) {
       const root = findActorModelRoot(actor)?.root ?? null;
       const animState = session.studentAnims.get(actor);
@@ -883,27 +2352,25 @@ export const schoolInteriorRuntime: SceneRuntime = {
           animState.controller = null;
         }
         const animated = animState ? syncStudentAnimation(animState, 0) : false;
-        if (!animated) poseActor(actor, actor === session.context.actors.linxia && session.scene === 'C2', true);
+        if (!animated) {
+          const isSeated = actor === session.context.actors.linxia && session.scene === 'C2';
+          const isTeacher = actor === session.context.actors.teacher;
+          poseActor(actor, isSeated, !isSeated && !isTeacher);
+        }
       } else if (animState && actor.visible) {
         syncStudentAnimation(animState, dt);
       }
-      if (actor.visible) actor.rotation.z = base + Math.sin(session.time * 1.5) * 0.003;
-    }
-    const garden = session.context.actors['window-greenery'];
-    if (garden && garden.visible) {
-      garden.position.z = Math.sin(session.time * 0.68) * 0.04;
-    }
-    const beams = session.context.actors['corridor-light-beams'];
-    if (beams && beams.visible) {
-      const pulse = 0.045 + Math.sin(session.time * 0.8) * 0.006;
-      beams.traverse((child) => {
-        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial) {
-          child.material.opacity = pulse;
-        }
-      });
+      if (actor.visible) {
+        const phase = session.phases.get(actor) ?? 0;
+        actor.rotation.z = base + Math.sin(session.time * 1.45 + phase) * 0.0025;
+      }
     }
   },
-  exit: clearRuntime,
+  exit(): void {
+    interiorGeneration += 1;
+    releaseInteriorKitMeshes();
+    clearRuntime();
+  },
 };
 
 export function createSchoolInteriorDefinition(sceneId: SceneId): WorldSceneDefinition {
@@ -913,33 +2380,60 @@ export function createSchoolInteriorDefinition(sceneId: SceneId): WorldSceneDefi
     : scene === 'C6' ? { id: 'night-phone', ...INTERIOR_LOCATIONS.stairwell }
       : scene === 'D1' ? { id: 'platform-ayuan', ...INTERIOR_LOCATIONS.platform }
         : scene === 'D6' ? { id: 'corridor-linxia', ...INTERIOR_LOCATIONS.corridor } : null;
+
   return {
-    sceneKey: 'interior', spawn: { ...INTERIOR_LOCATIONS.spawns[scene] }, nav: navigation(scene),
-    // 同 key 不重建，首次进入预载共享几何实际使用的四类角色；main 负责懒加载本模块。
-    requiredModels: [...MODELS], footstepSurface: 'stone', build: buildSchoolInterior,
-    interactables: scene === 'C2' ? INTERIOR_LOCATIONS.seats.map(({ id, x, y, z }) => ({
-      id, position: { x, y, z }, lightOffsetY: 0.6, maxDistance: 2.8, hitRadius: 0.3,
-    })) : scene === 'C3' ? [{
-      id: 'teacher-office-door',
-      position: { ...INTERIOR_LOCATIONS.teacherOfficeDoor },
-      lightOffsetY: 0.25,
-      maxDistance: 2.8,
-      hitRadius: 0.5,
-    }] : scene === 'C5' ? INTERIOR_LOCATIONS.students.map(({ id, x, z, lightOffset }) => ({
-      id, position: { x: x + lightOffset.x, y: 1.1, z: z + lightOffset.z }, lightOffsetY: 0.3, maxDistance: 2.8, hitRadius: 0.28,
-    })) : [],
-    zones: zone ? [{ id: zone.id, kind: 'circle', center: { x: zone.x, y: 0, z: zone.z }, radius: 0.8, once: true }] : [],
+    sceneKey: 'interior',
+    spawn: { ...INTERIOR_LOCATIONS.spawns[scene] },
+    nav: navigation(scene),
+    requiredModels: [...MODELS],
+    footstepSurface: 'stone',
+    build: buildSchoolInterior,
+    interactables: scene === 'C2'
+      ? INTERIOR_LOCATIONS.seats.map(({ id, x, y, z }) => ({
+        id, position: { x, y, z }, lightOffsetY: 0.6, maxDistance: 2.8, hitRadius: 0.3,
+      }))
+      : scene === 'C3'
+        ? [{
+          id: 'teacher-office-door',
+          position: { ...INTERIOR_LOCATIONS.teacherOfficeDoor },
+          lightOffsetY: 0.25,
+          maxDistance: 3.2,
+          hitRadius: 0.55,
+        }]
+        : scene === 'C5'
+          ? INTERIOR_LOCATIONS.students.map(({ id, x, y, z, lightOffset }) => ({
+            id,
+            position: { x: x + lightOffset.x, y: y + 1.1, z: z + lightOffset.z },
+            lightOffsetY: 0.3,
+            maxDistance: 2.8,
+            hitRadius: 0.28,
+          }))
+          : [],
+    zones: zone
+      ? [{ id: zone.id, kind: 'circle', center: { x: zone.x, y: zone.y, z: zone.z }, radius: 1.0, once: true }]
+      : [],
     targetGuides: scene === 'C3'
-      ? [{ id: 'teacher-office-door', position: { x: 3.0, y: 1.35, z: -8.7 } }]
-      : zone ? [{ id: zone.id, position: { x: zone.x, y: 0.8, z: zone.z } }] : [],
-    // 分级氛围空间雾：日间冷灰压抑（C2/C4/C5）、黄昏克制残阳（D1/D6）、夜间冷暗压迫（C6）
+      ? [{
+        id: 'teacher-office-door',
+        position: {
+          x: INTERIOR_LOCATIONS.teacherOfficeDoor.x,
+          y: INTERIOR_LOCATIONS.teacherOfficeDoor.y + 0.35,
+          z: INTERIOR_LOCATIONS.teacherOfficeDoor.z,
+        },
+      }]
+      : zone
+        ? [{ id: zone.id, position: { x: zone.x, y: zone.y + 0.85, z: zone.z } }]
+        : [],
     fog: scene === 'C6'
-      ? { color: 0x2c394d, near: 10, far: 38 }
+      ? { color: 0x202b3d, near: 10, far: 38 }
       : scene === 'D1' || scene === 'D6'
-        ? { color: 0xc7b3a4, near: 16, far: 52 }
-        : { color: 0xc3ccd4, near: 14, far: 48 },
-    panoramaAnchor: scene === 'D1' ? {
-      position: { x: 6.55, y: 1.54, z: 5.05 }, lookAt: { x: 8.3, y: 1.35, z: 5 },
-    } : undefined,
+        ? { color: 0xc8aa95, near: 16, far: 54 }
+        : { color: 0xc7ccd0, near: 16, far: 54 },
+    panoramaAnchor: scene === 'D1'
+      ? {
+        position: { x: 6.7, y: FLOOR2_Y + 1.54, z: 5.45 },
+        lookAt: { x: INTERIOR_LOCATIONS.platformActor.x, y: FLOOR2_Y + 1.35, z: INTERIOR_LOCATIONS.platformActor.z },
+      }
+      : undefined,
   };
 }

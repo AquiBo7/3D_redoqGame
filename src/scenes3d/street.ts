@@ -24,6 +24,7 @@ import {
   yawToward,
 } from './shared';
 import type { CharacterAnimationController } from './characterAnimation';
+import type { CharacterModelId } from './modelManifest';
 import type { BoxSize, Vec3 } from './shared';
 import { createCanopyCardBatch } from './canopy';
 import type { CanopyCardSpec } from './canopy';
@@ -429,25 +430,32 @@ const BIN_TONES = {
 } as const;
 type BinVariant = keyof typeof BIN_TONES;
 
-/** 行李 + 迎新志愿者 / 新生 3D 角色组合（两人面对面自然交谈，不机械同向） */
-const STREET_NPCS = [
+/** 行李 + 迎新学长学姐 / 新生 3D 角色组合（两人面对面自然交谈，使用互不重复的非主线同学模型） */
+const STREET_NPCS: ReadonlyArray<{
+  group: { x: number; z: number };
+  greeterModel: CharacterModelId;
+  greeterColor: number;
+  studentModel: CharacterModelId;
+  studentColor: number;
+  luggage: { x: number; z: number };
+}> = [
   {
     group: { x: 4.4, z: -7 },
-    greeterModel: 'volunteer',
+    greeterModel: 'studentMale',
     greeterColor: 0x8f8578,
-    studentModel: 'ayuan',
+    studentModel: 'studentFemale4',
     studentColor: 0x8f9aa3,
     luggage: { x: 3.6, z: -7.6 },
   },
   {
     group: { x: -4.6, z: -24 },
-    greeterModel: 'volunteer',
+    greeterModel: 'studentFemale3',
     greeterColor: 0x867d70,
-    studentModel: 'ayuan',
+    studentModel: 'studentMale3',
     studentColor: 0x93a0a8,
     luggage: { x: -5.4, z: -24.6 },
   },
-] as const;
+];
 
 const SPAWN: SceneSpawn = { x: 0, z: 14, yaw: 0, pitchDeg: -5 };
 
@@ -3468,13 +3476,13 @@ function buildFallenBicycle(): THREE.Group {
   return bike;
 }
 
-/** 街道三处叙事伏笔：便利店刷手机路人、父子拎箱子、摔倒自行车与举手机围观人群 */
+/** 街道三处叙事伏笔：便利店刷手机路人、父子拎箱子、摔倒自行车与举手机围观人群（全部使用非主线差异化路人模型，避免与后续阿远/林夏父亲撞脸） */
 function buildStreetForeshadowings(
   parent: THREE.Object3D,
   actors: Record<string, THREE.Object3D>,
 ): void {
   // 1. 便利店门口：低头刷手机随手一划的路人
-  const scroller = createCharacterActor('ayuan', 1.68, 0x6b7b84, {
+  const scroller = createCharacterActor('studentMale2', 1.72, 0x6b7b84, {
     yaw: -1.45,
     leanRad: 0.04,
     props: [{ kind: 'phone', color: 0x3b4147, side: 'right' }],
@@ -3484,13 +3492,13 @@ function buildStreetForeshadowings(
   parent.add(scroller);
   actors['foreshadow-scroller'] = scroller;
 
-  // 2. 路边：爸爸帮孩子拎箱子
+  // 2. 路边：爸爸帮孩子拎箱子（使用稳重非主线男同学放大身高饰演路人家长，不撞脸林夏爸爸）
   const dadPos = { x: -2.05, z: -1.2 };
   const kidPos = { x: -2.05, z: -1.95 };
-  const dad = createCharacterActor('ayuan', 1.75, 0x737c75, { yaw: yawToward(dadPos, kidPos) });
+  const dad = createCharacterActor('studentMale4', 1.78, 0x737c75, { yaw: yawToward(dadPos, kidPos) });
   dad.name = 'street-foreshadow-father';
   dad.position.set(dadPos.x, 0, dadPos.z);
-  const kid = createCharacterActor('volunteer', 1.56, 0x9aa296, { yaw: yawToward(kidPos, dadPos) });
+  const kid = createCharacterActor('studentFemale', 1.56, 0x9aa296, { yaw: yawToward(kidPos, dadPos) });
   kid.name = 'street-foreshadow-child';
   kid.position.set(kidPos.x, 0, kidPos.z);
   const suitcase = addBox(
@@ -3504,7 +3512,7 @@ function buildStreetForeshadowings(
   actors['foreshadow-dad'] = dad;
   actors['foreshadow-kid'] = kid;
 
-  // 3. 路边摔倒的自行车 + 4 名举着手机拍照的围观者
+  // 3. 路边摔倒的自行车 + 4 名举着手机拍照的围观者（5 人 5 套互不重复的非主线同学模型）
   const bikePos = { x: -1.78, z: -26.4 };
   const bike = buildFallenBicycle();
   bike.position.set(bikePos.x, 0.12, bikePos.z);
@@ -3513,17 +3521,17 @@ function buildStreetForeshadowings(
   actors['fallen-bike'] = bike;
 
   const cyclistPos = { x: -2.22, z: -26.85 };
-  const cyclist = createCharacterActor('ayuan', 1.64, 0x859099, { yaw: yawToward(cyclistPos, bikePos) });
+  const cyclist = createCharacterActor('studentFemale', 1.62, 0x859099, { yaw: yawToward(cyclistPos, bikePos) });
   cyclist.name = 'street-fallen-cyclist';
   cyclist.position.set(cyclistPos.x, 0, cyclistPos.z);
   parent.add(cyclist);
   actors['fallen-cyclist'] = cyclist;
 
-  const onlookers: ReadonlyArray<{ x: number; z: number; model: 'ayuan' | 'volunteer'; color: number; h: number }> = [
-    { x: -2.35, z: -25.15, model: 'volunteer', color: 0x8b867d, h: 1.64 },
-    { x: -2.42, z: -27.75, model: 'ayuan', color: 0x7c878f, h: 1.7 },
-    { x: -1.52, z: -25.0, model: 'ayuan', color: 0x748188, h: 1.68 },
-    { x: -1.52, z: -27.85, model: 'volunteer', color: 0x91887c, h: 1.62 },
+  const onlookers: ReadonlyArray<{ x: number; z: number; model: CharacterModelId; color: number; h: number }> = [
+    { x: -2.35, z: -25.15, model: 'studentMale3', color: 0x8b867d, h: 1.71 },
+    { x: -2.42, z: -27.75, model: 'studentFemale4', color: 0x7c878f, h: 1.63 },
+    { x: -1.52, z: -25.0, model: 'studentMale2', color: 0x748188, h: 1.72 },
+    { x: -1.52, z: -27.85, model: 'studentFemale3', color: 0x91887c, h: 1.64 },
   ];
   onlookers.forEach((spec, index) => {
     const onlooker = createCharacterActor(spec.model, spec.h, spec.color, {
@@ -3683,21 +3691,36 @@ function startStreetIdleMotions(actors: Record<string, THREE.Object3D>): void {
   disposeStreetAnimations();
   const specs: Array<{ id: string; clips: readonly string[]; switchSec: number }> = [
     { id: 'sign-volunteer', clips: ['wave_goodbye_02', 'wait', 'agree'], switchSec: 7.5 },
-    { id: 'npc-0-greeter', clips: ['agree', 'wait'], switchSec: 8.5 },
-    { id: 'npc-1-greeter', clips: ['wait', 'agree'], switchSec: 9.2 },
+    { id: 'npc-0-greeter', clips: ['agree', 'greet_04', 'fold_arms'], switchSec: 8.5 },
+    { id: 'npc-0-student', clips: ['look_around', 'fold_arms', 'afraid'], switchSec: 8.8 },
+    { id: 'npc-1-greeter', clips: ['agree', 'laugh_01'], switchSec: 9.2 },
+    { id: 'npc-1-student', clips: ['wait', 'cheer', 'make_a_call_02'], switchSec: 8.2 },
+    { id: 'foreshadow-dad', clips: ['agree', 'look_around', 'make_a_call_02'], switchSec: 9.0 },
+    { id: 'foreshadow-kid', clips: ['wait', 'agree', 'idle'], switchSec: 7.8 },
+    { id: 'foreshadow-scroller', clips: ['wait', 'laugh_02'], switchSec: 8.4 },
+    { id: 'bike-onlooker-0', clips: ['make_a_call_02', 'cheer', 'wait'], switchSec: 7.4 },
+    { id: 'bike-onlooker-1', clips: ['look_around', 'fold_arms'], switchSec: 8.6 },
+    { id: 'bike-onlooker-2', clips: ['laugh_02', 'wait'], switchSec: 7.9 },
+    { id: 'bike-onlooker-3', clips: ['laugh_01', 'agree'], switchSec: 8.3 },
   ];
   for (const spec of specs) {
     const actor = actors[spec.id];
     if (!actor) continue;
+    const controller = createActorAnimation(actor);
+    const available = controller ? spec.clips.filter((c) => controller.hasAnimation(c)) : spec.clips;
     const entry: StreetAnimatedNpc = {
       actor,
-      clips: spec.clips,
+      clips: available.length > 0 ? available : spec.clips,
       switchSec: spec.switchSec,
       timer: 0,
       clipIndex: 0,
-      controller: createActorAnimation(actor),
+      controller: available.length > 0 ? controller : null,
     };
-    entry.controller?.play(entry.clips[0], { fadeIn: 0.35, timeScale: 0.88, loop: true });
+    if (entry.controller) {
+      entry.controller.play(entry.clips[0], { fadeIn: 0.35, timeScale: 0.88, loop: true });
+    } else if (controller) {
+      controller.dispose();
+    }
     streetAnimatedNpcs.push(entry);
   }
 }
@@ -3742,8 +3765,18 @@ export const streetRuntime: SceneRuntime = {
     for (const entry of streetAnimatedNpcs) {
       if (!entry.actor.visible) continue;
       if (!entry.controller) {
-        entry.controller = createActorAnimation(entry.actor);
-        entry.controller?.play(entry.clips[entry.clipIndex], { fadeIn: 0.35, timeScale: 0.88, loop: true });
+        const created = createActorAnimation(entry.actor);
+        if (created) {
+          const available = entry.clips.filter((c) => created.hasAnimation(c));
+          if (available.length > 0) {
+            entry.clips = available;
+            entry.clipIndex = 0;
+            entry.controller = created;
+            entry.controller.play(entry.clips[0], { fadeIn: 0.35, timeScale: 0.88, loop: true });
+          } else {
+            created.dispose();
+          }
+        }
       }
       if (!entry.controller) continue;
       entry.timer += dtSeconds;
@@ -3781,8 +3814,17 @@ export function createStreetDefinition(_sceneId: SceneId): WorldSceneDefinition 
     sceneKey: 'street',
     spawn: SPAWN,
     nav: NAV,
-    // 进 S4 时按需预载：举牌志愿者 + 路边与新生交谈的志愿者 / 阿远
-    requiredModels: ['volunteer', 'ayuan'],
+    // 进 S4 时按需预载：唯一迎新举牌女老师 + 7 位互不重复的非主线同学模型（不再混入主线阿远）
+    requiredModels: [
+      'volunteer',
+      'studentMale',
+      'studentFemale',
+      'studentMale2',
+      'studentMale3',
+      'studentMale4',
+      'studentFemale3',
+      'studentFemale4',
+    ],
     interactables: S4_INTERACTABLES,
     hotspots: S4_HOTSPOTS,
     zones: [

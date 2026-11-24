@@ -19,7 +19,20 @@ export type PropModelId =
   | 'canteenTrayRack'
   | 'canteenWindowBay'
   | 'canteenVending'
-  | 'canteenClock';
+  | 'canteenClock'
+  | 'schoolDeskUnit'
+  | 'schoolChairUnit'
+  | 'schoolLowLocker'
+  | 'schoolTallLocker'
+  | 'schoolBackpack'
+  | 'schoolBulletin'
+  | 'schoolPodium'
+  | 'schoolSpeaker'
+  | 'schoolOfficeDesk'
+  | 'schoolFileCabinet'
+  | 'schoolTreeA'
+  | 'schoolTreeB'
+  | 'schoolTreeC';
 
 /** 色温覆盖三档：木器 / 金属 / 纸张书本 */
 export const PROP_TINT_WOOD = 0xb9a07f;
@@ -204,6 +217,149 @@ export const PROP_MODELS: readonly PropModelEntry[] = [
     license: 'CC0 1.0',
     author: 'Local Blender Kit',
     source: 'local://tools/blender_canteen_kit.py',
+  },
+  {
+    id: 'schoolDeskUnit',
+    name: '倒角暖木弯管课桌',
+    path: './models/props/prop_school_desk_unit.glb',
+    heightM: 0.75,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolChairUnit',
+    name: '微弧胶合板弯管课椅',
+    path: './models/props/prop_school_chair_unit.glb',
+    heightM: 0.84,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolLowLocker',
+    name: '走廊八门百叶储物矮柜',
+    path: './models/props/prop_school_low_locker.glb',
+    heightM: 0.9,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolTallLocker',
+    name: '双门铁皮百叶储物高柜',
+    path: './models/props/prop_school_tall_locker.glb',
+    heightM: 1.92,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolBackpack',
+    name: '学生通勤双肩书包',
+    path: './models/props/prop_school_backpack.glb',
+    heightM: 0.337,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolBulletin',
+    name: '木框绿绒课程表公告栏',
+    path: './models/props/prop_school_bulletin.glb',
+    heightM: 1.04,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolPodium',
+    name: '挡书围边斜顶立式讲桌',
+    path: './models/props/prop_school_podium.glb',
+    heightM: 1.06,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolSpeaker',
+    name: '壁挂圆网罩广播音箱',
+    path: './models/props/prop_school_speaker.glb',
+    heightM: 0.323,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolOfficeDesk',
+    name: '胡桃木辅导员办公桌组合',
+    path: './models/props/prop_school_office_desk.glb',
+    heightM: 1.151,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolFileCabinet',
+    name: '上玻下铁双节档案文件柜',
+    path: './models/props/prop_school_file_cabinet.glb',
+    heightM: 1.94,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolTreeA',
+    name: '庭院伞状阔冠香樟树',
+    path: './models/props/prop_school_tree_a.glb',
+    heightM: 4.472,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolTreeB',
+    name: '庭院偏侧自然香樟树',
+    path: './models/props/prop_school_tree_b.glb',
+    heightM: 4.644,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
+  },
+  {
+    id: 'schoolTreeC',
+    name: '庭院高窄疏朗香樟树',
+    path: './models/props/prop_school_tree_c.glb',
+    heightM: 4.951,
+    castShadow: false,
+    tint: PROP_TINT_NEUTRAL,
+    license: 'CC0 1.0',
+    author: 'Local Blender Kit',
+    source: 'local://tools/blender_school_kit.py',
   },
 ];
 

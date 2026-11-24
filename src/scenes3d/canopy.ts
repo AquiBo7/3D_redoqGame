@@ -605,6 +605,68 @@ export function createCanopyCardBatch(specs: CanopyCardSpec[], options: CanopyBa
   return mesh;
 }
 
+/**
+ * 创建归属单次 build 独立拥有的枝叶卡片批次（不打 sharedResource、不入全局缓存）：
+ * 与 street/building 共用同一套枝干骨架+楔形破形枝+四层叶簇绘制算法及动态风摆着色器，
+ * 贴图与实例缓冲随材质/几何 dispose 一并释放，满足食堂等独立生命周期场景的零泄漏契约。
+ */
+export function createOwnedCanopyCardBatch(
+  specs: CanopyCardSpec[],
+  options: CanopyBatchOptions,
+): THREE.InstancedMesh {
+  const spec: CanopySpec = {
+    size: Math.max(128, Math.round(options.texture?.size ?? 1024)),
+    seed: options.texture?.seed ?? 5,
+    mode: options.texture?.mode ?? 'mass',
+    holeRatio: options.texture?.holeRatio ?? 0.11,
+    density: options.texture?.density ?? 0.92,
+    edgeFeather: options.texture?.edgeFeather ?? 0.015,
+    threshold: options.texture?.threshold ?? 112,
+    aniso: options.texture?.aniso ?? 8,
+    inset: options.texture?.inset ?? 0.045,
+    lean: options.texture?.lean ?? -1,
+  };
+  let texture: THREE.Texture;
+  if (canvasAvailable()) {
+    texture = paintCanopyTexture(spec);
+  } else {
+    texture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    texture.needsUpdate = true;
+  }
+  const geometry = new THREE.PlaneGeometry(1, 1);
+  const material = createCanopyCardMaterial({
+    map: texture,
+    alphaTest: options.alphaTest ?? 0.45,
+    time: options.time,
+    sway: options.sway ?? 0.075,
+  });
+  const releaseTexture = (): void => {
+    texture.dispose();
+    material.removeEventListener('dispose', releaseTexture);
+  };
+  material.addEventListener('dispose', releaseTexture);
+  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, specs.length));
+  bindInstanceRelease(mesh, material);
+  mesh.name = options.name;
+  const transform = new THREE.Object3D();
+  const color = new THREE.Color();
+  specs.forEach((item, index) => {
+    transform.position.set(item.x, item.y, item.z);
+    transform.rotation.set((item.tilt ?? 0) * 0.6, item.yaw, item.tilt ?? 0);
+    transform.scale.set(item.scale, item.scale * 1.08, item.scale);
+    transform.updateMatrix();
+    mesh.setMatrixAt(index, transform.matrix);
+    mesh.setColorAt(index, color.setHex(item.tint ?? 0xffffff));
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.frustumCulled = false;
+  mesh.computeBoundingSphere();
+  return mesh;
+}
+
 /** 只给测试与热重载用：释放缓存贴图 */
 export function disposeCanopyTextures(): void {
   for (const texture of textureCache.values()) texture.dispose();

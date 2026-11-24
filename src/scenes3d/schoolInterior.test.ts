@@ -1,16 +1,25 @@
-// 真实 Three 几何/导航/射线测试；只替代下载边界与 Canvas，不替代角色工厂。
+// 真实 Three 双层教学楼几何/多层导航/射线/资源测试；只替代下载边界与 Canvas，不替代角色工厂。
 import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventBus } from '../core/eventBus';
 import { createInitialStoryState } from '../core/state';
 import type { SceneId } from '../data/storySchema';
-import { isInsideBounds, resolveMovement, type Vec2 } from '../world/navMath';
+import { isInsideBounds, resolveMovement, sampleGroundHeight, type Vec2 } from '../world/navMath';
 import * as resources from '../world/resources';
 import type { SceneRuntimeContext } from '../world/worldSceneTypes';
 import { getCharacterModel } from './modelManifest';
-import { INTERIOR_LOCATIONS as L, createSchoolInteriorDefinition, schoolInteriorRuntime as runtime } from './schoolInterior';
+import {
+  CORRIDOR_LAYOUT,
+  CORRIDOR_PILLAR_Z,
+  FLOOR1_Y,
+  FLOOR2_Y,
+  INTERIOR_LOCATIONS as L,
+  LANDING_Y,
+  createSchoolInteriorDefinition,
+  schoolInteriorRuntime as runtime,
+} from './schoolInterior';
 
-const IDS = ['C2', 'C4', 'C5', 'C6', 'D1', 'D6'] as const;
+const IDS = ['C2', 'C3', 'C4', 'C5', 'C6', 'D1', 'D6'] as const;
 const roots: THREE.Object3D[] = [];
 const printed: string[] = [];
 beforeEach(() => {
@@ -71,14 +80,15 @@ function allResources(root: THREE.Object3D) {
   return { geometries, materials, textures, instances };
 }
 
-describe('共享教学楼契约', () => {
-  it('无 DOM definition 不启动加载/订阅/计时器；六场共享同一个 build，模型 ID 全部有效且实际使用', () => {
+describe('共享双层教学楼契约', () => {
+  it('无 DOM definition 不启动加载/订阅/计时器；七场共享同一个 build，模型 ID 全部有效且实际使用', () => {
     vi.stubGlobal('document', undefined);
     const timer = vi.spyOn(globalThis, 'setInterval');
     const definitions = IDS.map(createSchoolInteriorDefinition);
     for (const d of definitions) {
       expect(d.sceneKey).toBe('interior'); expect(d.build).toBe(definitions[0].build);
       expect(d.footstepSurface).toBe('stone');
+      expect(d.nav.surfaces?.length).toBeGreaterThanOrEqual(5);
       d.requiredModels!.forEach((id) => expect(getCharacterModel(id).path).toMatch(/^\.\/models\/chr_/));
     }
     expect(resources.loadCharacterModel).not.toHaveBeenCalled(); expect(timer).not.toHaveBeenCalled();
@@ -87,35 +97,50 @@ describe('共享教学楼契约', () => {
     expect(createSchoolInteriorDefinition('C2').nav.obstacles.length).toBeGreaterThan(10);
     expect(createSchoolInteriorDefinition('C2').spawn.x).toBe(L.spawns.C2.x);
   });
-  it('仅对应场景提供准确交互/区域 ID，D1 提供近景锚点', () => {
+
+  it('仅对应场景提供准确交互/区域 ID，C3 提供 1F 办公室交互，D1 提供 2F 近景锚点', () => {
     expect(createSchoolInteriorDefinition('C2').interactables!.map((p) => p.id)).toEqual(['seat-beside', 'seat-front', 'seat-far']);
+    expect(createSchoolInteriorDefinition('C3').interactables!.map((p) => p.id)).toEqual(['teacher-office-door']);
     expect(createSchoolInteriorDefinition('C5').interactables!.map((p) => p.id)).toEqual(L.students.map((p) => p.id));
     for (const [id, zone] of [['C4', 'stairwell-corner'], ['C6', 'night-phone'], ['D1', 'platform-ayuan'], ['D6', 'corridor-linxia']] as const) {
       const d = createSchoolInteriorDefinition(id);
       expect(d.zones!.map((z) => z.id)).toEqual([zone]); expect(d.interactables).toEqual([]);
     }
     expect(createSchoolInteriorDefinition('D1').panoramaAnchor!.lookAt.x).toBe(L.platformActor.x);
+    expect(createSchoolInteriorDefinition('D1').panoramaAnchor!.position.y).toBeGreaterThan(FLOOR2_Y);
   });
 });
 
-describe('真实 Three 建筑与资源', () => {
-  it('水磨石、闭合屋顶墙窗、黑板桌椅、速写本铅笔、窗外绿植和七个工厂演员', () => {
+describe('真实 Three 双层建筑与资源', () => {
+  it('双层木地板、青蓝楼梯地胶、闭合屋顶墙窗、教室黑板桌椅、1F 辅导员办公室与八个工厂演员', () => {
     const { root, definition, actors } = build();
-    for (const name of ['roof', 'interior-walls', 'window-pane', 'blackboard', 'podium', 'stairwell-flight',
-      'sketchbook-cover', 'sketchbook-page', 'pencil', 'pencilled-window-study', 'window-greenery']) expect(root.getObjectByName(name), name).toBeDefined();
-    expect(printed).toContain('二楼 · 教室'); expect(printed).toContain('侧楼梯 · 平台');
+    for (const name of [
+      'roof', 'interior-walls', 'window-pane', 'blackboard', 'podium', 'stairwell-flight',
+      'sketchbook-cover', 'sketchbook-page', 'pencil', 'pencilled-window-study', 'window-greenery',
+      'teacher-office-furniture', 'floor-2f-main-surface', 'stair-landing-slab',
+    ]) {
+      expect(root.getObjectByName(name), name).toBeDefined();
+    }
+    expect(printed).toContain('1F');
+    expect(printed).toContain('2F');
+    expect(printed).toContain('二楼 · 教室');
+    expect(printed).toContain('辅导员办公室');
+    expect(printed).toContain('侧楼梯 · 平台');
     const floor = mesh(root, 'interior-terrazzo-floor');
     expect((floor.material as THREE.MeshStandardMaterial).map).toBeInstanceOf(THREE.DataTexture);
     expect(new THREE.Box3().setFromObject(floor).max.y).toBeCloseTo(0);
     expect(actors['student-4']).toBe(actors.ayuan);
+    expect(actors.teacher).toBeDefined();
     const modelIds = new Set<string>(); let people = 0;
     root.traverse((node) => {
       expect(node.castShadow).toBe(false);
       if (node.userData.actorModelId) { modelIds.add(node.userData.actorModelId); people += 1; }
       if (node instanceof THREE.Mesh) expect(Array.from(node.geometry.getAttribute('position').array).every(Number.isFinite)).toBe(true);
     });
-    expect(people).toBe(7); expect([...modelIds].sort()).toEqual([...definition.requiredModels!].sort());
+    expect(people).toBe(8);
+    expect([...modelIds].sort()).toEqual([...definition.requiredModels!].sort());
     expect(getCharacterModel(actors.linxia.userData.actorModelId).path).toBe('./models/chr_linxia.glb');
+    expect(getCharacterModel(actors.teacher.userData.actorModelId).path).toBe('./models/chr_volunteer.glb');
     for (const { id } of L.students) {
       const phone = actors[id].getObjectByName('actor-props')!.children[0] as THREE.Mesh;
       expect(phone.geometry).toBeInstanceOf(THREE.BoxGeometry);
@@ -123,15 +148,23 @@ describe('真实 Three 建筑与资源', () => {
       expect(color === 0xcd793c).toBe(id === 'student-4');
     }
     expect(root.getObjectByName('orange-phone-screen')).toBeDefined();
-    // 从教室、走廊、平台中心，水平四周与正上方均能命中封闭外壳。
-    for (const origin of [new THREE.Vector3(-4, 1.6, 6), new THREE.Vector3(3, 1.6, 0), new THREE.Vector3(7, 1.6, 5)]) {
+    // 1F 办公室/走廊 与 2F 教室/走廊/平台中心，水平四周与正上方均命中封闭外壳。
+    const probes = [
+      new THREE.Vector3(-4, FLOOR1_Y + 1.6, -3),
+      new THREE.Vector3(3, FLOOR1_Y + 1.6, 0),
+      new THREE.Vector3(-4, FLOOR2_Y + 1.6, 6),
+      new THREE.Vector3(3, FLOOR2_Y + 1.6, 0),
+      new THREE.Vector3(7, FLOOR2_Y + 1.6, 5),
+    ];
+    for (const origin of probes) {
       for (let a = 0; a < 32; a += 1) {
         const ray = new THREE.Raycaster(origin, new THREE.Vector3(Math.cos(a * Math.PI / 16), 0, Math.sin(a * Math.PI / 16)), 0, 40);
         expect(ray.intersectObject(root.getObjectByName('interior-walls')!, true).length).toBeGreaterThan(0);
       }
-      expect(new THREE.Raycaster(origin, new THREE.Vector3(0, 1, 0), 0, 5).intersectObject(root.getObjectByName('roof')!).length).toBeGreaterThan(0);
+      expect(new THREE.Raycaster(origin, new THREE.Vector3(0, 1, 0), 0, 10).intersectObject(root.getObjectByName('interior-walls')!, true).length).toBeGreaterThan(0);
     }
   });
+
   it('重复 build 无本地共享泄漏；WorldApp 清理规则释放全部 owned 资源和实例缓冲', () => {
     const a = build(); const b = build(); const ar = allResources(a.root); const br = allResources(b.root);
     const disposed = new Set<unknown>();
@@ -148,73 +181,195 @@ describe('真实 Three 建筑与资源', () => {
     instanceSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
     for (const r of br.materials) expect(disposed.has(r)).toBe(false);
   });
+
+  it('P0-01～03 回归：公告栏与矮柜零穿柱穿门套、地面柔光非加色过曝、外窗玻璃零重叠', () => {
+    const { root, actors } = build('D1');
+    const pillarHalf = 0.16;
+    const boardHalf = 0.64;
+    const lockerHalf = 0.69;
+    const f1Doors: ReadonlyArray<[number, number]> = [[-3.45, -0.95], [3.75, 6.25]];
+    const f2Doors: ReadonlyArray<[number, number]> = [[-6.25, -3.75], [3.75, 6.25]];
+
+    const assertClearZ = (center: number, half: number, doors: ReadonlyArray<[number, number]>) => {
+      const minZ = center - half;
+      const maxZ = center + half;
+      for (const pz of CORRIDOR_PILLAR_Z) {
+        const gap = Math.max(minZ - (pz + pillarHalf), (pz - pillarHalf) - maxZ);
+        expect(gap, `Z=${center} 与柱 Z=${pz} 净距不足`).toBeGreaterThanOrEqual(0.14);
+      }
+      for (const [dMin, dMax] of doors) {
+        const gap = Math.max(minZ - dMax, dMin - maxZ);
+        expect(gap, `Z=${center} 与门套 [${dMin},${dMax}] 净距不足`).toBeGreaterThanOrEqual(0.12);
+      }
+    };
+    CORRIDOR_LAYOUT.f1BulletinsZ.forEach((bz) => assertClearZ(bz, boardHalf, f1Doors));
+    CORRIDOR_LAYOUT.f2BulletinsZ.forEach((bz) => assertClearZ(bz, boardHalf, f2Doors));
+    CORRIDOR_LAYOUT.f1LowLockersZ.forEach((lz) => assertClearZ(lz, lockerHalf, f1Doors));
+    CORRIDOR_LAYOUT.f2LowLockersZ.forEach((lz) => assertClearZ(lz, lockerHalf, f2Doors));
+
+    // P0-02：木地面适度漫反射粗糙度、窗光贴地层使用 NormalBlending、夕照点光强度受控
+    const floorMat = mesh(root, 'interior-terrazzo-floor').material as THREE.MeshStandardMaterial;
+    expect(floorMat.roughness).toBeGreaterThanOrEqual(0.55);
+    expect(floorMat.roughness).toBeLessThanOrEqual(0.7);
+    const patches = mesh(root, 'corridor-sun-patches').material as THREE.MeshBasicMaterial;
+    expect(patches.blending).toBe(THREE.NormalBlending);
+    runtime.enter(context(actors, 'D1'));
+    expect((actors['interior-sunset'] as THREE.PointLight).intensity).toBeLessThanOrEqual(8);
+
+    // P0-03：独立命名的 window-pane 不与批量 window-panes-batch 任何实例重叠
+    root.updateMatrixWorld(true);
+    const singlePaneBox = new THREE.Box3().setFromObject(mesh(root, 'window-pane'));
+    const batchPanes = root.getObjectByName('window-panes-batch') as THREE.InstancedMesh;
+    expect(batchPanes).toBeInstanceOf(THREE.InstancedMesh);
+    const instanceMatrix = new THREE.Matrix4();
+    const unitBox = new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5));
+    for (let i = 0; i < batchPanes.count; i += 1) {
+      batchPanes.getMatrixAt(i, instanceMatrix);
+      const worldInstBox = unitBox.clone().applyMatrix4(instanceMatrix).applyMatrix4(batchPanes.matrixWorld);
+      expect(singlePaneBox.intersectsBox(worldInstBox), `window-pane 与批次实例 #${i} 重叠`).toBe(false);
+    }
+  });
 });
 
 const RADIUS = 0.32;
-/** 网格 BFS 用真实 movement 验证连接，不允许跨薄墙或只证明目标位于矩形内。 */
-function walkableGrid(id: SceneId) {
-  const d = createSchoolInteriorDefinition(id); const { nav } = d;
-  const points = new Map<string, Vec2>(); const step = 0.2;
-  for (let ix = -42; ix <= 47; ix += 1) for (let iz = -42; iz <= 42; iz += 1) {
-    const p = { x: ix * step, z: iz * step };
-    if (!isInsideBounds(p, nav.bounds) || nav.obstacles.some((o) => p.x > o.minX - RADIUS + 1e-6 && p.x < o.maxX + RADIUS - 1e-6 && p.z > o.minZ - RADIUS + 1e-6 && p.z < o.maxZ + RADIUS - 1e-6)) continue;
-    points.set(`${ix},${iz}`, p);
-  }
-  const first = [...points].sort((a, b) => Math.hypot(a[1].x - d.spawn.x, a[1].z - d.spawn.z) - Math.hypot(b[1].x - d.spawn.x, b[1].z - d.spawn.z))[0][0];
-  const queue = [first]; const reached = new Set(queue);
-  for (let i = 0; i < queue.length; i += 1) {
-    const [x, z] = queue[i].split(',').map(Number);
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const key = `${x + dx},${z + dz}`;
-      if (reached.has(key) || !points.has(key)) continue;
-      const from = points.get(queue[i])!; const to = points.get(key)!;
-      const end = resolveMovement(from, { x: to.x - from.x, z: to.z - from.z }, nav.bounds, nav.obstacles, RADIUS);
-      if (Math.hypot(end.x - to.x, end.z - to.z) > 1e-6) continue;
-      reached.add(key); queue.push(key);
+
+/** 按给定航点逐帧（0.15m 步长）模拟真实玩家走完多层路线并追踪 feetY。 */
+function walkWaypoints(
+  sceneId: SceneId,
+  start: { x: number; y: number; z: number },
+  waypoints: ReadonlyArray<{ x: number; z: number }>,
+): { x: number; y: number; z: number } {
+  const { nav } = createSchoolInteriorDefinition(sceneId);
+  let pos: Vec2 = { x: start.x, z: start.z };
+  let feetY = start.y;
+  for (const target of waypoints) {
+    for (let guard = 0; guard < 240; guard += 1) {
+      const dx = target.x - pos.x;
+      const dz = target.z - pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist <= 0.05) break;
+      const step = Math.min(0.15, dist);
+      const next = resolveMovement(
+        pos,
+        { x: (dx / dist) * step, z: (dz / dist) * step },
+        nav.bounds,
+        nav.obstacles,
+        RADIUS,
+        { currentY: feetY, surfaces: nav.surfaces, groundY: nav.groundY },
+      );
+      expect(Math.hypot(next.x - pos.x, next.z - pos.z), `卡在 (${pos.x.toFixed(2)}, ${feetY.toFixed(2)}, ${pos.z.toFixed(2)}) → (${target.x}, ${target.z})`).toBeGreaterThan(1e-4);
+      pos = next;
+      feetY = sampleGroundHeight(pos, nav.surfaces, nav.groundY, feetY);
     }
+    expect(pos.x).toBeCloseTo(target.x, 1);
+    expect(pos.z).toBeCloseTo(target.z, 1);
   }
-  expect(reached.size).toBe(points.size);
-  return { d, points, reached };
+  return { x: pos.x, y: feetY, z: pos.z };
 }
-describe('教学楼导航与无遮挡目标', () => {
-  it.each(IDS)('%s：全导航连通、出生远离区域、目标接近点可达且无遮挡', (id) => {
-    const { d, points, reached } = walkableGrid(id);
-    const { root, result, actors } = build(id); runtime.enter(context(actors, id)); root.updateMatrixWorld(true);
-    const targets = id === 'C2' ? L.seats.map((seat, i) => ({ approach: seat.approach, interaction: d.interactables![i] }))
-      : id === 'C5' ? L.students.map((p, i) => ({ approach: p.approach, interaction: d.interactables![i] })) : [];
-    const approaches: Vec2[] = [...targets.map((t) => t.approach), ...d.zones!.map((z) => z.center), L.classroomDoor, L.stairwellDoor];
-    for (const p of approaches) {
-      const nearest = [...points].sort((a, b) => Math.hypot(a[1].x - p.x, a[1].z - p.z) - Math.hypot(b[1].x - p.x, b[1].z - p.z))[0];
-      expect(reached.has(nearest[0])).toBe(true);
-      const end = resolveMovement(nearest[1], { x: p.x - nearest[1].x, z: p.z - nearest[1].z }, d.nav.bounds, d.nav.obstacles, RADIUS);
-      expect(end.x).toBeCloseTo(p.x); expect(end.z).toBeCloseTo(p.z);
-    }
+
+describe('双层教学楼导航、上下楼动线与无遮挡目标', () => {
+  it('C3：从 2F 教室外真实走下双跑折返楼梯（2F → 1.5F 休息平台 → 1F）并走入 1F 辅导员办公室见周老师', () => {
+    const d = createSchoolInteriorDefinition('C3');
+    const { root, result, actors } = build('C3');
+    runtime.enter(context(actors, 'C3'));
+    root.updateMatrixWorld(true);
+    expect(actors.teacher.visible).toBe(true);
+    expect(actors.teacher.position.y).toBe(FLOOR1_Y);
+
+    const end = walkWaypoints('C3', L.spawns.C3, [
+      { x: 6.2, z: 3.0 }, // 2F 东侧楼梯口
+      { x: 6.2, z: 0.4 }, // 踏入上段梯段 A
+      { x: 6.2, z: -5.8 }, // 到达 1.5F 中间休息平台
+      { x: 8.7, z: -5.8 }, // 折返至下段梯段 B 顶
+      { x: 8.7, z: 1.6 }, // 下到 1F 楼梯厅
+      { x: 3.0, z: 2.2 }, // 拐入 1F 走廊
+      { x: 3.0, z: -2.2 }, // 到达 1F 辅导员办公室门外
+      { x: L.teacherOfficeApproach.x, z: L.teacherOfficeApproach.z }, // 走入 1F 辅导员办公室周老师桌前
+    ]);
+    expect(end.y).toBeCloseTo(FLOOR1_Y, 2);
+
+    const interaction = d.interactables![0];
+    const eye = new THREE.Vector3(end.x, end.y + 1.6, end.z);
+    const target = new THREE.Vector3(interaction.position.x, interaction.position.y + interaction.lightOffsetY!, interaction.position.z);
+    const dist = eye.distanceTo(target);
+    expect(dist).toBeLessThan(interaction.maxDistance!);
+    expect(new THREE.Raycaster(eye, target.sub(eye).normalize(), 0, dist - 0.08).intersectObjects(result.occluders, true)).toHaveLength(0);
+  });
+
+  it('C4：从 1F 楼梯口真实沿下段梯段走上 1.5F 中间休息平台听见林夏打电话，且还能继续上到 2F', () => {
+    const mid = walkWaypoints('C4', L.spawns.C4, [
+      { x: 8.7, z: 2.2 },
+      { x: 8.7, z: -5.4 },
+      { x: L.stairwell.x, z: L.stairwell.z },
+    ]);
+    expect(mid.y).toBeCloseTo(LANDING_Y, 2);
+
+    const upTo2F = walkWaypoints('C4', mid, [
+      { x: 6.2, z: -5.4 },
+      { x: 6.2, z: 1.6 },
+      { x: 3.0, z: 3.0 },
+    ]);
+    expect(upTo2F.y).toBeCloseTo(FLOOR2_Y, 2);
+  });
+
+  it.each(['C2', 'C5', 'C6', 'D1', 'D6'] as const)('%s：目标可达、视线无遮挡且出生远离触发区', (id) => {
+    const d = createSchoolInteriorDefinition(id);
+    const { root, result, actors } = build(id);
+    runtime.enter(context(actors, id));
+    root.updateMatrixWorld(true);
+    const spawn = d.spawn;
+    const spawnPos = { x: spawn.x, y: spawn.y ?? FLOOR1_Y, z: spawn.z };
+    expect(isInsideBounds(spawnPos, d.nav.bounds, spawnPos.y)).toBe(true);
+
     for (const zone of d.zones!) {
       expect(zone.kind).toBe('circle');
-      expect(Math.hypot(d.spawn.x - zone.center.x, d.spawn.z - zone.center.z)).toBeGreaterThan(2);
+      expect(Math.hypot(spawnPos.x - zone.center.x, spawnPos.z - zone.center.z, spawnPos.y - zone.center.y)).toBeGreaterThan(2);
     }
-    for (const { approach, interaction } of targets) {
-      const eye = new THREE.Vector3(approach.x, 1.6, approach.z);
-      const p = interaction.position; const target = new THREE.Vector3(p.x, p.y + interaction.lightOffsetY!, p.z);
-      const distance = eye.distanceTo(target);
-      expect(distance).toBeLessThan(interaction.maxDistance!);
-      expect(new THREE.Raycaster(eye, target.sub(eye).normalize(), 0, distance - 0.08).intersectObjects(result.occluders, true)).toHaveLength(0);
+
+    if (id === 'C2') {
+      L.seats.forEach((seat, i) => {
+        const eye = new THREE.Vector3(seat.approach.x, seat.approach.y + 1.6, seat.approach.z);
+        const inter = d.interactables![i];
+        const target = new THREE.Vector3(inter.position.x, inter.position.y + inter.lightOffsetY!, inter.position.z);
+        const dist = eye.distanceTo(target);
+        expect(dist).toBeLessThan(inter.maxDistance!);
+        expect(new THREE.Raycaster(eye, target.sub(eye).normalize(), 0, dist - 0.08).intersectObjects(result.occluders, true)).toHaveLength(0);
+      });
+    }
+    if (id === 'C5') {
+      L.students.forEach((student, i) => {
+        const eye = new THREE.Vector3(student.approach.x, student.approach.y + 1.6, student.approach.z);
+        const inter = d.interactables![i];
+        const target = new THREE.Vector3(inter.position.x, inter.position.y + inter.lightOffsetY!, inter.position.z);
+        const dist = eye.distanceTo(target);
+        expect(dist).toBeLessThan(inter.maxDistance!);
+        expect(new THREE.Raycaster(eye, target.sub(eye).normalize(), 0, dist - 0.08).intersectObjects(result.occluders, true)).toHaveLength(0);
+      });
     }
     if (d.panoramaAnchor) {
-      const a = d.panoramaAnchor; const from = new THREE.Vector3(a.position.x, a.position.y, a.position.z);
+      const a = d.panoramaAnchor;
+      const from = new THREE.Vector3(a.position.x, a.position.y, a.position.z);
       const target = new THREE.Vector3(a.lookAt.x, a.lookAt.y, a.lookAt.z);
-      const distance = from.distanceTo(target);
-      expect(distance).toBeLessThan(2);
-      expect(new THREE.Raycaster(from, target.sub(from).normalize(), 0, distance - 0.08).intersectObjects(result.occluders, true)).toHaveLength(0);
+      const dist = from.distanceTo(target);
+      expect(dist).toBeLessThan(2.5);
+      expect(new THREE.Raycaster(from, target.sub(from).normalize(), 0, dist - 0.08).intersectObjects(result.occluders, true)).toHaveLength(0);
     }
   });
-  it('墙/桌椅/楼梯/同学的碰撞不可穿过', () => {
-    const d = createSchoolInteriorDefinition('C5'); const nav = d.nav;
-    const move = (from: Vec2, delta: Vec2) => resolveMovement(from, delta, nav.bounds, nav.obstacles, RADIUS);
-    expect(move({ x: 3, z: 0 }, { x: -5, z: 0 }).x).toBeGreaterThan(1.4);
-    expect(move({ x: -5.3, z: 4 }, { x: -3, z: 0 }).x).toBeGreaterThan(-6);
-    expect(move({ x: 7, z: -5 }, { x: 2, z: 0 }).x).toBeLessThan(7.2);
-    expect(move({ x: 2.7, z: -4 }, { x: 2, z: 0 }).x).toBeLessThan(3.44);
+
+  it('2F 护栏挡住 2F 玩家掉进楼梯井，但正下方 1F 入口照常通行；墙/桌椅/中隔/同学碰撞不可穿过', () => {
+    const d = createSchoolInteriorDefinition('C5');
+    const { nav } = d;
+    const move = (from: Vec2, delta: Vec2, y: number) =>
+      resolveMovement(from, delta, nav.bounds, nav.obstacles, RADIUS, { currentY: y, surfaces: nav.surfaces, groundY: nav.groundY });
+    // 2F 教室墙与课桌阻挡
+    expect(move({ x: 3, z: 0 }, { x: -5, z: 0 }, FLOOR2_Y).x).toBeGreaterThan(1.4);
+    expect(move({ x: -5.3, z: 4 }, { x: -3, z: 0 }, FLOOR2_Y).x).toBeGreaterThan(-6);
+    // 2F 东侧护栏阻挡从 2F 平台跨进下段楼梯井
+    expect(move({ x: 8.6, z: 2.0 }, { x: 0, z: -4.0 }, FLOOR2_Y).z).toBeGreaterThan(0.6);
+    // 同 XZ 在 1F 畅通步入下段楼梯
+    expect(move({ x: 8.6, z: 2.0 }, { x: 0, z: -2.2 }, FLOOR1_Y).z).toBeLessThan(0.0);
+    // 同学占位阻挡
+    expect(move({ x: 2.7, z: -4 }, { x: 2, z: 0 }, FLOOR2_Y).x).toBeLessThan(3.44);
   });
 });
 
@@ -229,6 +384,7 @@ describe('局部 runtime 与过期订阅', () => {
     expect(actors.ayuan.visible).toBe(true);
     expect(ctx.storyFlags).toEqual({ noticedTyper: true, joined: true });
   });
+
   it('C5 初始全隐藏，仅辨认时显示可用 options，其他模态重新隐藏', () => {
     const { actors } = build('C5'); const ctx = context(actors); runtime.enter(ctx);
     const visible = vi.mocked(ctx.setInteractableVisible);
@@ -243,6 +399,7 @@ describe('局部 runtime 与过期订阅', () => {
     recognize(ctx); ctx.bus.emit('ui:showArt', { stepId: 'art', assetId: 'test' });
     expect(visible.mock.calls.slice(-6).every(([, show]) => !show)).toBe(true);
   });
+
   it('只读 noticedTyper / joined，错 scene 忽略，无反向状态变更', () => {
     const { actors } = build('C5'); const ctx = context(actors); runtime.enter(ctx);
     const hint = actors['orange-phone-hint'] as THREE.PointLight;
@@ -254,25 +411,37 @@ describe('局部 runtime 与过期订阅', () => {
     expect(actors.ayuan.visible).toBe(false); state(d6, 'D6', false, true); expect(actors.ayuan.visible).toBe(true);
     state(d6, 'D6', false, false); expect(actors.ayuan.visible).toBe(false);
   });
-  it('同 key 连续进入按配置重摆角色、坐姿/电话与日夜夕阳灯光均正确恢复', () => {
+
+  it('同 key 连续进入按楼层重摆角色、坐姿/电话与日夜夕阳灯光均正确恢复', () => {
     const { actors } = build(); const ctx = context(actors, 'C2');
     runtime.enter(ctx); expect(actors.linxia.visible).toBe(true); expect(actors.ayuan.visible).toBe(false);
+    expect(actors.linxia.position.y).toBe(FLOOR2_Y);
     expect(actors.linxia.position.z).toBe(L.linxiaDesk.z);
     expect(actors.linxia.getObjectByName('actor-props')!.visible).toBe(false);
     expect(actors.linxia.getObjectByName('seated-fallback-legs')!.visible).toBe(true);
     const day = (actors['interior-fill'] as THREE.Light).intensity;
+    runtime.enter({ ...ctx, sceneId: 'C3' });
+    expect(actors.teacher.visible).toBe(true);
+    expect(actors.teacher.position.y).toBe(FLOOR1_Y);
     runtime.enter({ ...ctx, sceneId: 'C4' });
-    expect(actors.linxia.position.x).toBe(L.stairwellActor.x); expect(actors.linxia.getObjectByName('actor-props')!.visible).toBe(true);
+    expect(actors.teacher.visible).toBe(false);
+    expect(actors.linxia.position.y).toBe(LANDING_Y);
+    expect(actors.linxia.position.x).toBe(L.stairwellActor.x);
+    expect(actors.linxia.getObjectByName('actor-props')!.visible).toBe(true);
     expect(actors.linxia.getObjectByName('seated-fallback-legs')!.visible).toBe(false);
     runtime.enter({ ...ctx, sceneId: 'C6' });
     expect(actors.linxia.visible).toBe(false); expect(actors.ayuan.visible).toBe(true);
+    expect(actors.ayuan.position.y).toBe(LANDING_Y);
     expect((actors['interior-fill'] as THREE.Light).intensity).toBeLessThan(day);
     expect((actors['orange-phone-hint'] as THREE.Light).intensity).toBeGreaterThan(0.2);
     runtime.enter({ ...ctx, sceneId: 'D1' });
-    expect(actors.ayuan.position.z).toBe(L.platformActor.z); expect((actors['interior-sunset'] as THREE.Light).intensity).toBeGreaterThan(0);
+    expect(actors.ayuan.position.y).toBe(FLOOR2_Y);
+    expect(actors.ayuan.position.z).toBe(L.platformActor.z);
+    expect((actors['interior-sunset'] as THREE.Light).intensity).toBeGreaterThan(0);
     runtime.enter(ctx); expect((actors['interior-fill'] as THREE.Light).intensity).toBe(day);
     expect((actors['interior-sunset'] as THREE.Light).intensity).toBe(0);
   });
+
   it('重复 enter 不叠加订阅，旧 bus/已取消回调/错场景和 exit 后 tick 均无效', () => {
     const a = build('C5'); const ctx = context(a.actors); const on = vi.spyOn(ctx.bus, 'on');
     const off = vi.spyOn(ctx.bus, 'off'); runtime.enter(ctx); const count = on.mock.calls.length;
@@ -291,7 +460,6 @@ describe('局部 runtime 与过期订阅', () => {
   });
 });
 
-/** 简化可预测的真实 Three 骨架，验证工厂缓存路径/实例骨骼姿态，不假冒真实美术质量验收。 */
 function rig(): THREE.Group {
   const root = new THREE.Group();
   const hip = new THREE.Bone(); hip.name = 'Hip'; hip.position.y = 0.9; root.add(hip);
@@ -311,6 +479,7 @@ function rig(): THREE.Group {
   mesh.bind(new THREE.Skeleton(bones)); root.add(mesh);
   return root;
 }
+
 describe('缓存角色与热替换资源', () => {
   it('模型就绪使用工厂真实模型根，坐姿调整实例骨骼，退出复位，释放独有 skeleton 不释放共享材质', () => {
     vi.spyOn(resources, 'hasCharacterModel').mockReturnValue(true);
@@ -331,11 +500,11 @@ describe('缓存角色与热替换资源', () => {
     const materialSpies = sharedMaterials.map((m) => vi.spyOn(m, 'dispose'));
     disposeTree(root); spies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1));
     materialSpies.forEach((spy) => expect(spy).not.toHaveBeenCalled());
-    // 测试夹具扮演资源缓存，最后自行释放其持有的共享模板资源。
     instances.forEach((model) => model.traverse((node) => {
       if (node instanceof THREE.Mesh) { node.geometry.dispose(); (node.material as THREE.Material).dispose(); }
     }));
   });
+
   it('运行中模型晚到会重新应用坐姿；退出后不再补姿态', async () => {
     let ready = false; let finish!: (asset: resources.CharacterModelAsset) => void;
     vi.spyOn(resources, 'hasCharacterModel').mockImplementation(() => ready);

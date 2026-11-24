@@ -15,16 +15,22 @@ import type { PropModelId } from './propManifest';
 
 const TINTS = [PROP_TINT_WOOD, PROP_TINT_METAL, PROP_TINT_PAPER, PROP_TINT_NEUTRAL];
 
-/** 本地脚本程序化建模的食堂套件（成品色烘进顶点色，tint 必须中性白） */
-const LOCAL_KIT_IDS: PropModelId[] = [
+/** 本地脚本程序化建模的食堂套件与教学楼套件（成品色烘进顶点色，canteenSet 外 tint 必须中性白） */
+const CANTEEN_KIT_IDS: PropModelId[] = [
   'canteenSet', 'canteenColumn', 'canteenTrayRack', 'canteenWindowBay', 'canteenVending', 'canteenClock',
 ];
+const SCHOOL_KIT_IDS: PropModelId[] = [
+  'schoolDeskUnit', 'schoolChairUnit', 'schoolLowLocker', 'schoolTallLocker', 'schoolBackpack',
+  'schoolBulletin', 'schoolPodium', 'schoolSpeaker', 'schoolOfficeDesk', 'schoolFileCabinet',
+  'schoolTreeA', 'schoolTreeB', 'schoolTreeC',
+];
+const LOCAL_KIT_IDS: PropModelId[] = [...CANTEEN_KIT_IDS, ...SCHOOL_KIT_IDS];
 
 describe('PROP_MODELS 清单', () => {
-  it('登记 public/models/props 下全部 14 件成品，id 不重复', () => {
-    expect(PROP_MODELS).toHaveLength(14);
+  it('登记 public/models/props 下全部 27 件成品，id 不重复', () => {
+    expect(PROP_MODELS).toHaveLength(27);
     const ids = PROP_MODELS.map((entry) => entry.id);
-    expect(new Set(ids).size).toBe(14);
+    expect(new Set(ids).size).toBe(27);
   });
 
   it('所有道具路径以 ./models/ 开头且为 .glb（禁止写死根路径）', () => {
@@ -79,10 +85,14 @@ describe('PROP_MODELS 清单', () => {
     for (const entry of PROP_MODELS) {
       expect(entry.license).toBe('CC0 1.0');
       expect(entry.name.length).toBeGreaterThan(0);
-      if ((LOCAL_KIT_IDS as string[]).includes(entry.id)) {
-        // 本地脚本产物：作者与来源指向可复跑的生产脚本
+      if ((CANTEEN_KIT_IDS as string[]).includes(entry.id)) {
+        // 本地食堂脚本产物：作者与来源指向可复跑的生产脚本
         expect(entry.author).toBe('Local Blender Kit');
         expect(entry.source).toBe('local://tools/blender_canteen_kit.py');
+      } else if ((SCHOOL_KIT_IDS as string[]).includes(entry.id)) {
+        // 本地教学楼脚本产物：作者与来源指向可复跑的生产脚本
+        expect(entry.author).toBe('Local Blender Kit');
+        expect(entry.source).toBe('local://tools/blender_school_kit.py');
       } else {
         expect(entry.author).toBe('Poly Haven');
         expect(entry.source.startsWith('https://polyhaven.com/a/')).toBe(true);

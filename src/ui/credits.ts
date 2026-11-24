@@ -17,8 +17,10 @@ const CREDITS: readonly CreditEntry[] = [
   { item: '正文字体 Noto Sans SC', detail: '按本作用字子集化后本地打包', license: 'SIL Open Font License 1.1' },
   { item: '3D 渲染 three.js', detail: '开源 3D 渲染库', license: 'MIT License' },
   { item: '镜头与动画 GSAP', detail: '开源动画库', license: 'GSAP 标准免费许可' },
-  { item: '角色模型', detail: '项目团队制作并压缩', license: '本作品自有' },
-  { item: '场景、纸纹、胶片颗粒与音效', detail: '全部由代码程序化生成', license: '本作品自有' },
+  { item: '部分室外与室内 3D 道具', detail: 'Poly Haven 公共领域模型（路灯、长椅、行李箱、单人床、垃圾桶、文具等，经压缩与色温归一）', license: 'CC0 1.0' },
+  { item: '食堂与教学楼模块化组件', detail: '本地 Blender 脚本程序化建模并烘焙顶点 AO（桌椅、储物柜、公告栏、讲桌、香樟树等）', license: '本作品自有（CC0 1.0）' },
+  { item: '角色模型与剧情插画', detail: '项目团队制作并压缩打包', license: '本作品自有' },
+  { item: '建筑壳体、纸纹颗粒与音效', detail: '由代码、离屏 Canvas 与 Web Audio 程序化生成，自绘 SVG 图标', license: '本作品自有' },
 ];
 
 let overlay: HTMLElement | null = null;
@@ -60,7 +62,11 @@ function build(): HTMLElement {
     list.append(row);
   }
 
-  const note = createElement('p', 'credits__note', '本版本未使用第三方贴图、模型或图标。');
+  const note = createElement(
+    'p',
+    'credits__note',
+    '本版本不含强制署名（CC BY）素材；外部 CC0 道具与本地 Blender 组件逐项清单见 docs/ASSET_CREDITS.md。',
+  );
 
   sheet.append(closeButton, eyebrow, title, lead, list, note);
   root.append(sheet);

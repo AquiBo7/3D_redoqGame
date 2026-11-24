@@ -478,9 +478,9 @@ export class WorldApp {
           };
         },
         getAirParticles: () => this.airParticles,
-        /** 传送并设定视角（yawDeg=0 面向 -Z，180 面向 +Z；pitchDeg 缺省沿用控制器初始值） */
-        teleport: (x: number, z: number, yawDeg = 0, pitchDeg?: number) => {
-          this.controller.setSpawn({ x, z, yaw: (yawDeg * Math.PI) / 180, pitchDeg });
+        /** 传送并设定视角（yawDeg=0 面向 -Z，180 面向 +Z；pitchDeg 缺省沿用控制器初始值；可选 y 供双层楼指定楼层） */
+        teleport: (x: number, z: number, yawDeg = 0, pitchDeg?: number, y?: number) => {
+          this.controller.setSpawn({ x, z, y, yaw: (yawDeg * Math.PI) / 180, pitchDeg });
         },
         hasModel: (id: string) => hasCharacterModel(id as CharacterModelId),
         // 无头回归脚本：按当前场景发出与交互系统相同的事件，避免依赖 3D 瞄准
@@ -1133,7 +1133,7 @@ export class WorldApp {
     this.levelGroup.traverse((object) => {
       if (!object.userData.actorModelId) return;
       const position = object.getWorldPosition(this.scratchWorldPos);
-      const groundY = sampleGroundHeight(position, this.currentDefinition.nav.surfaces, this.currentDefinition.nav.groundY);
+      const groundY = sampleGroundHeight(position, this.currentDefinition.nav.surfaces, this.currentDefinition.nav.groundY, position.y);
       if (isGroundedActor(object, groundY)) grounded.push(object);
     });
     for (const actor of grounded) {

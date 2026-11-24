@@ -40,20 +40,41 @@
 | `prop_bench.glb` | painted_wooden_bench | S8 林荫路 长椅 | Poly Haven | https://polyhaven.com/a/painted_wooden_bench | CC0 1.0 |
 | `prop_suitcase.glb` | vintage_suitcase | S1 热点「行李箱」 | Poly Haven | https://polyhaven.com/a/vintage_suitcase | CC0 1.0 |
 | `prop_stationery.glb` | stationery_supplies | S7 登记桌 / C2 教室 文具书本 | Poly Haven | https://polyhaven.com/a/stationery_supplies | CC0 1.0 |
-| `prop_canteen_set.glb` | painted_wooden_table + painted_wooden_chair_01 | S12 / S13 食堂 一桌四椅套装（`tools/blender_canteen_set.py` 合成并烘焙成单图集） | Poly Haven | https://polyhaven.com/a/painted_wooden_table | CC0 1.0 |
 
 - CC0 允许商用、无需署名、无需额外声明；上表仅为评委核查留痕。
 - 道具已挂载：清单在 `src/scenes3d/propManifest.ts`，各场景按位表用 InstancedMesh 换掉程序化家具；
   GLB 加载失败或被切走时场景保留程序化桌椅兜底，不会出现空洞。
-- 树（行道树）没有采用 Poly Haven：其树是摄影测量扫描，1k 变体 60–100MB、上万片带 alpha 的叶卡，
-  压到 500 面会糊成一团；按 `docs/美术优化素材与提示词包.md` 第六节 S8 的方案保持程序化 + InstancedMesh。
+
+## 本地 Blender 程序化套件（自制 · CC0 1.0）
+
+由仓库内可复跑的 Blender Python 脚本直接建模、射线烘焙顶点色 AO（`COLOR_0`）并经 `@gltf-transform/cli meshopt` 压缩输出至 `public/models/props/`，零外部贴图依赖：
+
+| 成品 | 生产脚本 | 用途 | 许可 |
+| --- | --- | --- | --- |
+| `prop_canteen_set.glb` | `tools/blender_canteen_kit.py` | S12 / S13 食堂 连体四人桌椅套装 | CC0 1.0 |
+| `prop_canteen_column.glb` | `tools/blender_canteen_kit.py` | S12 / S13 食堂 竖条纹凹槽大柱 | CC0 1.0 |
+| `prop_canteen_tray_rack.glb` | `tools/blender_canteen_kit.py` | S12 / S13 食堂 不锈钢多层餐盘回收架 | CC0 1.0 |
+| `prop_canteen_window_bay.glb` | `tools/blender_canteen_kit.py` | S12 / S13 食堂 落地高窗框带暖气片 | CC0 1.0 |
+| `prop_canteen_vending.glb` | `tools/blender_canteen_kit.py` | S12 / S13 食堂 无品牌发光售货机 | CC0 1.0 |
+| `prop_canteen_clock.glb` | `tools/blender_canteen_kit.py` | S12 / S13 食堂 端墙圆形挂钟 | CC0 1.0 |
+| `prop_school_desk_unit.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 倒角暖木弯管双人课桌（掏空书斗） | CC0 1.0 |
+| `prop_school_chair_unit.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 微弧胶合板弯管课椅 | CC0 1.0 |
+| `prop_school_low_locker.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 走廊 2×4 八门百叶储物矮柜 | CC0 1.0 |
+| `prop_school_tall_locker.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 双门铁皮百叶储物高柜 | CC0 1.0 |
+| `prop_school_backpack.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 学生通勤双肩书包 | CC0 1.0 |
+| `prop_school_bulletin.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 木框绿绒课程表公告栏 | CC0 1.0 |
+| `prop_school_podium.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 挡书围边斜顶立式讲桌 | CC0 1.0 |
+| `prop_school_speaker.glb` | `tools/blender_school_kit.py` | C2–D6 教学楼 壁挂圆网罩广播音箱 | CC0 1.0 |
+| `prop_school_office_desk.glb` | `tools/blender_school_kit.py` | C3 1F 辅导员办公室 胡桃木办公桌组合（含台灯与显示器） | CC0 1.0 |
+| `prop_school_file_cabinet.glb` | `tools/blender_school_kit.py` | C3 1F 辅导员办公室 上玻下铁双节档案文件柜 | CC0 1.0 |
+| `prop_school_tree_a.glb` / `_b.glb` / `_c.glb` | `tools/blender_school_kit.py` | 教学楼窗外庭院 伞状 / 偏侧 / 高窄三型阔叶香樟树 | CC0 1.0 |
 
 ## 项目自制内容
 
 | 内容 | 说明 |
 | --- | --- |
-| 角色模型 `public/models/chr_*.glb` | 团队制作并经 gltf-transform meshopt 压缩（原始文件在 `art/raw/`） |
-| 场景几何体与文字牌 | 全部由 `src/scenes3d/` 程序化生成 |
+| 角色模型 `public/models/chr_*.glb` 与立绘/CG | 团队制作并经 gltf-transform meshopt 压缩（原始文件在 `art/raw/`） |
+| 场景建筑壳体、地面程序纹理与文字标牌 | 由 `src/scenes3d/` 生成，并与上述 Poly Haven 道具及本地 Blender 套件实例化组合 |
 | 胶片颗粒与纸纹 | `src/ui/filmGrain.ts` 离屏 Canvas 生成，无第三方纹理 |
 | 图标（静音 / 关闭 / 准星 / 箭头） | 自绘 SVG 与 CSS，未使用 game-icons.net |
 | 音效与环境声 | `src/audio/audioManager.ts` Web Audio 合成，无第三方音频文件 |

@@ -147,7 +147,7 @@ export function intersectGroundRay(
     };
     if (surface && !isPointInRect(point, surface)) continue;
     if (currentY !== undefined && Math.abs(point.y - currentY) > maxHeightDelta) continue;
-    if (Math.abs(sampleGroundHeight(point, surfaces, groundY) - point.y) > 1e-6) continue;
+    if (Math.abs(sampleGroundHeight(point, surfaces, groundY, currentY, maxHeightDelta) - point.y) > 1e-6) continue;
     nearest = distance;
     hit = point;
   }

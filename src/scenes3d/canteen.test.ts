@@ -122,6 +122,9 @@ describe('食堂真实几何与行走', () => {
     expect((mesh(root, 'canteen-tray-stacks') as THREE.InstancedMesh).count).toBe(24);
     expect((mesh(root, 'canteen-hot-food-pans') as THREE.InstancedMesh).count).toBe(16);
     expect(root.getObjectByName('canteen-window-garden')).toBeDefined();
+    expect(root.getObjectByName('canteen-tree-canopy-cards')).toBeInstanceOf(THREE.InstancedMesh);
+    const trunksMesh = mesh(root, 'canteen-tree-trunks');
+    expect((trunksMesh.material as THREE.MeshStandardMaterial).map).toBeInstanceOf(THREE.DataTexture);
     expect(root.getObjectByName('canteen-ceiling')).toBeDefined();
     const floor = mesh(root, 'canteen-terrazzo-floor');
     const material = floor.material as THREE.MeshStandardMaterial;
@@ -248,10 +251,9 @@ describe('食堂资源生命周期', () => {
     const second = build('S13');
     const a = resources(first.root);
     const b = resources(second.root);
-    // 1 张水磨石 DataTexture + 4 张窗口名 CanvasTexture + C-36 三号窗口悬挑牌 = 6。
-    // 该数字是场景内 CanvasTexture 的上限账（全场景贴图预算 25），新增文字牌必须走 createTextSign，
-    // 并且要确认它的 texture 由 material 的 dispose 监听释放，否则这里会漏检而不是变红。
-    expect(a.textures.size).toBe(6);
+    // 1 张水磨石 DataTexture + 4 张窗口名 CanvasTexture + C-36 三号窗口悬挑牌 + 1 张同款程序化树皮 + 1 张枝叶卡片 = 8。
+    // 远低于全场景 25 张贴图上限，且全部独立拥有并随 material dispose 释放。
+    expect(a.textures.size).toBe(8);
     const disposed = new Set<unknown>();
     // Three.js 各资源使用不同的 EventDispatcher 泛型，分别注册以保留严格类型。
     a.geometries.forEach((resource) => resource.addEventListener('dispose', () => disposed.add(resource)));

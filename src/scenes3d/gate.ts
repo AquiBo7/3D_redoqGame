@@ -732,20 +732,20 @@ const GATE_COLUMNS = [
   { center: { x: 0, y: 4.2, z: 1.5 }, size: { w: 4.9, h: 0.5, d: 0.6 } },
 ] as const;
 
-/** 围观人群（含举手机拍照的新生），错落面向台阶中央 */
+/** 围观人群（含举手机拍照的新生），错落面向台阶中央；4 名围观者 + 2 名进校路人共 6 套互不重复的非主线同学模型 */
 const CROWD_LOOK_TARGET: XZ = { x: 0, z: 2.8 };
 const CROWD: Array<{
   position: Vec3;
-  model: 'ayuan' | 'volunteer' | 'studentFemale' | 'studentMale';
+  model: 'ayuan' | 'volunteer' | 'studentFemale' | 'studentMale' | 'studentMale2' | 'studentMale3' | 'studentFemale3' | 'studentFemale4';
   color: number;
   phone?: boolean;
   /** 面向台阶时的微偏角，避免机械同向排排站 */
   yawBias?: number;
 }> = [
-  { position: { x: -3.6, y: 0, z: 3.4 }, model: 'studentMale', color: 0x8f9aa3, phone: true, yawBias: -0.18 },
-  { position: { x: 3.8, y: 0, z: 3.0 }, model: 'studentFemale', color: 0x93a0a8, yawBias: -0.65 },
-  { position: { x: 4.4, y: 0, z: 1.4 }, model: 'studentFemale', color: 0x8f9aa3, phone: true, yawBias: 0.4 },
-  { position: { x: -4.0, y: 0, z: 1.0 }, model: 'studentMale', color: 0x96a3ab, yawBias: 0.95 },
+  { position: { x: -3.6, y: 0, z: 3.4 }, model: 'studentMale2', color: 0x8f9aa3, phone: true, yawBias: -0.18 },
+  { position: { x: 3.8, y: 0, z: 3.0 }, model: 'studentFemale3', color: 0x93a0a8, yawBias: -0.65 },
+  { position: { x: 4.4, y: 0, z: 1.4 }, model: 'studentFemale4', color: 0x8f9aa3, phone: true, yawBias: 0.4 },
+  { position: { x: -4.0, y: 0, z: 1.0 }, model: 'studentMale3', color: 0x96a3ab, yawBias: 0.95 },
 ];
 
 /** 台阶旁低头打字的男生（橙色手机壳是认人暗号，不做特写） */
@@ -1339,8 +1339,18 @@ export function createGateDefinition(sceneId: SceneId): WorldSceneDefinition {
     footstepActors: ['carryGroup', 'linxiaSolo', ...GATE_WALKERS.map((path) => path.id)],
     spawn: SPAWN,
     nav: NAV,
-    // 围观 / 打字男生 / 父女合体骨架与交接后的林夏：爸爸全程用同一套骨骼演出，不再装第二份静态模型
-    requiredModels: ['linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale'],
+    // 围观（4 位差异化非主线同学）+ 2 位进校同学 + 打字男生（阿远）+ 父女合体骨架与交接后的林夏
+    requiredModels: [
+      'linxia',
+      'fatherCarry',
+      'ayuan',
+      'studentFemale',
+      'studentMale',
+      'studentMale2',
+      'studentMale3',
+      'studentFemale3',
+      'studentFemale4',
+    ],
     interactables: [],
     hotspots: isS5 ? HOTSPOTS : [],
     zones: isS5

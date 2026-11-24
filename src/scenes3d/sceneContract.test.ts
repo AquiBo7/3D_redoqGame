@@ -257,9 +257,15 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
     for (const sceneId of ['S1', 'S2', 'S3'] as const) {
       expect(getSceneDefinition(sceneId).requiredModels ?? []).toHaveLength(0);
     }
-    expect(getSceneDefinition('S4').requiredModels).toEqual(['volunteer', 'ayuan']);
-    expect(getSceneDefinition('S5').requiredModels).toEqual(['linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
-    expect(getSceneDefinition('S6').requiredModels).toEqual(['linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale']);
+    expect(getSceneDefinition('S4').requiredModels).toEqual([
+      'volunteer', 'studentMale', 'studentFemale', 'studentMale2', 'studentMale3', 'studentMale4', 'studentFemale3', 'studentFemale4',
+    ]);
+    expect(getSceneDefinition('S5').requiredModels).toEqual([
+      'linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale', 'studentMale2', 'studentMale3', 'studentFemale3', 'studentFemale4',
+    ]);
+    expect(getSceneDefinition('S6').requiredModels).toEqual([
+      'linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale', 'studentMale2', 'studentMale3', 'studentFemale3', 'studentFemale4',
+    ]);
     expect(getSceneDefinition('S7').requiredModels).toEqual(['volunteer', 'linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S8').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S9').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
