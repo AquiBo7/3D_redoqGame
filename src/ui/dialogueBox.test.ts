@@ -157,27 +157,35 @@ describe('DialogueBox 左侧人物立绘渲染与降级', () => {
     const firstImg = portrait.findByClass('dialogue__portrait-image')!;
     expect(firstImg.src).toBe(READY_EXTERNAL_ASSETS.portrait_linxia_casual);
 
-    // 点击一次跳过打字，再点击进入第二句（同为林夏，应复用同一 <img> 节点防闪烁）
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    // 切到下一句（兼容短句 160ms 内自动打完与长句手动跳过打字）
+    const nextLine = (): void => {
+      if (!section.classList.contains('is-ready')) {
+        vi.advanceTimersByTime(160);
+        panel.dispatchEvent(new Event('click'));
+      }
+      if (section.classList.contains('is-ready')) {
+        vi.advanceTimersByTime(160);
+        panel.dispatchEvent(new Event('click'));
+      }
+    };
+
+    // 进入第二句（同为林夏，应复用同一 <img> 节点防闪烁）
+    nextLine();
     expect(portrait.findByClass('dialogue__portrait-image')).toBe(firstImg);
 
     // 第三句：妈妈无配置立绘，左侧立绘隐藏，降级显示首字圆标
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    nextLine();
     expect(portrait.hidden).toBe(true);
     expect(section.classList.contains('dialogue--has-portrait')).toBe(false);
     expect(section.findByClass('dialogue__avatar-letter')?.textContent).toBe('妈');
 
     // 第四句：旁白隐藏立绘与圆标
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    nextLine();
     expect(portrait.hidden).toBe(true);
     expect(section.classList.contains('dialogue--narration')).toBe(true);
 
     // 第五句：阿远切回左侧立绘；模拟图片加载失败则自动降级回首字圆标
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    nextLine();
     const ayuanImg = portrait.findByClass('dialogue__portrait-image')!;
     expect(ayuanImg.src).toBe(READY_EXTERNAL_ASSETS.portrait_ayuan);
     ayuanImg.dispatchEvent(new Event('error'));
@@ -209,19 +217,27 @@ describe('DialogueBox 左侧人物立绘渲染与降级', () => {
     const section = rootHost.findByClass('dialogue')!;
     const portrait = section.findByClass('dialogue__portrait')!;
     const panel = section.findByClass('dialogue__panel')!;
+    const nextLine = (): void => {
+      if (!section.classList.contains('is-ready')) {
+        vi.advanceTimersByTime(160);
+        panel.dispatchEvent(new Event('click'));
+      }
+      if (section.classList.contains('is-ready')) {
+        vi.advanceTimersByTime(160);
+        panel.dispatchEvent(new Event('click'));
+      }
+    };
 
     const img = portrait.findByClass('dialogue__portrait-image')!;
     expect(img.src).toBe(EXPRESSION_PORTRAITS.linxiaSmile2);
 
     // 同一说话人切换到“我自己画的。”，复用同一 <img> 原地切真心笑
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    nextLine();
     expect(portrait.findByClass('dialogue__portrait-image')).toBe(img);
     expect(img.src).toBe(EXPRESSION_PORTRAITS.linxiaJoy2);
 
     // 切换阿远阴阳怪气_3，若该表情图加载失败先回退基础半身立绘
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    nextLine();
     const ayuanImg = portrait.findByClass('dialogue__portrait-image')!;
     expect(ayuanImg.src).toBe(EXPRESSION_PORTRAITS.ayuanSmirk3);
     ayuanImg.dispatchEvent(new Event('error'));
@@ -229,13 +245,50 @@ describe('DialogueBox 左侧人物立绘渲染与降级', () => {
     expect(ayuanImg.src).toBe(READY_EXTERNAL_ASSETS.portrait_ayuan);
 
     // 周老师正色_2
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    nextLine();
     expect(portrait.findByClass('dialogue__portrait-image')!.src).toBe(EXPRESSION_PORTRAITS.teacherSerious2);
 
     // 未收录但带 cry 情绪 → 命中林夏低落_3
-    panel.dispatchEvent(new Event('click'));
-    panel.dispatchEvent(new Event('click'));
+    nextLine();
     expect(portrait.findByClass('dialogue__portrait-image')!.src).toBe(EXPRESSION_PORTRAITS.linxiaLow3);
+  });
+
+  it('连续快速点击在 150ms 内防抖，超过 150ms 正常推进下一句或结束', () => {
+    const onEnd = vi.fn();
+    box = new DialogueBox({
+      container: rootHost as unknown as HTMLElement,
+      onEnd,
+    });
+    box.show({
+      stepId: 'debounce-step',
+      speakerNames: { linxia: '林夏' },
+      lines: [
+        { speaker: 'linxia', text: '第一句台词很长很长。' },
+        { speaker: 'linxia', text: '第二句。' },
+      ],
+    });
+    const section = rootHost.findByClass('dialogue')!;
+    const panel = section.findByClass('dialogue__panel')!;
+
+    // 第一次点击补全第一句打字；50ms 内连点两次不该跳进第二句
+    panel.dispatchEvent(new Event('click'));
+    expect(section.classList.contains('is-ready')).toBe(true);
+    vi.advanceTimersByTime(50);
+    panel.dispatchEvent(new Event('click'));
+    expect(section.findByClass('dialogue__text')?.textContent).toBe('第一句台词很长很长。');
+    expect(onEnd).not.toHaveBeenCalled();
+
+    // 累计超过 150ms 后再次点击，进入第二句；再快速双击不会瞬间关闭结束
+    vi.advanceTimersByTime(120);
+    panel.dispatchEvent(new Event('click'));
+    vi.advanceTimersByTime(40);
+    panel.dispatchEvent(new Event('click'));
+    expect(onEnd).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(160);
+    panel.dispatchEvent(new Event('click'));
+    vi.advanceTimersByTime(160);
+    panel.dispatchEvent(new Event('click'));
+    expect(onEnd).toHaveBeenCalledExactlyOnceWith('debounce-step');
   });
 });

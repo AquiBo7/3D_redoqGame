@@ -16,8 +16,8 @@ export const allObjectives: Partial<Record<SceneId, SceneObjective>> = {
     goal: '去三号窗口打饭',
   },
   C2: {
-    text: '走进教室，找一个空位坐下吧。',
-    hint: '在教室里自由走动，走近想坐的空位按 E 或点击坐下',
+    text: '林夏正在教室里',
+    hint: '先看看教室和她所在的位置',
     goal: '在教室选一个座位',
   },
   C3: {

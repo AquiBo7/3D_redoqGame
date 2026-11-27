@@ -24,6 +24,8 @@ export interface UrlParams {
   scene: SceneId | null;
   /** 夜间氛围测试：街道等室外场景改由路灯照明，正式剧情时段不受影响 */
   night: boolean;
+  /** 开场倒计时调试参数：?autodepart=0 关闭自动出门，?autodepart=2 使用 2 秒快速倒计时 */
+  autoDepartSec: 0 | 2 | null;
 }
 
 const FALSE_VALUES = new Set(['0', 'false', 'off', 'no']);
@@ -38,6 +40,8 @@ export function parseUrlParams(search: string = window.location.search): UrlPara
   const params = new URLSearchParams(search);
   const rawRole = params.get('role')?.trim().toLowerCase() ?? '';
   const rawScene = params.get('scene')?.trim().toUpperCase() ?? '';
+  const rawAutoDepart = params.get('autodepart')?.trim();
+  const autoDepartSec = rawAutoDepart === '0' ? 0 : rawAutoDepart === '2' ? 2 : null;
 
   return {
     debug: toFlag(params.get('debug')),
@@ -47,5 +51,6 @@ export function parseUrlParams(search: string = window.location.search): UrlPara
     role: isRole(rawRole) ? rawRole : 'bystander',
     scene: isSceneId(rawScene) ? rawScene : null,
     night: toFlag(params.get('night')),
+    autoDepartSec,
   };
 }

@@ -106,6 +106,8 @@ export const chapter1: ChapterStory = {
     teacher: { name: '周老师' },
     admin: { name: '校园墙管理员' },
     passerby: { name: '同学' },
+    guard: { name: '保安大叔' },
+    auntie: { name: '食堂阿姨' },
   },
   scenes: {
     S1: {
@@ -138,6 +140,7 @@ export const chapter1: ChapterStory = {
           lines: [
             '……近日，多所学校提醒学生：转发未经核实的内容，同样可能伤害他人。',
             '某学生因一张被断章取义的照片，被围攻数日，最终关闭了账号，也不再出门。',
+            '教育部门同时呼吁：面对网络争议多些宽容与理性核实，不做跟风伤害的推手，共同拒绝网络暴力。',
           ],
           effects: {
             set: { newsSeen: true },
@@ -175,7 +178,7 @@ export const chapter1: ChapterStory = {
           id: 's1-observe-shirt',
           event: 'scene:gazeHotspot',
           target: 'culture-shirt',
-          reveal: { text: '椅背上挂着一件新生文化衫。' },
+          reveal: { text: '敞开的衣柜里挂着一件新生文化衫。' },
         },
         {
           id: 's1-observe-suitcase',
@@ -231,7 +234,7 @@ export const chapter1: ChapterStory = {
           event: 'scene:interact',
           target: 'culture-shirt',
           effects: {
-            log: { type: 'observe', summary: '顺手带上了椅背上的文化衫。' },
+            log: { type: 'observe', summary: '顺手带上了衣柜里的新生文化衫。' },
           },
           reveal: { text: '你顺手把文化衫塞进了包里。' },
         },
@@ -253,7 +256,7 @@ export const chapter1: ChapterStory = {
       sceneKey: 'street',
       title: '街道',
       stageNotes: [
-        '清晨，拖着行李的新生和家长，志愿者举着“新生报到 →”的牌子；目标光点在前方校门。',
+        '清晨，拖着行李的新生和家长，路边立着“新生报到 ↑”指引牌；目标光点在前方校门。',
         '路上手机最多震动 2 次，间隔不少于 20 秒；忽略一次 phoneIgnored +1。',
         '路边两位家长低声说话：“听说九点就关了。”不要刻意强调。',
         '不设倒计时，用镜头晃动和脚步声表现赶路感。',
@@ -408,6 +411,19 @@ export const chapter1: ChapterStory = {
           effects: {
             set: { noticedTyper: true },
             log: { type: 'observe', summary: '注意到台阶旁低头打字的男生。' },
+          },
+        },
+        {
+          id: 's5-see-guard',
+          event: 'scene:gazeHotspot',
+          target: 'guard-steps',
+          once: true,
+          observe: {
+            text: '保安大叔朝台阶喊了一声：“慢点，台阶有露水。”爸爸应道：“谢谢，她脚崴了。”保安点点头：“哎呦，那是该背一段。”',
+            durationMs: 4200,
+          },
+          effects: {
+            log: { type: 'observe', summary: '值班室前的保安大叔提醒台阶有露水，听见爸爸说林夏脚崴了。' },
           },
         },
       ],

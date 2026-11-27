@@ -111,7 +111,14 @@ describe('第二章剧本', () => {
     h.machine.onInteract('S12', 'window-two');
     expect(h.current()?.id).toBe('s12-window');
     h.machine.onInteract('S12', 'window-three');
+    expect(h.current()?.id).toBe('s12-auntie');
+    h.readThrough();
+    h.machine.onChooseOption('s12-auntie-choice', 's12-auntie-wait');
+    h.machine.onDialogueEnd('s12-auntie-story');
+    h.machine.onDialogueEnd('s12-auntie-caption');
     h.machine.onDialogueEnd('s12-vibration');
+    expect(h.machine.getState()).toMatchObject({ talkedAunt: true });
+    expect(h.machine.getState().draftReactions).toContain('有位阿姨多给了我一个蛋。');
     expect(h.machine.getSceneId()).toBe('S13');
   });
 

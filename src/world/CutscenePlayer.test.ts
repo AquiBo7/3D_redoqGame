@@ -110,12 +110,15 @@ describe('CutscenePlayer 出门过场', () => {
     anchor!.preparationMs = 4200;
     playRun();
     expect(player.isPlaying()).toBe(true);
+    expect(player.isAnimating()).toBe(false);
     expect(setCinematic).not.toHaveBeenCalledWith(true);
     expect(animation.tweens).toHaveLength(0);
     vi.advanceTimersByTime(4199);
+    expect(player.isAnimating()).toBe(false);
     expect(animation.tweens).toHaveLength(0);
     camera.position.set(1, 1.6, 1);
     vi.advanceTimersByTime(1);
+    expect(player.isAnimating()).toBe(true);
     expect(setCinematic).toHaveBeenCalledWith(true);
     expect(animation.tweens.length).toBeGreaterThan(0);
     updateMotion(0, 1);

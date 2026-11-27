@@ -205,6 +205,7 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
       { id: 'typer', position: { x: -3.6, y: 1.35, z: 7.95 } },
       { id: 'handoff-moment', position: { x: -0.45, y: 1.45, z: 2.45 } },
       { id: 'father-bags', position: { x: -0.55, y: 0.6, z: 0.7 } },
+      { id: 'guard-steps', position: { x: -5.85, y: 1.45, z: -1.65 } },
     ]);
     expect(gate.panoramaAnchor).toEqual({
       position: { x: 0, y: 3.6, z: 5.6 }, lookAt: { x: 0, y: 1.7, z: 1.4 },
@@ -258,15 +259,15 @@ describe('剧情数据 ↔ 3D 场景注册表契约', () => {
       expect(getSceneDefinition(sceneId).requiredModels ?? []).toHaveLength(0);
     }
     expect(getSceneDefinition('S4').requiredModels).toEqual([
-      'volunteer', 'studentMale', 'studentFemale', 'studentMale2', 'studentMale3', 'studentMale4', 'studentFemale3', 'studentFemale4',
+      'studentMale', 'studentFemale', 'studentMale2', 'studentMale3', 'studentMale4', 'studentMale5', 'studentFemale1', 'studentFemale2', 'studentFemale3', 'studentFemale4',
     ]);
     expect(getSceneDefinition('S5').requiredModels).toEqual([
-      'linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale', 'studentMale2', 'studentMale3', 'studentFemale3', 'studentFemale4',
+      'linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale', 'studentMale2', 'studentMale3', 'studentFemale3', 'studentFemale4', 'securityGuard',
     ]);
     expect(getSceneDefinition('S6').requiredModels).toEqual([
-      'linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale', 'studentMale2', 'studentMale3', 'studentFemale3', 'studentFemale4',
+      'linxia', 'fatherCarry', 'ayuan', 'studentFemale', 'studentMale', 'studentMale2', 'studentMale3', 'studentFemale3', 'studentFemale4', 'securityGuard',
     ]);
-    expect(getSceneDefinition('S7').requiredModels).toEqual(['volunteer', 'linxia', 'father', 'studentFemale', 'studentMale']);
+    expect(getSceneDefinition('S7').requiredModels).toEqual(['studentFemale2', 'linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S8').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
     expect(getSceneDefinition('S9').requiredModels).toEqual(['linxia', 'father', 'studentFemale', 'studentMale']);
   });

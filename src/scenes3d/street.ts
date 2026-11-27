@@ -2,6 +2,7 @@
 // 进入 S4 后调度两次手机震动（间隔 ≥ 20s）；离开 S4 时 streetRuntime.exit() 必须清除未触发的定时器。
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { SceneId } from '../data/storySchema';
 import type { ObstacleAabb } from '../world/navMath';
 import type {
@@ -15,7 +16,6 @@ import type {
 } from '../world/worldSceneTypes';
 import {
   addBox,
-  addGround,
   createActorAnimation,
   createCharacterActor,
   createMatteMaterial,
@@ -34,6 +34,7 @@ import { SHARED_RESOURCE_FLAG, loadPropModel } from '../world/resources';
 import {
   createContactShadowDiscBatch,
   getAsphaltMaterial,
+  getBakeryInteriorMaterial,
   getBarkMaterial,
   getFacadeBrickMaterial,
   getFacadeConcreteMaterial,
@@ -45,6 +46,29 @@ import {
   getWarmLampGlowMaterial,
   getWindowGlassMaterial,
 } from './materials';
+import {
+  buildBaoziShopDressing,
+  buildCampusClockTowerPlaza,
+  buildConvenienceStoreDressing,
+  buildLabBuildingDressing,
+  buildLibraryDressing,
+  buildMilkTeaShop,
+  buildPharmacyDressing,
+  buildPrintShopDressing,
+  buildSoyMilkDressing,
+  SOY_DISPLAY_CABINET,
+  tickStreetShopAnimations,
+  type AnimatedSteamPuff,
+  type ShopBuildContext,
+  type StreetShopLightSpec,
+} from './streetShops';
+import {
+  buildStreetSunsetSeascape,
+  SEASCAPE_SUNSET_LIGHTING,
+  tickStreetSeascape,
+  type SeascapeWaveState,
+} from './streetSeascape';
+import { buildStreetResidentialBuilding, RESIDENTIAL_FOOTPRINT } from './streetResidential';
 
 type FacadeKind = 'tile' | 'concrete' | 'brick' | 'plaster';
 type ParapetStyle = 'flat' | 'stepped' | 'cornice';
@@ -85,6 +109,11 @@ interface BuildingSpec {
    * 招牌右端三块蛋糕图案、立面白色装饰线、波浪垂边、门口两盆陶土小松树、粉色 A 字小黑板、橱窗甜品剪影。
    */
   bakeryDressing?: boolean;
+  /** 九处精准升级铺面 / 建筑专属橱窗与人行道陈设 */
+  customShowcase?: 'soymilk' | 'baozi' | 'library' | 'print' | 'conv' | 'pharmacy' | 'lab';
+  /** 临街橱窗 / 入户门相对 center.z 的偏移；缺省 -0.65 / +1.28，豆浆店为展示柜让位重排 */
+  storefrontWinOffsetZ?: number;
+  storefrontDoorOffsetZ?: number;
   /** 拱顶单栋铺面：半圆柱桶拱起拱于墙顶，拱面开小窗，人行道摆水果堆头 */
   barrelRoof?: {
     /** 拱顶哑光色 */
@@ -159,6 +188,7 @@ const BUILDINGS: BuildingSpec[] = [
     },
     sideFeature: 'flue',
     storeInteriorTint: 0xffe4bc,
+    customShowcase: 'baozi',
   },
   {
     center: { x: -7.0, y: 3.4, z: -18 },
@@ -187,6 +217,7 @@ const BUILDINGS: BuildingSpec[] = [
     },
     sideFeature: 'meter',
     storeInteriorTint: 0xe3edf2,
+    customShowcase: 'print',
   },
   {
     center: { x: -7.18, y: 4.4, z: -30 },
@@ -215,6 +246,7 @@ const BUILDINGS: BuildingSpec[] = [
     },
     sideFeature: 'louver',
     storeInteriorTint: 0xdff2ec,
+    customShowcase: 'pharmacy',
   },
   {
     center: { x: 7.12, y: 3.7, z: 0 },
@@ -242,6 +274,9 @@ const BUILDINGS: BuildingSpec[] = [
     },
     sideFeature: 'flue',
     storeInteriorTint: 0xffe2b6,
+    customShowcase: 'soymilk',
+    storefrontWinOffsetZ: -2.3,
+    storefrontDoorOffsetZ: 2.6,
   },
   {
     center: { x: 7.02, y: 2.7, z: -12 },
@@ -269,6 +304,7 @@ const BUILDINGS: BuildingSpec[] = [
     },
     sideFeature: 'bookcase',
     storeInteriorTint: 0xf1e8d6,
+    customShowcase: 'library',
   },
   {
     center: { x: 7.26, y: 5.4, z: -24 },
@@ -296,34 +332,37 @@ const BUILDINGS: BuildingSpec[] = [
     },
     sideFeature: 'louver',
     storeInteriorTint: 0xeef0e4,
+    customShowcase: 'conv',
   },
   {
     center: { x: 7.08, y: 3.5, z: -36 },
     size: { w: 9, h: 7.0, d: 8.5 },
     color: 0x8f989e,
     facade: 'tile',
+    facadeTint: 0xeaf1f7,
     parapetStyle: 'flat',
-    shopName: '学府文具打印',
-    signBackground: '#e1e8ec',
-    signForeground: '#2b3d4a',
+    shopName: '实验楼',
+    signBackground: '#ffffff',
+    signForeground: '#1a4f8a',
     signWidth: 2.35,
-    signHeight: 0.46,
+    signHeight: 0.48,
     awningTone: 'slate',
     hasBalcony: false,
     hasOverhang: false,
     hasWaterTank: false,
-    hasAFrame: true,
+    hasAFrame: false,
     sidePoster: {
-      text: '开学文具 · 彩印复印',
-      background: '#dce4e9',
-      foreground: '#293b48',
-      width: 2.3,
+      text: '物理 · 化学 · 生物实验室',
+      background: '#edf4fa',
+      foreground: '#1a4f8a',
+      width: 2.45,
       height: 0.7,
-      centerY: 2.4,
-      accentColor: 0x4a6375,
+      centerY: 2.42,
+      accentColor: 0x2f74b5,
     },
     sideFeature: 'meter',
-    storeInteriorTint: 0xe5eef3,
+    storeInteriorTint: 0xe8f3fc,
+    customShowcase: 'lab',
   },
   {
     // 街角水果店：右前景转角空位（晨光豆浆 +Z 山墙之后），单层拱顶铺面
@@ -365,18 +404,43 @@ const BUILDINGS: BuildingSpec[] = [
   },
 ];
 
-/** 路灯灯柱（XZ 位置） */
+/** 路灯灯柱（XZ 位置）；index 1 为豆浆店专用低灯，其余为复古铸铁路灯 */
 const LAMP_POSTS: Array<{ x: number; z: number }> = [
-  { x: -3.2, z: 10 },
-  { x: 3.2, z: 0 },
+  { x: -3.2, z: 10.4 },
+  { x: 1.9, z: 4.2 },
   { x: -3.2, z: -10 },
   { x: 3.2, z: -20 },
   { x: -3.2, z: -30 },
 ];
 
-/** 双格分类垃圾桶位表（人行道外缘，与电线杆、自行车错开） */
+const SOY_LAMP_INDEX = 1;
+/** 豆浆店路灯：整体右移约 4.4m，落在行道树右侧、红砖墙前；横臂垂直墙面悬挑 0.9m */
+const SOY_LAMP = {
+  x: 1.9,
+  z: 4.2,
+  poleHeight: 3.2,
+  bulbY: 2.9,
+  armLength: 0.9,
+  baseHeight: 0.3,
+  baseSize: 0.34,
+  poolRadius: 1.75,
+  lightDistance: 6,
+} as const;
+
+const UTILITY_POLE_SPOTS: ReadonlyArray<{ x: number; z: number; parallelStreet?: boolean }> = [
+  { x: -2.3, z: 11 },
+  { x: 1.95, z: 7, parallelStreet: true },
+  { x: -2.3, z: -5 },
+  { x: 2.3, z: -5 },
+  { x: -2.3, z: -21 },
+  { x: 2.3, z: -21 },
+  { x: -2.3, z: -37 },
+  { x: 2.3, z: -37 },
+];
+
+/** 双格分类垃圾桶位表（人行道外缘，避开甜品面包店橱窗、路灯与电线杆，落在面包店与早餐铺街角空位） */
 const BIN_SPOTS: ReadonlyArray<{ x: number; z: number }> = [
-  { x: -2.1, z: 4 },
+  { x: -2.1, z: 0.9 },
   { x: 2.1, z: -18 },
   { x: -2.1, z: -33 },
 ];
@@ -440,18 +504,10 @@ const STREET_NPCS: ReadonlyArray<{
   luggage: { x: number; z: number };
 }> = [
   {
-    group: { x: 4.4, z: -7 },
-    greeterModel: 'studentMale',
-    greeterColor: 0x8f8578,
-    studentModel: 'studentFemale4',
-    studentColor: 0x8f9aa3,
-    luggage: { x: 3.6, z: -7.6 },
-  },
-  {
     group: { x: -4.6, z: -24 },
-    greeterModel: 'studentFemale3',
+    greeterModel: 'studentFemale2',
     greeterColor: 0x867d70,
-    studentModel: 'studentMale3',
+    studentModel: 'studentMale5',
     studentColor: 0x93a0a8,
     luggage: { x: -5.4, z: -24.6 },
   },
@@ -480,13 +536,61 @@ const NAV: NavigationConfig = {
   bounds: { minX: -5.5, maxX: 5.5, minZ: -45.5, maxZ: 15.5 },
   obstacles: [
     ...buildingObstacles(),
-    ...LAMP_POSTS.map((post, index) => ({
-      id: `street-lamp-${index}`,
-      minX: post.x - 0.22,
-      maxX: post.x + 0.22,
-      minZ: post.z - 0.22,
-      maxZ: post.z + 0.22,
-      height: 4,
+    // 街道起点左侧复古红墙楼（x ∈ [-11.4, -2.6], z ∈ [11.35, 18.85]）与右侧巷道黑金小塔楼（x ∈ [3.05, 5.45], z ∈ [4.56, 6.64]）
+    { id: 'street-heritage-left', minX: -11.4, maxX: -2.6, minZ: 11.35, maxZ: 18.85, height: 8.8 },
+    // 左侧外转角纯装饰居民楼（x ∈ [-18.6, -12.6], z ∈ [7.5, 15.5]），与红砖楼留 1.2m 巷道
+    {
+      id: 'street-residential-building',
+      minX: RESIDENTIAL_FOOTPRINT.minX,
+      maxX: RESIDENTIAL_FOOTPRINT.maxX,
+      minZ: RESIDENTIAL_FOOTPRINT.minZ,
+      maxZ: RESIDENTIAL_FOOTPRINT.maxZ,
+      height: RESIDENTIAL_FOOTPRINT.ridgeY,
+    },
+    { id: 'street-artdeco-tower', minX: 3.05, maxX: 5.45, minZ: 4.56, maxZ: 6.64, height: 7.75 },
+    // 豆浆店橱窗与门之间的展示柜：碰撞厚 0.3m，柜前净宽 ≥0.9m，不堵中央主通路
+    {
+      id: 'street-soy-display-cabinet',
+      minX: 2.02,
+      maxX: 2.02 + SOY_DISPLAY_CABINET.collisionDepth,
+      minZ: SOY_DISPLAY_CABINET.centerZ - SOY_DISPLAY_CABINET.widthZ / 2,
+      maxZ: SOY_DISPLAY_CABINET.centerZ + SOY_DISPLAY_CABINET.widthZ / 2,
+      height: SOY_DISPLAY_CABINET.heightY,
+    },
+    // 场景八：右侧空挡校园钟楼 + 喷泉广场（x ∈ [3.65, 6.45], z ∈ [-31.45, -28.75]）
+    { id: 'street-clock-tower', minX: 3.65, maxX: 6.45, minZ: -31.45, maxZ: -28.75, height: 7.8 },
+    // 场景九：校门口左侧「青春茶饮」奶茶店（两层，x ∈ [-8.75, -2.55], z ∈ [-42.6, -36.2]）
+    { id: 'street-milktea-shop', minX: -8.75, maxX: -2.55, minZ: -42.6, maxZ: -36.2, height: 6.75 },
+    // 右侧公交候车亭「校门口」（避开中央 x ∈ [-2.5, +2.5] 通行带与校园书屋正面）
+    { id: 'street-bus-shelter', minX: 2.58, maxX: 4.02, minZ: -7.55, maxZ: -4.45, height: 2.6 },
+    // 左侧老小区门洞「向阳里」（x ∈ [-4.1, -3.05], z ∈ [-13.65, -10.58]）
+    { id: 'street-xiangyangli-gate', minX: -4.1, maxX: -3.05, minZ: -13.65, maxZ: -10.58, height: 3.3 },
+    // 街道南端尽头海景防波堤不可通行隐形墙（禁止玩家进入沙滩与海水）
+    { id: 'street-seawall-barrier', minX: -6, maxX: 6, minZ: 15.2, maxZ: 115, height: 4 },
+    ...LAMP_POSTS.map((post, index) => {
+      const isSoy = index === SOY_LAMP_INDEX;
+      const x = isSoy ? SOY_LAMP.x : post.x;
+      const z = post.z;
+      return {
+        id: `street-lamp-${index}`,
+        minX: x - 0.22,
+        maxX: x + 0.22,
+        minZ: z - 0.22,
+        maxZ: z + 0.22,
+        height: isSoy ? SOY_LAMP.poleHeight : 4,
+      };
+    }),
+    ...UTILITY_POLE_SPOTS.map((pole, index) => ({
+      id: `street-utility-pole-${index}`,
+      shape: 'circle' as const,
+      centerX: pole.x,
+      centerZ: pole.z,
+      radius: 0.2,
+      minX: pole.x - 0.2,
+      maxX: pole.x + 0.2,
+      minZ: pole.z - 0.2,
+      maxZ: pole.z + 0.2,
+      height: 6.45,
     })),
     ...STREET_NPCS.map((npc, index) => ({
       id: `street-npc-${index}`,
@@ -720,7 +824,14 @@ function createSegmentCylinderInstances(
 }
 
 function buildStreetGround(parent: THREE.Object3D): void {
-  addGround(parent, 110, 0x74867b);
+  const streetBase = new THREE.Mesh(
+    new THREE.PlaneGeometry(110, 85.6),
+    createMatteMaterial(0x74867b, 0.96),
+  );
+  streetBase.rotation.x = -Math.PI / 2;
+  streetBase.position.set(0, -0.02, -27.2);
+  streetBase.receiveShadow = true;
+  parent.add(streetBase);
 
   const road = new THREE.Mesh(
     new THREE.PlaneGeometry(3.3, 76),
@@ -972,8 +1083,6 @@ function buildStreetBuildings(parent: THREE.Object3D, occluders: THREE.Object3D[
   const bakeryScallops: BoxInstanceSpec[] = [];
   const bakeryDesserts: Array<BoxInstanceSpec & { color: number }> = [];
 
-  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
-
   for (const [index, building] of BUILDINGS.entries()) {
     const sharedFacade = facadeMaterials[building.facade];
     const wall = new THREE.Mesh(
@@ -1195,16 +1304,99 @@ function buildStreetBuildings(parent: THREE.Object3D, occluders: THREE.Object3D[
 
     // 临街商铺三层景深门头：
     // 第一层：内凹暖光橱窗（z: center - 1.92 .. center + 0.62，宽 2.54m）
-    const winCenterZ = building.center.z - 0.65;
-    storeBacks.push({
-      position: { x: faceX + side * 0.035, y: 1.02, z: winCenterZ },
-      scale: { x: 0.04, y: 1.56, z: 2.52 },
-    });
-    storeBackColors.push(building.storeInteriorTint);
-    shopGlassPanes.push({
-      position: { x: faceX + side * 0.36, y: 1.02, z: winCenterZ },
-      scale: { x: 0.018, y: 1.52, z: 2.48 },
-    });
+    const winCenterZ = building.center.z + (building.storefrontWinOffsetZ ?? -0.65);
+    if (building.bakeryDressing) {
+      // 甜品面包店专属高清烘焙展示架背板 + 低雾度清透橱窗玻璃 + 立体 3D 面包与蛋糕陈列
+      const bakeryBack = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.52, 1.56),
+        getBakeryInteriorMaterial(),
+      );
+      bakeryBack.name = 'street-bakery-interior-back';
+      bakeryBack.position.set(faceX + side * 0.055, 1.02, winCenterZ);
+      bakeryBack.rotation.y = side * (Math.PI / 2);
+      parent.add(bakeryBack);
+
+      const bakeryGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(0.014, 1.52, 2.48),
+        new THREE.MeshStandardMaterial({
+          color: 0xdff0ee,
+          roughness: 0.12,
+          metalness: 0.08,
+          transparent: true,
+          opacity: 0.12,
+          depthWrite: false,
+        }),
+      );
+      bakeryGlass.name = 'street-bakery-showcase-glass';
+      bakeryGlass.position.set(faceX + side * 0.36, 1.02, winCenterZ);
+      bakeryGlass.renderOrder = 2;
+      parent.add(bakeryGlass);
+
+      for (const shelfY of [0.54, 0.92, 1.3]) {
+        shelves.push({
+          position: { x: faceX + side * 0.19, y: shelfY, z: winCenterZ },
+          scale: { x: 0.28, y: 0.042, z: 2.26 },
+        });
+      }
+      buildBakeryShowcaseProps(parent, faceX, side, winCenterZ);
+    } else if (building.customShowcase) {
+      const ctx: ShopBuildContext = {
+        parent,
+        occluders,
+        animatedPuffs: streetShopPuffs,
+        registerShopLight: registerStreetShopLight,
+      };
+      switch (building.customShowcase) {
+        case 'soymilk':
+          buildSoyMilkDressing(ctx, faceX, side, building.center.z);
+          break;
+        case 'baozi':
+          buildBaoziShopDressing(ctx, faceX, side, building.center.z);
+          break;
+        case 'library':
+          buildLibraryDressing(ctx, faceX, side, building.center.z);
+          break;
+        case 'print':
+          buildPrintShopDressing(ctx, faceX, side, building.center.z);
+          break;
+        case 'conv':
+          buildConvenienceStoreDressing(ctx, faceX, side, building.center.z);
+          break;
+        case 'pharmacy':
+          buildPharmacyDressing(ctx, faceX, side, building.center.z);
+          break;
+        case 'lab':
+          buildLabBuildingDressing(ctx, faceX, side, building.center.z);
+          break;
+      }
+    } else {
+      storeBacks.push({
+        position: { x: faceX + side * 0.035, y: 1.02, z: winCenterZ },
+        scale: { x: 0.04, y: 1.56, z: 2.52 },
+      });
+      storeBackColors.push(building.storeInteriorTint);
+      shopGlassPanes.push({
+        position: { x: faceX + side * 0.36, y: 1.02, z: winCenterZ },
+        scale: { x: 0.018, y: 1.52, z: 2.48 },
+      });
+      for (const shelfY of [0.56, 0.94, 1.32]) {
+        shelves.push({
+          position: { x: faceX + side * 0.17, y: shelfY, z: winCenterZ },
+          scale: { x: 0.24, y: 0.05, z: 2.18 },
+        });
+        for (let item = 0; item < 9; item += 1) {
+          const target = (item + index) % 3 === 0 ? goodsWarm : (item + index) % 3 === 1 ? goodsCool : goodsLight;
+          target.push({
+            position: {
+              x: faceX + side * 0.27,
+              y: shelfY + 0.125,
+              z: winCenterZ - 0.96 + item * 0.24,
+            },
+            scale: { x: 0.12, y: 0.18 + ((item + index) % 3) * 0.035, z: 0.13 },
+          });
+        }
+      }
+    }
     for (const offsetZ of [-1.27, 0, 1.27]) {
       storeFrames.push({
         position: { x: faceX + side * 0.38, y: 1.02, z: winCenterZ + offsetZ },
@@ -1217,30 +1409,13 @@ function buildStreetBuildings(parent: THREE.Object3D, occluders: THREE.Object3D[
         scale: { x: 0.055, y: 0.055, z: 2.6 },
       });
     }
-    for (const shelfY of [0.56, 0.94, 1.32]) {
-      shelves.push({
-        position: { x: faceX + side * 0.17, y: shelfY, z: winCenterZ },
-        scale: { x: 0.24, y: 0.05, z: 2.18 },
-      });
-      for (let item = 0; item < 9; item += 1) {
-        const target = (item + index) % 3 === 0 ? goodsWarm : (item + index) % 3 === 1 ? goodsCool : goodsLight;
-        target.push({
-          position: {
-            x: faceX + side * 0.27,
-            y: shelfY + 0.125,
-            z: winCenterZ - 0.96 + item * 0.24,
-          },
-          scale: { x: 0.12, y: 0.18 + ((item + index) % 3) * 0.035, z: 0.13 },
-        });
-      }
-    }
     ceilingLights.push({
       position: { x: faceX + side * 0.2, y: 1.72, z: winCenterZ },
       scale: { x: 0.12, y: 0.04, z: 1.85 },
     });
 
     // 第二层：侧边内凹入户玻璃门 + 门把手 + 门槛 + 上方卷闸门箱
-    const doorCenterZ = building.center.z + 1.28;
+    const doorCenterZ = building.center.z + (building.storefrontDoorOffsetZ ?? 1.28);
     doorBacks.push({
       position: { x: faceX + side * 0.03, y: 0.96, z: doorCenterZ },
       scale: { x: 0.04, y: 1.72, z: 1.06 },
@@ -1420,20 +1595,7 @@ function buildStreetBuildings(parent: THREE.Object3D, occluders: THREE.Object3D[
         bakeryPots.push({ position: { x: potX, y: 0.14, z: potZ }, scale: { x: 0.17, y: 0.28, z: 0.17 } });
         bakeryTrees.push({ position: { x: potX, y: 0.56, z: potZ }, scale: { x: 0.22, y: 0.26, z: 0.22 } });
       }
-      // 橱窗前沿一排甜品剪影（布丁/粉奶油/草莓/马卡龙/泡芙），只占一个批次
-      const dessertTones = [0xe8c37a, 0xefa8c4, 0xd9556a, 0xa8d8c4, 0xf7ecd4];
-      dessertTones.forEach((hex, i) => {
-        bakeryDesserts.push({
-          position: {
-            x: faceX + side * 0.33,
-            y: 1.03,
-            z: winCenterZ - 0.72 + i * 0.36,
-          },
-          scale: { x: 0.13, y: 0.15, z: 0.13 },
-          color: hex,
-        });
-      });
-      // 门玻璃上的粉色海报（提示词"玻璃双开门…粉海报"），复用甜品剪影批次
+      // 门玻璃上的粉色海报（橱窗内原 5 个单色方盒已由立体 3D 面包与蛋糕组替代）
       bakeryDesserts.push({
         position: { x: faceX + side * 0.275, y: 1.2, z: doorCenterZ - 0.26 },
         scale: { x: 0.012, y: 0.44, z: 0.34 },
@@ -1741,13 +1903,16 @@ function buildStreetBuildings(parent: THREE.Object3D, occluders: THREE.Object3D[
       });
     }
 
-    if (
-      (index === 0 || index === 4 || index === 5 || index === 8) &&
-      (!coarsePointer || index === 5)
-    ) {
-      const light = new THREE.PointLight(0xffbe72, 1.4, 3.8, 2);
-      light.position.set(faceX + side * 0.9, 1.35, winCenterZ);
-      parent.add(light);
+    if (index === 0 || index === 4 || index === 5 || index === 8) {
+      registerStreetShopLight({
+        x: faceX + side * 0.9,
+        y: 1.35,
+        z: winCenterZ,
+        color: 0xffbe72,
+        intensity: 1.4,
+        distance: 3.8,
+        decay: 2,
+      });
     }
   }
 
@@ -1926,6 +2091,172 @@ function buildStreetBuildings(parent: THREE.Object3D, occluders: THREE.Object3D[
     });
     if (fruitMesh.instanceColor) fruitMesh.instanceColor.needsUpdate = true;
   }
+}
+
+/**
+ * 甜品面包店前景立体 3D 面包与蛋糕陈列（建议 6）：
+ * 在橱窗内侧三层木架上摆放真实可辨的低多边形牛角可颂、斜纹法棍、双层草莓奶油大蛋糕、
+ * 粉色纸杯玛芬蛋糕、瑞士卷与切片蛋糕，使用共享实例批次控制 DrawCall。
+ */
+function buildBakeryShowcaseProps(
+  parent: THREE.Object3D,
+  faceX: number,
+  side: number,
+  winCenterZ: number,
+): void {
+  const group = new THREE.Group();
+  group.name = 'street-bakery-showcase-props';
+  parent.add(group);
+
+  const spheres: Array<BoxInstanceSpec & { color: number }> = [];
+  const cylinders: Array<BoxInstanceSpec & { color: number }> = [];
+  const boxes: Array<BoxInstanceSpec & { color: number }> = [];
+  const x = faceX + side * 0.255;
+
+  // --- 上层架面 y = 1.321：弧形牛角可颂(×2) + 金黄斜纹法棍(×2) + 山形大吐司 ---
+  const topY = 1.321;
+  // 1. 两个金黄弧形牛角可颂（5 段缩放弧形球串连，#dfa248）
+  for (const cz of [winCenterZ - 0.82, winCenterZ - 0.28]) {
+    const offsets: Array<[number, number, number, number]> = [
+      [-0.1, 0.032, 0.042, 0.03],
+      [-0.055, 0.048, 0.052, 0.042],
+      [0, 0.056, 0.06, 0.05],
+      [0.055, 0.048, 0.052, 0.042],
+      [0.1, 0.032, 0.042, 0.03],
+    ];
+    for (const [dz, dy, r, rx] of offsets) {
+      spheres.push({
+        position: { x: x + side * (0.015 - Math.abs(dz) * 0.25), y: topY + dy, z: cz + dz },
+        scale: { x: rx, y: r * 0.85, z: r },
+        color: 0xdfa248,
+      });
+    }
+  }
+  // 2. 斜置金黄法棍与焦糖斜切棱（2 条错落排开不重叠）
+  for (const [idx, fz] of [winCenterZ + 0.16, winCenterZ + 0.58].entries()) {
+    const tilt = idx === 0 ? 0.22 : -0.18;
+    spheres.push({
+      position: { x, y: topY + 0.055, z: fz },
+      scale: { x: 0.048, y: 0.048, z: 0.21 },
+      rotation: { x: tilt, y: 0.14, z: 0 },
+      color: 0xd9923b,
+    });
+    for (const sz of [-0.09, 0, 0.09]) {
+      boxes.push({
+        position: { x: x + side * 0.035, y: topY + 0.088 + sz * Math.sin(tilt), z: fz + sz },
+        scale: { x: 0.016, y: 0.012, z: 0.045 },
+        rotation: { x: 0.4, y: 0.35, z: 0 },
+        color: 0x8f4e1c,
+      });
+    }
+  }
+  // 3. 黄金山形方吐司（右端）
+  const toastZ = winCenterZ + 0.92;
+  boxes.push({ position: { x, y: topY + 0.068, z: toastZ }, scale: { x: 0.11, y: 0.13, z: 0.16 }, color: 0xd88e34 });
+  spheres.push(
+    { position: { x, y: topY + 0.135, z: toastZ - 0.035 }, scale: { x: 0.056, y: 0.042, z: 0.055 }, color: 0xc97b25 },
+    { position: { x, y: topY + 0.135, z: toastZ + 0.035 }, scale: { x: 0.056, y: 0.042, z: 0.055 }, color: 0xc97b25 },
+  );
+
+  // --- 中层 C 位架面 y = 0.941：2 只双层草莓奶油大蛋糕 + 2 只粉纸托纸杯玛芬 + 1 块草莓切片蛋糕 ---
+  const midY = 0.941;
+  // 1. 双层草莓奶油圆蛋糕（视觉核心焦点）
+  for (const cakeZ of [winCenterZ - 0.78, winCenterZ + 0.14]) {
+    // 金边托盘
+    cylinders.push({ position: { x, y: midY + 0.009, z: cakeZ }, scale: { x: 0.145, y: 0.016, z: 0.145 }, color: 0xf4ead4 });
+    // 下层乳白奶油胚 (#fff7ea)
+    cylinders.push({ position: { x, y: midY + 0.068, z: cakeZ }, scale: { x: 0.12, y: 0.105, z: 0.12 }, color: 0xfff7ea });
+    // 草莓果酱夹心环
+    cylinders.push({ position: { x, y: midY + 0.072, z: cakeZ }, scale: { x: 0.123, y: 0.022, z: 0.123 }, color: 0xf498b0 });
+    // 上层小蛋糕胚
+    cylinders.push({ position: { x, y: midY + 0.15, z: cakeZ }, scale: { x: 0.082, y: 0.068, z: 0.082 }, color: 0xfff9f0 });
+    // 顶部一圈粉色奶油花边 + 鲜红草莓点缀 (#de4355)
+    for (let k = 0; k < 8; k += 1) {
+      const ang = (k / 8) * Math.PI * 2;
+      spheres.push({
+        position: { x: x + Math.cos(ang) * 0.098, y: midY + 0.122, z: cakeZ + Math.sin(ang) * 0.098 },
+        scale: { x: 0.022, y: 0.02, z: 0.022 },
+        color: 0xf6a6bf,
+      });
+    }
+    for (let k = 0; k < 4; k += 1) {
+      const ang = (k / 4) * Math.PI * 2 + 0.4;
+      spheres.push({
+        position: { x: x + Math.cos(ang) * 0.045, y: midY + 0.2, z: cakeZ + Math.sin(ang) * 0.045 },
+        scale: { x: 0.022, y: 0.028, z: 0.022 },
+        color: 0xde4355,
+      });
+    }
+    // 顶中心鲜红大草莓与绿叶
+    spheres.push(
+      { position: { x, y: midY + 0.214, z: cakeZ }, scale: { x: 0.026, y: 0.032, z: 0.026 }, color: 0xde4355 },
+      { position: { x, y: midY + 0.194, z: cakeZ }, scale: { x: 0.03, y: 0.008, z: 0.03 }, color: 0x4e9a54 },
+    );
+  }
+
+  // 2. 纸杯玛芬蛋糕（粉色波浪纸杯底座 #f29fb2 + 蓬松棕色蛋糕顶 #a8643a + 白色糖珠）
+  for (const [muffY, muffZ] of [
+    [midY, winCenterZ - 0.3],
+    [midY, winCenterZ + 0.62],
+    [0.561, winCenterZ + 0.34],
+    [0.561, winCenterZ + 0.58],
+  ] as const) {
+    cylinders.push({ position: { x, y: muffY + 0.045, z: muffZ }, scale: { x: 0.056, y: 0.088, z: 0.056 }, color: 0xf29fb2 });
+    spheres.push(
+      { position: { x, y: muffY + 0.098, z: muffZ }, scale: { x: 0.068, y: 0.054, z: 0.068 }, color: 0xa8643a },
+      { position: { x: x + side * 0.024, y: muffY + 0.135, z: muffZ - 0.018 }, scale: { x: 0.012, y: 0.012, z: 0.012 }, color: 0xfffaf0 },
+      { position: { x: x + side * 0.018, y: muffY + 0.142, z: muffZ + 0.02 }, scale: { x: 0.012, y: 0.012, z: 0.012 }, color: 0xfffaf0 },
+      { position: { x, y: muffY + 0.155, z: muffZ }, scale: { x: 0.016, y: 0.016, z: 0.016 }, color: 0xe34b5f },
+    );
+  }
+
+  // 3. 中层右端：草莓奶油切片蛋糕
+  const sliceZ = winCenterZ + 0.94;
+  boxes.push(
+    { position: { x, y: midY + 0.058, z: sliceZ }, scale: { x: 0.12, y: 0.11, z: 0.1 }, rotation: { x: 0, y: 0.25, z: 0 }, color: 0xf8db95 },
+    { position: { x, y: midY + 0.062, z: sliceZ }, scale: { x: 0.124, y: 0.024, z: 0.104 }, rotation: { x: 0, y: 0.25, z: 0 }, color: 0xfff8ee },
+    { position: { x, y: midY + 0.12, z: sliceZ }, scale: { x: 0.124, y: 0.024, z: 0.104 }, rotation: { x: 0, y: 0.25, z: 0 }, color: 0xfffaf2 },
+  );
+  spheres.push({ position: { x, y: midY + 0.152, z: sliceZ }, scale: { x: 0.024, y: 0.026, z: 0.024 }, color: 0xde4355 });
+
+  // --- 下层架面 y = 0.561：奶香瑞士卷(×2) + 焦糖编织包 + 草莓奶油小卷 ---
+  const lowY = 0.561;
+  // 1. 奶香瑞士卷（金黄卷筒 #f6d08a + 两端奶白螺旋奶油芯 #fff4e0）
+  for (const rollZ of [winCenterZ - 0.82, winCenterZ - 0.42]) {
+    cylinders.push(
+      { position: { x, y: lowY + 0.064, z: rollZ }, scale: { x: 0.062, y: 0.13, z: 0.062 }, rotation: { x: 0, y: 0, z: Math.PI / 2 }, color: 0xf6d08a },
+      { position: { x: x + side * 0.066, y: lowY + 0.064, z: rollZ }, scale: { x: 0.044, y: 0.01, z: 0.044 }, rotation: { x: 0, y: 0, z: Math.PI / 2 }, color: 0xfff4e0 },
+      { position: { x: x + side * 0.072, y: lowY + 0.064, z: rollZ }, scale: { x: 0.02, y: 0.008, z: 0.02 }, rotation: { x: 0, y: 0, z: Math.PI / 2 }, color: 0xd99646 },
+    );
+  }
+  // 2. 焦糖编织面包（4 节交错）
+  const braidZ = winCenterZ - 0.02;
+  for (const [idx, dz] of [-0.11, -0.04, 0.04, 0.11].entries()) {
+    spheres.push({
+      position: { x: x + side * (idx % 2 === 0 ? 0.015 : -0.015), y: lowY + 0.052, z: braidZ + dz },
+      scale: { x: 0.052, y: 0.046, z: 0.062 },
+      rotation: { x: 0, y: idx % 2 === 0 ? 0.4 : -0.4, z: 0 },
+      color: 0xd18231,
+    });
+  }
+  // 3. 右下角牛角可颂
+  for (const [dz, dy, r] of [[-0.08, 0.03, 0.036], [0, 0.05, 0.054], [0.08, 0.03, 0.036]] as const) {
+    spheres.push({
+      position: { x, y: lowY + dy, z: winCenterZ + 0.92 + dz },
+      scale: { x: r * 0.85, y: r * 0.82, z: r },
+      color: 0xe3a040,
+    });
+  }
+
+  const paintColored = (mesh: THREE.InstancedMesh | null, list: Array<{ color: number }>): void => {
+    if (!mesh) return;
+    const c = new THREE.Color();
+    list.forEach((item, idx) => mesh.setColorAt(idx, c.setHex(item.color)));
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  };
+  paintColored(createSphereInstances(group, 'bakery-props-spheres', spheres, createMatteMaterial(0xffffff, 0.62)), spheres);
+  paintColored(createCylinderInstances(group, 'bakery-props-cylinders', cylinders, createMatteMaterial(0xffffff, 0.64)), cylinders);
+  paintColored(createBoxInstances(group, 'bakery-props-boxes', boxes, createMatteMaterial(0xffffff, 0.66)), boxes);
 }
 
 function buildVendingMachines(parent: THREE.Object3D): void {
@@ -2169,9 +2500,9 @@ function buildVendingMachines(parent: THREE.Object3D): void {
 function buildStreetTrees(parent: THREE.Object3D): void {
   const trees = [
     { x: -1.9, z: 9, height: 2.25, slender: false },
-    { x: 1.9, z: 3, height: 2.52, slender: true },
+    { x: 1.82, z: 3, height: 2.52, slender: true },
     { x: -1.9, z: -14, height: 2.4, slender: true },
-    { x: 1.9, z: -27, height: 2.18, slender: false },
+    { x: 1.84, z: -27, height: 2.18, slender: false },
   ];
   const pitBeds: BoxInstanceSpec[] = [];
   const pitBorders: BoxInstanceSpec[] = [];
@@ -2217,8 +2548,8 @@ function buildStreetTrees(parent: THREE.Object3D): void {
     const yShift = tree.height - 2.25;
     for (const branch of [
       { x: inward * 0.27, y: 2.6 + yShift, z: -0.25 },
-      { x: -inward * 0.18, y: 2.75 + yShift, z: 0.28 },
-      { x: inward * 0.12, y: 3.02 + yShift, z: 0.08 },
+      { x: inward * 0.14, y: 2.75 + yShift, z: 0.28 },
+      { x: inward * 0.18, y: 3.02 + yShift, z: 0.08 },
     ]) {
       branches.push({
         from: { x: tree.x, y: 1.55 + yShift * 0.6, z: tree.z },
@@ -2227,21 +2558,21 @@ function buildStreetTrees(parent: THREE.Object3D): void {
       });
     }
 
-    // 树冠参数：细高树收窄、圆冠树放宽；卡片尺寸略大于冠幅，靠重叠吃出体积
-    // 明度染色：贴图本身已烘焙四层明暗，这里只做轻微的冷暖差，避免把树压暗
+    // 树冠参数：细高树收窄、圆冠树放宽；靠路侧微倾避让砖墙外立面，防树叶穿墙
     const palette = tree.slender
       ? [0xe4ebdc, 0xeef4e7, 0xd8e2cf, 0xf4f8ee]
       : [0xe8ecd9, 0xf1f4e4, 0xdde3ce, 0xf6f8ec];
     const canopyCenterY = tree.height + (tree.slender ? 0.86 : 0.72);
-    const canopyRadius = tree.slender ? 0.6 : 0.78;
-    const cardScale = tree.slender ? 1.62 : 1.78;
+    const canopyRadius = tree.slender ? 0.56 : 0.76;
+    const cardScale = tree.slender ? 1.54 : 1.74;
+    const leanInward = inward * 0.16;
 
     for (let card = 0; card < canopyTier.cards; card += 1) {
       const t = (card + 0.5) / canopyTier.cards;
       const angle = card * goldenAngle * 2 + treeIndex * 1.37;
       const ring = canopyRadius * (0.42 + 0.58 * Math.sin(Math.PI * t));
       cardSpecs.push({
-        x: tree.x + Math.cos(angle) * ring * 0.92,
+        x: tree.x + leanInward + Math.cos(angle) * ring * 0.88,
         y: canopyCenterY + (t - 0.5) * (tree.slender ? 1.18 : 1.02),
         z: tree.z + Math.sin(angle) * ring * 0.6,
         scale: cardScale * (0.9 + ((card * 5 + treeIndex) % 4) * 0.05),
@@ -2412,6 +2743,7 @@ let streetNightRoot: THREE.Object3D | null = null;
 let streetNightContext: SceneRuntimeContext | null = null;
 let streetBulbMaterial: THREE.MeshStandardMaterial | null = null;
 const streetLampSpots: THREE.Vector3[] = [];
+const streetLampParams: Array<{ poolRadius: number; lightDistance: number }> = [];
 const nightPointLights: THREE.PointLight[] = [];
 let nightPoolMesh: THREE.InstancedMesh | null = null;
 let nightBeamMesh: THREE.InstancedMesh | null = null;
@@ -2420,9 +2752,18 @@ let nightBeamMaterial: THREE.MeshBasicMaterial | null = null;
 const scratchNightFeet = new THREE.Vector3();
 
 /** 灯位变更（程序化灯 → GLB 灯笼腔）后重建夜间件；同代重复调用只会保留一套 */
-function setStreetLampSpots(spots: ReadonlyArray<{ x: number; y: number; z: number }>): void {
+function setStreetLampSpots(
+  spots: ReadonlyArray<{ x: number; y: number; z: number; poolRadius?: number; lightDistance?: number }>,
+): void {
   streetLampSpots.length = 0;
-  for (const spot of spots) streetLampSpots.push(new THREE.Vector3(spot.x, spot.y, spot.z));
+  streetLampParams.length = 0;
+  for (const spot of spots) {
+    streetLampSpots.push(new THREE.Vector3(spot.x, spot.y, spot.z));
+    streetLampParams.push({
+      poolRadius: spot.poolRadius ?? NIGHT_LAMP.poolRadius,
+      lightDistance: spot.lightDistance ?? NIGHT_LAMP.lightDistance,
+    });
+  }
   if (nightPoolMesh || nightBeamMesh) {
     // 灯位整体迁移时旧的光斑 / 光柱要按新位置重排，不能留在原悬臂端
     nightPoolMesh?.parent?.remove(nightPoolMesh as THREE.Object3D);
@@ -2450,9 +2791,10 @@ function placeStreetNightDecals(root: THREE.Object3D): void {
   const poolGeometry = new THREE.PlaneGeometry(1, 1);
   const pools = new THREE.InstancedMesh(poolGeometry, nightPoolMaterial, streetLampSpots.length);
   streetLampSpots.forEach((spot, index) => {
+    const radius = streetLampParams[index]?.poolRadius ?? NIGHT_LAMP.poolRadius;
     transform.position.set(spot.x, NIGHT_LAMP.poolY, spot.z);
     transform.rotation.set(-Math.PI / 2, 0, 0);
-    transform.scale.set(NIGHT_LAMP.poolRadius * 2, NIGHT_LAMP.poolRadius * 2, 1);
+    transform.scale.set(radius * 2, radius * 2, 1);
     transform.updateMatrix();
     pools.setMatrixAt(index, transform.matrix);
   });
@@ -2493,9 +2835,10 @@ function placeStreetNightDecals(root: THREE.Object3D): void {
   });
   const beams = new THREE.InstancedMesh(beamGeometry, nightBeamMaterial, streetLampSpots.length);
   streetLampSpots.forEach((spot, index) => {
-    transform.position.set(spot.x, NIGHT_LAMP.beamFloorY + beamHeight / 2, spot.z);
+    const height = Math.max(0.2, spot.y - NIGHT_LAMP.beamFloorY);
+    transform.position.set(spot.x, NIGHT_LAMP.beamFloorY + height / 2, spot.z);
     transform.rotation.set(0, 0, 0);
-    transform.scale.set(1, 1, 1);
+    transform.scale.set(1, height / beamHeight, 1);
     transform.updateMatrix();
     beams.setMatrixAt(index, transform.matrix);
   });
@@ -2509,6 +2852,99 @@ function placeStreetNightDecals(root: THREE.Object3D): void {
   bindInstancedDispose(beamGeometry, beams);
   root.add(beams);
   nightBeamMesh = beams;
+}
+
+/** 街道新增店铺/灯箱的日夜自发光与地面光斑统一登记，确保白天 ≤0.2、夜间 ≤0.9 不爆光 */
+interface StreetNightLightBinding {
+  material: THREE.MeshStandardMaterial;
+  dayEmissive: number;
+  nightEmissive: number;
+}
+const streetExtraNightBindings: StreetNightLightBinding[] = [];
+const streetExtraNightDecals: THREE.Object3D[] = [];
+const streetShopLightSpecs: StreetShopLightSpec[] = [];
+const streetShopLights: THREE.PointLight[] = [];
+const SHOP_LIGHT_SLOTS = 2;
+
+function registerStreetShopLight(spec: StreetShopLightSpec): void {
+  streetShopLightSpecs.push(spec);
+}
+
+/** 固定 2 盏店铺近距点光池：保持 visible 恒为 true 避免行走途中触发 GLSL 重编译，仅照亮玩家身边店铺 */
+function ensureStreetShopLights(): void {
+  const root = streetNightRoot;
+  if (!root || streetShopLightSpecs.length === 0) return;
+  while (streetShopLights.length < SHOP_LIGHT_SLOTS) {
+    const light = new THREE.PointLight(0xffcb78, 0, 4.0, 2);
+    light.castShadow = false;
+    light.visible = true;
+    light.name = `street-shop-light-${streetShopLights.length}`;
+    root.add(light);
+    streetShopLights.push(light);
+  }
+}
+
+function tickStreetShopLights(): void {
+  if (streetShopLights.length === 0 || streetShopLightSpecs.length === 0) return;
+  const hasPlayer = Boolean(streetNightContext?.getPlayerFeet);
+  if (hasPlayer && streetNightContext?.getPlayerFeet) {
+    streetNightContext.getPlayerFeet(scratchNightFeet);
+  }
+  const px = hasPlayer ? scratchNightFeet.x : SPAWN.x;
+  const pz = hasPlayer ? scratchNightFeet.z : SPAWN.z;
+
+  let best0 = -1;
+  let best1 = -1;
+  let dist0 = Number.POSITIVE_INFINITY;
+  let dist1 = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < streetShopLightSpecs.length; i += 1) {
+    const spec = streetShopLightSpecs[i];
+    const dx = spec.x - px;
+    const dz = spec.z - pz;
+    const dSq = dx * dx + dz * dz;
+    if (dSq < dist0) {
+      dist1 = dist0;
+      best1 = best0;
+      dist0 = dSq;
+      best0 = i;
+    } else if (dSq < dist1) {
+      dist1 = dSq;
+      best1 = i;
+    }
+  }
+
+  const indices = [best0, best1];
+  const dists = [dist0, dist1];
+  for (let slot = 0; slot < streetShopLights.length; slot += 1) {
+    const light = streetShopLights[slot];
+    const idx = indices[slot] ?? -1;
+    const dSq = dists[slot] ?? Number.POSITIVE_INFINITY;
+    if (idx < 0 || dSq > 225) {
+      light.intensity = 0;
+      continue;
+    }
+    const spec = streetShopLightSpecs[idx];
+    const fade = dSq <= 144 ? 1 : (225 - dSq) / 81;
+    light.color.setHex(spec.color);
+    light.position.set(spec.x, spec.y, spec.z);
+    light.distance = spec.distance;
+    light.decay = spec.decay ?? 2;
+    light.intensity = spec.intensity * fade;
+  }
+}
+
+export function registerStreetExtraNightMaterial(
+  material: THREE.MeshStandardMaterial,
+  dayEmissive = 0.18,
+  nightEmissive = 0.85,
+): void {
+  material.emissiveIntensity = streetNightEnabled ? nightEmissive : dayEmissive;
+  streetExtraNightBindings.push({ material, dayEmissive, nightEmissive });
+}
+
+export function registerStreetExtraNightDecal(decal: THREE.Object3D): void {
+  decal.visible = streetNightEnabled;
+  streetExtraNightDecals.push(decal);
 }
 
 /** 点光只给离玩家最近的几盏：低档 1 盏、中档 2 盏、高档 3 盏，阴影全部仍由月光那一盏负责 */
@@ -2525,6 +2961,12 @@ function applyStreetNight(): void {
     streetBulbMaterial.emissive.setHex(
       streetNightEnabled ? NIGHT_LAMP.bulbColor : NIGHT_LAMP.dayBulbColor,
     );
+  }
+  for (const item of streetExtraNightBindings) {
+    item.material.emissiveIntensity = streetNightEnabled ? item.nightEmissive : item.dayEmissive;
+  }
+  for (const decal of streetExtraNightDecals) {
+    decal.visible = streetNightEnabled;
   }
   const root = streetNightRoot;
   if (!streetNightEnabled || !root || streetLampSpots.length === 0) {
@@ -2578,6 +3020,8 @@ function tickStreetNight(dtSeconds: number): void {
       return;
     }
     const spot = streetLampSpots[winner.index];
+    const params = streetLampParams[winner.index];
+    light.distance = params?.lightDistance ?? NIGHT_LAMP.lightDistance;
     if (light.position.lengthSq() === 0) light.position.copy(spot);
     else light.position.lerp(spot, ease);
     // 相位跟着灯走：光斑从一盏换到另一盏时明暗连续，不出现整条街同频闪
@@ -2599,7 +3043,10 @@ function resetStreetNightRig(): void {
   nightPoolMaterial = null;
   nightBeamMaterial = null;
   nightPointLights.length = 0;
+  for (const light of streetShopLights) light.removeFromParent();
+  streetShopLights.length = 0;
   streetLampSpots.length = 0;
+  streetLampParams.length = 0;
   // 呼吸节律按场景重新起相：跨场累计会让同一段时间在不同帧率下算出不同相位
   streetNightTime = 0;
 }
@@ -2616,18 +3063,20 @@ function buildStreetLamps(parent: THREE.Object3D, occluders: THREE.Object3D[]): 
     metalness: 0,
   });
 
+  const standardIndices = LAMP_POSTS.map((_, index) => index).filter((index) => index !== SOY_LAMP_INDEX);
   const poles: BoxInstanceSpec[] = [];
   const bases: BoxInstanceSpec[] = [];
   const arms: SegmentInstanceSpec[] = [];
   const shadeGeometry = new THREE.CylinderGeometry(0.08, 0.22, 0.18, 10, 1, true);
-  const shades = new THREE.InstancedMesh(shadeGeometry, shadeMaterial, LAMP_POSTS.length);
+  const shades = new THREE.InstancedMesh(shadeGeometry, shadeMaterial, standardIndices.length);
   bindInstancedDispose(shadeGeometry, shades);
   const bulbGeometry = new THREE.SphereGeometry(0.09, 10, 7);
   const bulbs = new THREE.InstancedMesh(bulbGeometry, glowMaterial, LAMP_POSTS.length);
   bindInstancedDispose(bulbGeometry, bulbs);
   const transform = new THREE.Object3D();
 
-  LAMP_POSTS.forEach((post, index) => {
+  standardIndices.forEach((postIndex, slot) => {
+    const post = LAMP_POSTS[postIndex];
     poles.push({ position: { x: post.x, y: 2, z: post.z }, scale: { x: 0.065, y: 4, z: 0.065 } });
     bases.push({ position: { x: post.x, y: 0.09, z: post.z }, scale: { x: 0.145, y: 0.18, z: 0.145 } });
     const headX = post.x - Math.sign(post.x) * 1.15;
@@ -2640,12 +3089,43 @@ function buildStreetLamps(parent: THREE.Object3D, occluders: THREE.Object3D[]): 
     transform.rotation.set(0, 0, 0);
     transform.scale.set(1, 1, 1);
     transform.updateMatrix();
-    shades.setMatrixAt(index, transform.matrix);
+    shades.setMatrixAt(slot, transform.matrix);
 
     transform.position.set(headX, 3.99, post.z);
     transform.updateMatrix();
-    bulbs.setMatrixAt(index, transform.matrix);
+    bulbs.setMatrixAt(postIndex, transform.matrix);
   });
+
+  // 豆浆店专用低灯：方形铸铁基座、3.2m 杆、2.9m 灯头、垂直墙面悬挑 0.9m，独立批次不被 GLB 替换
+  const soyMetal = new THREE.MeshStandardMaterial({ color: 0x4a5150, roughness: 0.6, metalness: 0.4 });
+  const soyShadeMaterial = createMatteMaterial(0x5a625e, 0.7);
+  const soyHeadX = SOY_LAMP.x - SOY_LAMP.armLength;
+  const soyPole = createCylinderInstances(parent, 'street-lamp-soy-pole', [
+    { position: { x: SOY_LAMP.x, y: SOY_LAMP.poleHeight / 2, z: SOY_LAMP.z }, scale: { x: 0.065, y: SOY_LAMP.poleHeight, z: 0.065 } },
+  ], soyMetal, true);
+  if (soyPole) occluders.push(soyPole);
+  createBoxInstances(parent, 'street-lamp-soy-base', [
+    { position: { x: SOY_LAMP.x, y: SOY_LAMP.baseHeight / 2, z: SOY_LAMP.z }, scale: { x: SOY_LAMP.baseSize, y: SOY_LAMP.baseHeight, z: SOY_LAMP.baseSize } },
+  ], soyMetal, true);
+  createSegmentCylinderInstances(parent, 'street-lamp-soy-arm', [
+    { from: { x: SOY_LAMP.x, y: SOY_LAMP.bulbY + 0.05, z: SOY_LAMP.z }, to: { x: soyHeadX, y: SOY_LAMP.bulbY + 0.05, z: SOY_LAMP.z }, radius: 0.025 },
+  ], soyMetal, true, 6);
+  const soyShadeGeometry = new THREE.CylinderGeometry(0.08, 0.22, 0.18, 10, 1, true);
+  const soyShade = new THREE.InstancedMesh(soyShadeGeometry, soyShadeMaterial, 1);
+  bindInstancedDispose(soyShadeGeometry, soyShade);
+  transform.position.set(soyHeadX, SOY_LAMP.bulbY + 0.08, SOY_LAMP.z);
+  transform.rotation.set(0, 0, 0);
+  transform.scale.set(1, 1, 1);
+  transform.updateMatrix();
+  soyShade.setMatrixAt(0, transform.matrix);
+  soyShade.instanceMatrix.needsUpdate = true;
+  soyShade.name = 'street-lamp-soy-shade';
+  soyShade.computeBoundingBox();
+  soyShade.computeBoundingSphere();
+  parent.add(soyShade);
+  transform.position.set(soyHeadX, SOY_LAMP.bulbY, SOY_LAMP.z);
+  transform.updateMatrix();
+  bulbs.setMatrixAt(SOY_LAMP_INDEX, transform.matrix);
 
   const poleMesh = createCylinderInstances(parent, 'street-lamp-poles', poles, metal, true);
   if (poleMesh) occluders.push(poleMesh);
@@ -2661,46 +3141,61 @@ function buildStreetLamps(parent: THREE.Object3D, occluders: THREE.Object3D[]): 
   bulbs.computeBoundingSphere();
   parent.add(shades, bulbs);
 
-  // 夜间件的挂点：程序化灯的灯泡在悬臂端 3.99，GLB 到货后会整体换成灯笼腔
+  const soySpot = {
+    x: soyHeadX,
+    y: SOY_LAMP.bulbY,
+    z: SOY_LAMP.z,
+    poolRadius: SOY_LAMP.poolRadius,
+    lightDistance: SOY_LAMP.lightDistance,
+  };
   streetNightRoot = parent;
   streetBulbMaterial = glowMaterial;
-  setStreetLampSpots(LAMP_POSTS.map((post) => ({
-    x: post.x - Math.sign(post.x) * 1.15,
-    y: 3.99,
-    z: post.z,
-  })));
+  setStreetLampSpots(LAMP_POSTS.map((post, index) => (
+    index === SOY_LAMP_INDEX
+      ? soySpot
+      : { x: post.x - Math.sign(post.x) * 1.15, y: 3.99, z: post.z }
+  )));
 
-  // 复古铸铁路灯：加载成功才顶替灯柱 / 灯座 / 灯臂 / 灯罩四组实例，失败就保留上面这套程序化灯，不留空洞
+  // 复古铸铁路灯只替换其余四盏；豆浆低灯始终保留程序化批次
   loadPropModel('streetLamp').then((asset) => {
     if (!asset || generation !== streetGeneration) return;
-    // 成品铸铁路臂沿自身 X 对称伸出 ±0.38，与原程序化悬臂同轴，因此 yaw 取 0
-    const lampSpots = LAMP_POSTS.map((post) => ({ x: Math.sign(post.x) * LAMP_PROP_X, z: post.z }));
+    const glbSpots = standardIndices.map((index) => ({
+      index,
+      x: Math.sign(LAMP_POSTS[index].x) * LAMP_PROP_X,
+      z: LAMP_POSTS[index].z,
+    }));
     const lamps = createPropInstances(
       parent,
       'street-lamp-props',
       asset,
-      lampSpots.map((spot) => ({ x: spot.x, z: spot.z, yaw: 0 })),
+      glbSpots.map((spot) => ({ x: spot.x, z: spot.z, yaw: 0 })),
     );
     const slot = poleMesh ? occluders.indexOf(poleMesh) : -1;
     if (slot >= 0) occluders[slot] = lamps;
     else occluders.push(lamps);
     retireProceduralBatches([poleMesh, baseMesh, armMesh, shades], [metal, shadeMaterial]);
 
-    // GLB 里没有发光体：自发光灯泡实例挪进灯笼玻璃腔，夜里灯还是靠它亮着
-    lampSpots.forEach((spot, index) => {
+    glbSpots.forEach((spot) => {
       transform.position.set(spot.x, LAMP_PROP_BULB_Y, spot.z);
       transform.rotation.set(0, 0, 0);
       transform.scale.set(1, 1, 1);
       transform.updateMatrix();
-      bulbs.setMatrixAt(index, transform.matrix);
+      bulbs.setMatrixAt(spot.index, transform.matrix);
     });
     bulbs.instanceMatrix.needsUpdate = true;
 
-    setStreetLampSpots(lampSpots.map((spot) => ({ x: spot.x, y: LAMP_PROP_BULB_Y, z: spot.z })));
+    setStreetLampSpots(LAMP_POSTS.map((post, index) => (
+      index === SOY_LAMP_INDEX
+        ? soySpot
+        : { x: Math.sign(post.x) * LAMP_PROP_X, y: LAMP_PROP_BULB_Y, z: post.z }
+    )));
 
     const contacts = createContactShadowDiscBatch(
       'street-lamp-contact',
-      lampSpots.map((spot) => ({ x: spot.x, z: spot.z, radius: 0.3, y: 0.02 })),
+      [
+        ...glbSpots.map((spot) => ({ x: spot.x, z: spot.z, radius: 0.3, y: 0.02 })),
+        { x: SOY_LAMP.x, z: SOY_LAMP.z, radius: 0.3, y: 0.02 },
+      ],
     );
     if (contacts) parent.add(contacts);
   });
@@ -2710,64 +3205,175 @@ function buildUtilityPoles(parent: THREE.Object3D): void {
   const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x4a5150, roughness: 0.78, metalness: 0.08 });
   const wireMaterial = new THREE.MeshBasicMaterial({ color: 0x263238 });
   const ceramicMaterial = new THREE.MeshStandardMaterial({ color: 0xa9c0bd, roughness: 0.3, metalness: 0.08 });
-  const yellowMaterial = createMatteMaterial(0xd8ae38, 0.58);
+  const yellowMaterial = new THREE.MeshStandardMaterial({ color: 0xd8ae38, roughness: 0.32, metalness: 0.42 });
   const blackMaterial = createMatteMaterial(0x252b2c, 0.62);
+  const concreteMaterial = createMatteMaterial(0x9a9b94, 0.92);
   const poles: BoxInstanceSpec[] = [];
+  const bases: BoxInstanceSpec[] = [];
   const crossarms: BoxInstanceSpec[] = [];
   const insulators: BoxInstanceSpec[] = [];
   const yellowBands: BoxInstanceSpec[] = [];
   const blackBands: BoxInstanceSpec[] = [];
-  const zPositions = [11, -5, -21, -37];
 
-  for (const side of [-1, 1]) {
-    const x = side * 2.3;
-    for (const z of zPositions) {
-      poles.push({ position: { x, y: 3.1, z }, scale: { x: 0.072, y: 6.2, z: 0.072 } });
-      crossarms.push({ position: { x, y: 5.72, z }, scale: { x: 0.9, y: 0.075, z: 0.09 } });
-      for (const offsetX of [-0.32, 0.32]) {
-        insulators.push({
-          position: { x: x + offsetX, y: 5.84, z },
-          scale: { x: 0.045, y: 0.16, z: 0.045 },
-        });
+  for (const pole of UTILITY_POLE_SPOTS) {
+    const { x, z } = pole;
+    poles.push({ position: { x, y: 3.35, z }, scale: { x: 0.072, y: 6.2, z: 0.072 } });
+    bases.push({ position: { x, y: 0.125, z }, scale: { x: 0.5, y: 0.25, z: 0.5 } });
+    if (pole.parallelStreet) {
+      crossarms.push({ position: { x, y: 5.97, z }, scale: { x: 0.09, y: 0.075, z: 0.9 } });
+      for (const offsetZ of [-0.32, 0.32]) {
+        insulators.push({ position: { x, y: 6.09, z: z + offsetZ }, scale: { x: 0.045, y: 0.16, z: 0.045 } });
       }
-      for (let band = 0; band < 6; band += 1) {
-        const target = band % 2 === 0 ? yellowBands : blackBands;
-        target.push({
-          position: { x, y: 0.24 + band * 0.17, z },
-          scale: { x: 0.085, y: 0.17, z: 0.085 },
-        });
+    } else {
+      crossarms.push({ position: { x, y: 5.97, z }, scale: { x: 0.9, y: 0.075, z: 0.09 } });
+      for (const offsetX of [-0.32, 0.32]) {
+        insulators.push({ position: { x: x + offsetX, y: 6.09, z }, scale: { x: 0.045, y: 0.16, z: 0.045 } });
       }
     }
+    const bandCount = pole.parallelStreet ? 4 : 6;
+    for (let band = 0; band < bandCount; band += 1) {
+      const target = band % 2 === 0 ? yellowBands : blackBands;
+      target.push({ position: { x, y: 0.41 + band * 0.17, z }, scale: { x: 0.085, y: 0.17, z: 0.085 } });
+    }
+  }
 
-    for (let span = 0; span < zPositions.length - 1; span += 1) {
-      for (const offsetX of [-0.32, 0.32]) {
-        const startZ = zPositions[span];
-        const endZ = zPositions[span + 1];
+  for (const side of [-1, 1]) {
+    const sidePoles = UTILITY_POLE_SPOTS.filter((pole) => Math.sign(pole.x) === side).sort((a, b) => b.z - a.z);
+    for (let span = 0; span < sidePoles.length - 1; span += 1) {
+      const start = sidePoles[span];
+      const end = sidePoles[span + 1];
+      for (const offset of [-0.32, 0.32]) {
+        const offsetPoint = (pole: typeof start) => pole.parallelStreet
+          ? new THREE.Vector3(pole.x, 6.17, pole.z + offset)
+          : new THREE.Vector3(pole.x + offset, 6.17, pole.z);
+        const startPoint = offsetPoint(start);
+        const endPoint = offsetPoint(end);
         const curve = new THREE.CatmullRomCurve3([
-          new THREE.Vector3(x + offsetX, 5.92, startZ),
-          new THREE.Vector3(x + offsetX, 5.48, startZ * 0.66 + endZ * 0.34),
-          new THREE.Vector3(x + offsetX, 5.48, startZ * 0.34 + endZ * 0.66),
-          new THREE.Vector3(x + offsetX, 5.92, endZ),
+          startPoint,
+          startPoint.clone().lerp(endPoint, 0.34).setY(5.78),
+          startPoint.clone().lerp(endPoint, 0.66).setY(5.78),
+          endPoint,
         ]);
-        parent.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.008, 3, false), wireMaterial));
+        const wire = new THREE.Mesh(new THREE.TubeGeometry(curve, 20, 0.008, 3, false), wireMaterial);
+        wire.name = `street-utility-wire-${side}-${span}-${offset < 0 ? 0 : 1}`;
+        parent.add(wire);
       }
     }
   }
 
   for (const z of [-5, -21]) {
     const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-2.62, 5.75, z),
-      new THREE.Vector3(0, 5.08, z + 0.25),
-      new THREE.Vector3(2.62, 5.75, z),
+      new THREE.Vector3(-2.62, 6.17, z),
+      new THREE.Vector3(0, 5.78, z + 0.25),
+      new THREE.Vector3(2.62, 6.17, z),
     ]);
     parent.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.007, 3, false), wireMaterial));
   }
 
   createCylinderInstances(parent, 'street-utility-poles', poles, poleMaterial, true);
+  createCylinderInstances(parent, 'street-utility-pole-bases', bases, concreteMaterial, true);
   createBoxInstances(parent, 'street-utility-crossarms', crossarms, poleMaterial, true);
   createCylinderInstances(parent, 'street-utility-insulators', insulators, ceramicMaterial);
   createCylinderInstances(parent, 'street-utility-yellow-bands', yellowBands, yellowMaterial);
   createCylinderInstances(parent, 'street-utility-black-bands', blackBands, blackMaterial);
+
+  // 前景电线杆中式中国结挂饰与黄底黑字街道编号牌（重点作用于前景 z = 11 与中前段 z = -5）
+  const knotRedMaterial = createMatteMaterial(0xd92626, 0.52);
+  const knotFrameMaterial = new THREE.MeshStandardMaterial({ color: 0xc21e1e, roughness: 0.45, metalness: 0.28 });
+  const knotGoldMaterial = new THREE.MeshStandardMaterial({ color: 0xe6bc55, roughness: 0.36, metalness: 0.52 });
+  const knotFrames: BoxInstanceSpec[] = [];
+  const knotBodies: BoxInstanceSpec[] = [];
+  const knotCylinders: BoxInstanceSpec[] = [];
+  const knotGoldBeads: BoxInstanceSpec[] = [];
+
+  let poleSerial = 1;
+  for (const pole of UTILITY_POLE_SPOTS.slice(0, 4)) {
+    const { x, z } = pole;
+    const plateLabel = `迎新路 0${poleSerial}`;
+    poleSerial += 1;
+    const plate = createTextSign(plateLabel, 0.42, 0.22, {
+      background: '#e7c038',
+      foreground: '#1c1f21',
+      resolution: 256,
+    });
+    plate.name = `street-pole-plate-${poleSerial}`;
+    plate.position.set(x, 2.4, z + 0.088);
+    plate.castShadow = false;
+    if (plate.material instanceof THREE.MeshStandardMaterial) {
+      plate.material.roughness = 0.72;
+      plate.material.envMapIntensity = 0.25;
+    }
+    parent.add(plate);
+    knotFrames.push({
+      position: { x, y: 2.4, z: z + 0.075 },
+      scale: { x: 0.44, y: 0.24, z: 0.022 },
+    });
+
+    // 仅在前景主灯柱处保留 1 组中式中国结挂饰，避免沿街 8 个重复红挂件造成视觉噪点
+    if (!(Math.abs(x - 1.95) < 0.05 && Math.abs(z - 7) < 0.05)) continue;
+
+    const mountY = 3.12;
+    knotFrames.push(
+      { position: { x, y: mountY, z }, scale: { x: 0.22, y: 0.09, z: 0.22 } },
+      { position: { x, y: mountY, z }, scale: { x: 0.96, y: 0.036, z: 0.036 } },
+    );
+
+    for (const armDir of [-1, 1]) {
+      const kx = x + armDir * 0.34;
+      const frameW = 0.28;
+      const frameH = 0.24;
+      const frameCenterY = mountY - 0.14;
+      knotFrames.push(
+        { position: { x: kx, y: frameCenterY + frameH / 2, z }, scale: { x: frameW, y: 0.024, z: 0.026 } },
+        { position: { x: kx, y: frameCenterY - frameH / 2, z }, scale: { x: frameW, y: 0.024, z: 0.026 } },
+        { position: { x: kx - frameW / 2, y: frameCenterY, z }, scale: { x: 0.024, y: frameH, z: 0.026 } },
+        { position: { x: kx + frameW / 2, y: frameCenterY, z }, scale: { x: 0.024, y: frameH, z: 0.026 } },
+        { position: { x: kx, y: frameCenterY, z }, scale: { x: frameW - 0.04, y: 0.016, z: 0.02 } },
+        { position: { x: kx, y: frameCenterY, z }, scale: { x: 0.016, y: frameH - 0.04, z: 0.02 } },
+      );
+
+      knotCylinders.push({ position: { x: kx, y: frameCenterY - 0.17, z }, scale: { x: 0.008, y: 0.11, z: 0.008 } });
+      knotGoldBeads.push({ position: { x: kx, y: frameCenterY - 0.21, z }, scale: { x: 0.022, y: 0.022, z: 0.022 } });
+
+      const knotY = frameCenterY - 0.37;
+      knotBodies.push(
+        {
+          position: { x: kx, y: knotY, z },
+          scale: { x: 0.2, y: 0.2, z: 0.042 },
+          rotation: { x: 0, y: 0, z: Math.PI / 4 },
+        },
+        {
+          position: { x: kx, y: knotY, z },
+          scale: { x: 0.125, y: 0.125, z: 0.062 },
+          rotation: { x: 0, y: 0, z: Math.PI / 4 },
+        },
+        {
+          position: { x: kx - 0.145, y: knotY, z },
+          scale: { x: 0.055, y: 0.055, z: 0.032 },
+          rotation: { x: 0, y: 0, z: Math.PI / 4 },
+        },
+        {
+          position: { x: kx + 0.145, y: knotY, z },
+          scale: { x: 0.055, y: 0.055, z: 0.032 },
+          rotation: { x: 0, y: 0, z: Math.PI / 4 },
+        },
+      );
+      knotGoldBeads.push({ position: { x: kx, y: knotY, z }, scale: { x: 0.038, y: 0.038, z: 0.068 } });
+
+      const tasselTopY = knotY - 0.175;
+      knotGoldBeads.push({ position: { x: kx, y: tasselTopY, z }, scale: { x: 0.026, y: 0.028, z: 0.026 } });
+      knotCylinders.push(
+        { position: { x: kx, y: tasselTopY - 0.06, z }, scale: { x: 0.022, y: 0.12, z: 0.022 } },
+        { position: { x: kx - 0.018, y: tasselTopY - 0.05, z: z + 0.006 }, scale: { x: 0.014, y: 0.1, z: 0.014 } },
+        { position: { x: kx + 0.018, y: tasselTopY - 0.05, z: z - 0.006 }, scale: { x: 0.014, y: 0.1, z: 0.014 } },
+      );
+    }
+  }
+
+  createBoxInstances(parent, 'street-pole-knot-frames', knotFrames, knotFrameMaterial, true);
+  createBoxInstances(parent, 'street-pole-knot-bodies', knotBodies, knotRedMaterial, true);
+  createCylinderInstances(parent, 'street-pole-knot-tassels', knotCylinders, knotRedMaterial);
+  createSphereInstances(parent, 'street-pole-knot-gold', knotGoldBeads, knotGoldMaterial);
 }
 
 /** 顶点级抖动用的稳定哈希：同一个坐标永远算出同一个数，重涂不会每次进场景换花色 */
@@ -3195,110 +3801,318 @@ function buildTrashcans(parent: THREE.Object3D): void {
   if (contacts) parent.add(contacts);
 }
 
+/**
+ * 明快卡通彩色校园自行车（建议 8）：
+ * 多巴胺校园撞色：天蓝圆润管状车架与弧形挡泥板(#38a3e8)、草绿前叉/立管/链条罩/轮毂(#7bc943)、
+ * 亮橘橙圆润车座/手把套/脚踏(#f38624)、柠檬黄网格前车篮(#ffd342)配小花与折叠书本、
+ * 深炭黑饱满外胎(#262b30)裹前橙后黄双色宽边轮圈与银白辐条。
+ * 本地坐标系：轮底严格贴齐 y = 0，车头朝向 +Z。
+ */
+function buildCartoonBicycle(options: { withKickstand?: boolean; name?: string } = {}): THREE.Group {
+  const bike = new THREE.Group();
+  bike.name = options.name ?? 'street-cartoon-bicycle';
+
+  const frameBlue = createMatteMaterial(0x38a3e8, 0.56);
+  const accentGreen = createMatteMaterial(0x7bc943, 0.58);
+  const brightOrange = createMatteMaterial(0xf38624, 0.6);
+  const lemonYellow = createMatteMaterial(0xffd342, 0.58);
+  const tireDark = createMatteMaterial(0x262b30, 0.82);
+  const spokeSilver = new THREE.MeshStandardMaterial({ color: 0xe4eaed, roughness: 0.36, metalness: 0.55 });
+  const flowerPetal = createMatteMaterial(0xff8e42, 0.65);
+  const flowerCenter = createMatteMaterial(0xfff5d6, 0.65);
+  const leafGreen = createMatteMaterial(0x4ea348, 0.72);
+  const bookCover = createMatteMaterial(0x52b89a, 0.68);
+  const bookPages = createMatteMaterial(0xfaf4e6, 0.85);
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const addTube = (from: Vec3, to: Vec3, radius: number, material: THREE.Material): void => {
+    const start = new THREE.Vector3(from.x, from.y, from.z);
+    const end = new THREE.Vector3(to.x, to.y, to.z);
+    const dir = end.clone().sub(start);
+    const len = Math.max(0.002, dir.length());
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len, 8), material);
+    mesh.position.addVectors(start, end).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(up, dir.normalize());
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    bike.add(mesh);
+  };
+
+  // 1. 双车轮：轮心 y = 0.338，外胎半径 0.30 + 管径 0.038 => 轮底严格贴 y = 0
+  const wheelY = 0.338;
+  const frontZ = 0.52;
+  const rearZ = -0.52;
+  const tireGeo = new THREE.TorusGeometry(0.3, 0.038, 10, 22);
+  const rimGeo = new THREE.TorusGeometry(0.252, 0.021, 8, 20);
+  const hubGeo = new THREE.CylinderGeometry(0.038, 0.038, 0.09, 10);
+  hubGeo.rotateZ(Math.PI / 2);
+  const spokeGeo = new THREE.CylinderGeometry(0.005, 0.005, 0.49, 5);
+  const fenderGeo = new THREE.TorusGeometry(0.352, 0.025, 6, 14, Math.PI * 0.62);
+
+  for (const [zPos, rimMat, fenderRotX] of [
+    [frontZ, brightOrange, -Math.PI * 0.16],
+    [rearZ, lemonYellow, -Math.PI * 0.46],
+  ] as const) {
+    const wheelGroup = new THREE.Group();
+    wheelGroup.position.set(0, wheelY, zPos);
+
+    const tire = new THREE.Mesh(tireGeo, tireDark);
+    tire.rotation.y = Math.PI / 2;
+    tire.castShadow = true;
+    wheelGroup.add(tire);
+
+    const rim = new THREE.Mesh(rimGeo, rimMat);
+    rim.rotation.y = Math.PI / 2;
+    wheelGroup.add(rim);
+
+    const hub = new THREE.Mesh(hubGeo, accentGreen);
+    wheelGroup.add(hub);
+
+    // 4 根贯通直径辐条（构成 8 根对称辐条）
+    for (let s = 0; s < 4; s += 1) {
+      const spoke = new THREE.Mesh(spokeGeo, spokeSilver);
+      spoke.rotation.x = (s * Math.PI) / 4;
+      wheelGroup.add(spoke);
+    }
+
+    // 天蓝弧形挡泥板包覆轮胎上方
+    const fender = new THREE.Mesh(fenderGeo, frameBlue);
+    fender.rotation.y = Math.PI / 2;
+    fender.rotation.x = fenderRotX;
+    fender.scale.set(1, 1, 1.4);
+    fender.castShadow = true;
+    wheelGroup.add(fender);
+
+    bike.add(wheelGroup);
+  }
+
+  // 2. 天蓝色圆润管状三角形主车架
+  const crank: Vec3 = { x: 0, y: 0.36, z: -0.06 };
+  const seatTop: Vec3 = { x: 0, y: 0.78, z: -0.22 };
+  const headTop: Vec3 = { x: 0, y: 0.85, z: 0.34 };
+  const headBot: Vec3 = { x: 0, y: 0.65, z: 0.39 };
+  addTube(seatTop, headTop, 0.022, frameBlue);
+  addTube(crank, headBot, 0.025, frameBlue);
+  addTube(crank, seatTop, 0.023, frameBlue);
+  addTube(headBot, headTop, 0.027, frameBlue);
+  // 校园低跨弧形辅助梁
+  addTube({ x: 0, y: 0.56, z: -0.14 }, { x: 0, y: 0.74, z: 0.36 }, 0.019, frameBlue);
+  // 对称后上叉 / 后下叉
+  for (const sx of [-0.046, 0.046]) {
+    addTube(seatTop, { x: sx, y: wheelY, z: rearZ }, 0.014, frameBlue);
+    addTube(crank, { x: sx, y: wheelY, z: rearZ }, 0.015, frameBlue);
+  }
+
+  // 3. 草绿色前叉、车把立管与椭圆链条护罩
+  for (const sx of [-0.048, 0.048]) {
+    addTube(headBot, { x: sx, y: wheelY, z: frontZ }, 0.017, accentGreen);
+  }
+  addTube(headTop, { x: 0, y: 0.99, z: 0.3 }, 0.018, accentGreen);
+  // 椭圆链条护罩（挂在右侧曲柄到后轮轴）
+  const chainGuard = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), accentGreen);
+  chainGuard.position.set(0.066, 0.355, -0.28);
+  chainGuard.scale.set(0.028, 0.088, 0.29);
+  chainGuard.castShadow = true;
+  bike.add(chainGuard);
+  const crankCap = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.036, 12), accentGreen);
+  crankCap.rotation.z = Math.PI / 2;
+  crankCap.position.set(0.066, crank.y, crank.z);
+  bike.add(crankCap);
+
+  // 4. 亮橘橙色圆润车座、双侧手把套与脚踏板
+  addTube(seatTop, { x: 0, y: 0.87, z: -0.24 }, 0.015, spokeSilver);
+  const saddle = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), brightOrange);
+  saddle.position.set(0, 0.9, -0.245);
+  saddle.scale.set(0.105, 0.042, 0.145);
+  saddle.castShadow = true;
+  bike.add(saddle);
+
+  // 车把横管（略向后弯）+ 亮橘橙饱满手把套
+  addTube({ x: -0.17, y: 0.99, z: 0.28 }, { x: 0.17, y: 0.99, z: 0.28 }, 0.015, spokeSilver);
+  addTube({ x: 0, y: 0.99, z: 0.3 }, { x: 0, y: 0.99, z: 0.28 }, 0.016, spokeSilver);
+  for (const sx of [-1, 1]) {
+    addTube(
+      { x: sx * 0.16, y: 0.99, z: 0.28 },
+      { x: sx * 0.275, y: 0.985, z: 0.235 },
+      0.022,
+      brightOrange,
+    );
+  }
+  // 左右曲柄臂与亮橘橙脚踏板
+  addTube({ x: 0.075, y: crank.y, z: crank.z }, { x: 0.095, y: crank.y - 0.12, z: crank.z + 0.06 }, 0.011, spokeSilver);
+  addTube({ x: -0.075, y: crank.y, z: crank.z }, { x: -0.095, y: crank.y + 0.12, z: crank.z - 0.06 }, 0.011, spokeSilver);
+  for (const [px, py, pz] of [
+    [0.135, crank.y - 0.12, crank.z + 0.06],
+    [-0.135, crank.y + 0.12, crank.z - 0.06],
+  ] as const) {
+    const pedal = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.026, 0.068), brightOrange);
+    pedal.position.set(px, py, pz);
+    bike.add(pedal);
+  }
+
+  // 5. 柠檬黄色网格编织前车筐 + 亮橙小花与浅绿书本
+  const basketGroup = new THREE.Group();
+  basketGroup.position.set(0, 0.82, 0.51);
+  // 车筐支撑臂
+  addTube({ x: 0, y: 0.68, z: 0.39 }, { x: 0, y: 0.72, z: 0.49 }, 0.012, spokeSilver);
+  // 底板 + 四边顶部加粗框 + 网格栏条
+  const bBottom = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.02, 0.21), lemonYellow);
+  bBottom.position.y = -0.095;
+  basketGroup.add(bBottom);
+  for (const dz of [-0.105, 0.105]) {
+    const rimBar = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.024, 0.02), lemonYellow);
+    rimBar.position.set(0, 0.095, dz);
+    const midBar = new THREE.Mesh(new THREE.BoxGeometry(0.295, 0.014, 0.014), lemonYellow);
+    midBar.position.set(0, 0, dz);
+    basketGroup.add(rimBar, midBar);
+    for (let i = -3; i <= 3; i += 1) {
+      const vBar = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.19, 0.014), lemonYellow);
+      vBar.position.set(i * 0.044, 0, dz);
+      basketGroup.add(vBar);
+    }
+  }
+  for (const dx of [-0.148, 0.148]) {
+    const rimSide = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.024, 0.22), lemonYellow);
+    rimSide.position.set(dx, 0.095, 0);
+    const midSide = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.014, 0.21), lemonYellow);
+    midSide.position.set(dx, 0, 0);
+    basketGroup.add(rimSide, midSide);
+    for (let i = -2; i <= 2; i += 1) {
+      const vSide = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.19, 0.014), lemonYellow);
+      vSide.position.set(dx, 0, i * 0.046);
+      basketGroup.add(vSide);
+    }
+  }
+  // 筐内浅绿校园书本与两朵亮橙小花
+  const book = new THREE.Group();
+  book.position.set(-0.045, 0.015, 0);
+  book.rotation.set(0.24, 0.12, -0.18);
+  const coverMesh = new THREE.Mesh(new THREE.BoxGeometry(0.145, 0.18, 0.032), bookCover);
+  const pagesMesh = new THREE.Mesh(new THREE.BoxGeometry(0.135, 0.17, 0.024), bookPages);
+  pagesMesh.position.set(0.006, 0.005, 0);
+  book.add(coverMesh, pagesMesh);
+  basketGroup.add(book);
+
+  for (const [fx, fy, fz] of [
+    [0.068, 0.12, 0.025],
+    [0.032, 0.135, -0.035],
+  ] as const) {
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.16, 6), leafGreen);
+    stem.position.set(fx, fy - 0.08, fz);
+    basketGroup.add(stem);
+    const center = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), flowerCenter);
+    center.position.set(fx, fy, fz);
+    basketGroup.add(center);
+    for (let p = 0; p < 5; p += 1) {
+      const ang = (p / 5) * Math.PI * 2;
+      const petal = new THREE.Mesh(new THREE.SphereGeometry(0.022, 7, 5), flowerPetal);
+      petal.position.set(fx + Math.cos(ang) * 0.026, fy + 0.004, fz + Math.sin(ang) * 0.026);
+      petal.scale.set(1, 0.65, 1);
+      basketGroup.add(petal);
+    }
+  }
+  bike.add(basketGroup);
+
+  // 6. 停靠态脚撑
+  if (options.withKickstand) {
+    addTube({ x: -0.035, y: 0.36, z: -0.14 }, { x: -0.17, y: 0.008, z: -0.2 }, 0.012, spokeSilver);
+  }
+
+  // 将单辆自行车的 91 个静态子网格烘焙合批为哑光顶点色 + 金属辐条 2 个网格（5 辆车省去 ~445 次 DrawCall，像素与几何零损失）
+  bike.updateMatrixWorld(true);
+  const matteGeos: THREE.BufferGeometry[] = [];
+  const metalGeos: THREE.BufferGeometry[] = [];
+  const oldGeos = new Set<THREE.BufferGeometry>();
+  const oldMats = new Set<THREE.Material>();
+  bike.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    oldGeos.add(node.geometry);
+    const mat = node.material as THREE.MeshStandardMaterial;
+    if (mat !== spokeSilver) oldMats.add(mat);
+    const baked = node.geometry.index ? node.geometry.toNonIndexed() : node.geometry.clone();
+    baked.applyMatrix4(node.matrixWorld);
+    // 仅保留 position 与 normal，确保不同图元属性完全一致可无损合批
+    for (const attrName of Object.keys(baked.attributes)) {
+      if (attrName !== 'position' && attrName !== 'normal') {
+        baked.deleteAttribute(attrName);
+      }
+    }
+    if (mat === spokeSilver) {
+      metalGeos.push(baked);
+    } else {
+      const count = baked.getAttribute('position').count;
+      const colors = new Float32Array(count * 3);
+      const c = mat.color;
+      for (let i = 0; i < count; i += 1) {
+        colors[i * 3] = c.r;
+        colors[i * 3 + 1] = c.g;
+        colors[i * 3 + 2] = c.b;
+      }
+      baked.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      matteGeos.push(baked);
+    }
+  });
+
+  bike.clear();
+  for (const g of oldGeos) g.dispose();
+  for (const m of oldMats) m.dispose();
+
+  if (matteGeos.length > 0) {
+    const mergedMatte = mergeGeometries(matteGeos, false);
+    for (const g of matteGeos) g.dispose();
+    if (mergedMatte) {
+      const matteMesh = new THREE.Mesh(
+        mergedMatte,
+        new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.64, metalness: 0 }),
+      );
+      matteMesh.castShadow = true;
+      matteMesh.receiveShadow = true;
+      bike.add(matteMesh);
+    }
+  }
+  if (metalGeos.length > 0) {
+    const mergedMetal = mergeGeometries(metalGeos, false);
+    for (const g of metalGeos) g.dispose();
+    if (mergedMetal) {
+      const metalMesh = new THREE.Mesh(mergedMetal, spokeSilver);
+      metalMesh.castShadow = false;
+      metalMesh.receiveShadow = true;
+      bike.add(metalMesh);
+    }
+  }
+
+  return bike;
+}
+
 function buildStreetProps(parent: THREE.Object3D): void {
   // 双格分类垃圾桶（原位表，全程序化闭合实体）
   buildTrashcans(parent);
 
-  // 停靠路边的低多边形校园自行车（3 辆批处理，仅 3 个 DrawCall）
+  // 停靠路边的 3 辆明快卡通彩色校园自行车（与剧情摔倒单车画风统一，轮底严格贴齐人行道 y = 0.06）
   const bikeSpots = [
     { x: 2.12, z: 6.5, dir: 1 },
-    { x: -2.12, z: -10.6, dir: -1 },
+    { x: -2.12, z: -8.2, dir: -1 },
     { x: 2.12, z: -30.5, dir: 1 },
   ];
-  const bicycleMaterial = new THREE.MeshStandardMaterial({ color: 0x627c7d, roughness: 0.6, metalness: 0.34 });
-  const tireMaterial = createMatteMaterial(0x2f3537, 0.88);
-  const wheelGeometry = new THREE.TorusGeometry(0.31, 0.024, 6, 16);
-  const wheels = new THREE.InstancedMesh(wheelGeometry, tireMaterial, bikeSpots.length * 2);
-  bindInstancedDispose(wheelGeometry, wheels);
-  const bikeFrameSegments: SegmentInstanceSpec[] = [];
-  const bikeSaddles: BoxInstanceSpec[] = [];
-  const bikeWireParts: BoxInstanceSpec[] = [];
-  const transform = new THREE.Object3D();
-
+  const bikeContacts: Array<{ x: number; z: number; radius: number; y: number }> = [];
   bikeSpots.forEach((spot, index) => {
-    // 轮底原本陷进人行道 0.014 m：先把整车抬到贴地，否则加了脚撑反而坐实穿模
-    const rear = { x: spot.x, y: 0.396, z: spot.z + spot.dir * 0.55 };
-    const front = { x: spot.x, y: 0.396, z: spot.z - spot.dir * 0.55 };
-    const crank = { x: spot.x, y: 0.456, z: spot.z + spot.dir * 0.05 };
-    const seat = { x: spot.x, y: 0.896, z: spot.z + spot.dir * 0.25 };
-    const handle = { x: spot.x, y: 0.936, z: spot.z - spot.dir * 0.38 };
-
-    for (const [wheelOffset, point] of [rear, front].entries()) {
-      transform.position.set(point.x, point.y, point.z);
-      transform.rotation.set(0, Math.PI / 2, 0);
-      transform.scale.set(1, 1, 1);
-      transform.updateMatrix();
-      wheels.setMatrixAt(index * 2 + wheelOffset, transform.matrix);
-    }
-    for (const [from, to] of [
-      [rear, crank],
-      [crank, front],
-      [crank, seat],
-      [seat, rear],
-      [seat, handle],
-      [handle, front],
-    ] as const) {
-      bikeFrameSegments.push({ from, to, radius: 0.017 });
-    }
-    bikeFrameSegments.push({
-      from: { x: spot.x - 0.14, y: 0.996, z: spot.z - spot.dir * 0.42 },
-      to: { x: spot.x + 0.14, y: 0.996, z: spot.z - spot.dir * 0.42 },
-      radius: 0.014,
-    });
-    // 脚撑：从曲柄侧下方斜到地面，与车架同批（0 新增 DrawCall）
-    bikeFrameSegments.push({
-      from: { x: spot.x, y: 0.5, z: spot.z + spot.dir * 0.2 },
-      to: { x: spot.x - 0.1, y: 0.062, z: spot.z + spot.dir * 0.24 },
-      radius: 0.012,
-    });
-    bikeSaddles.push({
-      position: { x: spot.x, y: 0.926, z: spot.z + spot.dir * 0.28 },
-      scale: { x: 0.16, y: 0.045, z: 0.25 },
-    });
-
-    // 辐条（每轮 6 根）+ 前车筐：都是细件，合成 1 批
-    for (const point of [rear, front]) {
-      for (let spoke = 0; spoke < 6; spoke += 1) {
-        bikeWireParts.push({
-          position: { x: point.x, y: point.y, z: point.z },
-          scale: { x: 0.008, y: 0.29, z: 0.012 },
-          rotation: { x: (spoke * Math.PI) / 3, y: 0, z: 0 },
-        });
-      }
-    }
-    const basketZ = spot.z - spot.dir * 0.54;
-    for (const dz of [-0.09, 0.09]) {
-      bikeWireParts.push({
-        position: { x: spot.x, y: 0.93, z: basketZ + dz },
-        scale: { x: 0.24, y: 0.14, z: 0.012 },
-      });
-    }
-    for (const dx of [-0.12, 0.12]) {
-      bikeWireParts.push({
-        position: { x: spot.x + dx, y: 0.93, z: basketZ },
-        scale: { x: 0.012, y: 0.14, z: 0.19 },
-      });
-    }
-    bikeWireParts.push({
-      position: { x: spot.x, y: 0.865, z: basketZ },
-      scale: { x: 0.24, y: 0.014, z: 0.19 },
-    });
+    const parkedBike = buildCartoonBicycle({ withKickstand: true, name: `street-parked-bicycle-${index}` });
+    parkedBike.position.set(spot.x, 0.06, spot.z);
+    // dir = 1 时车头朝 -Z（rotY = π），dir = -1 时车头朝 +Z（rotY = 0）；略倾 5° 靠在脚撑上
+    parkedBike.rotation.set(0, spot.dir > 0 ? Math.PI : 0, 0.085);
+    parent.add(parkedBike);
+    bikeContacts.push({ x: spot.x, z: spot.z, radius: 0.72, y: 0.066 });
   });
+  const bikeShadowBatch = createContactShadowDiscBatch('street-parked-bike-contacts', bikeContacts);
+  if (bikeShadowBatch) parent.add(bikeShadowBatch);
 
-  wheels.instanceMatrix.needsUpdate = true;
-  wheels.name = 'street-bike-wheels';
-  wheels.castShadow = true;
-  wheels.receiveShadow = true;
-  wheels.computeBoundingBox();
-  wheels.computeBoundingSphere();
-  parent.add(wheels);
-  createSegmentCylinderInstances(parent, 'street-bike-frames', bikeFrameSegments, bicycleMaterial, true, 6);
-  createBoxInstances(parent, 'street-bike-saddles', bikeSaddles, createMatteMaterial(0x3c4344, 0.84));
-  createBoxInstances(parent, 'street-bike-wires', bikeWireParts, createMatteMaterial(0xb9c0bf, 0.62));
-
-  const signPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.8, 7), bicycleMaterial);
-  signPole.position.set(-2.1, 0.96, -34);
+  const signPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x627c7d, roughness: 0.6, metalness: 0.34 });
+  const signPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.61, 7), signPoleMaterial);
+  signPole.position.set(-2.1, 0.885, -34.02);
   parent.add(signPole);
+  const signBack = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.38, 0.024), createMatteMaterial(0x45585f, 0.82));
+  signBack.position.set(-2.1, 1.86, -34.014);
+  parent.add(signBack);
   const trafficSign = createTextSign('学校区域', 0.74, 0.34, {
     background: '#5e737c',
     foreground: '#ece8dc',
@@ -3369,7 +4183,7 @@ function buildStreetFarEnclosure(parent: THREE.Object3D, occluders: THREE.Object
   createBoxInstances(parent, 'street-side-wall-pillars', sidePillars, createMatteMaterial(0x919b91), true);
 
   const sideWings = [
-    { center: { x: -11, y: 4.5, z: 13 }, size: { w: 9, h: 9, d: 11 } },
+    // 原左侧远景盒已由 streetResidential 居民楼替代，避免包络重叠
     { center: { x: 11, y: 5, z: 12 }, size: { w: 9, h: 10, d: 13 } },
     { center: { x: -13, y: 5.5, z: -15 }, size: { w: 10, h: 11, d: 18 } },
     { center: { x: 13, y: 4.5, z: -18 }, size: { w: 10, h: 9, d: 17 } },
@@ -3420,14 +4234,892 @@ function buildStreetFarEnclosure(parent: THREE.Object3D, occluders: THREE.Object
     addBox(parent, building.center, building.size, building.color, { castShadow: false });
   }
 
+  // 6 栋远景天际线剪影（#b9c9cf 与雾色 #c9d7dc 混合 40% → 0xc0cfd4），单个 InstancedMesh 仅占 1 draw call
+  const skylineSpecs: Array<{ x: number; w: number; h: number; d: number; z: number }> = [
+    { x: -24, w: 7.4, h: 12.6, d: 6.8, z: -73 },
+    { x: -13, w: 6.4, h: 10.4, d: 6.2, z: -76 },
+    { x: -3.5, w: 8.6, h: 15.8, d: 7.2, z: -78 },
+    { x: 6.5, w: 7.2, h: 11.8, d: 6.5, z: -75 },
+    { x: 16.5, w: 8.8, h: 14.4, d: 7.0, z: -77 },
+    { x: 26, w: 6.8, h: 10.8, d: 6.4, z: -74 },
+  ];
+  createBoxInstances(
+    parent,
+    'street-far-skyline',
+    skylineSpecs.map((item) => ({
+      position: { x: item.x, y: item.h / 2, z: item.z },
+      scale: { x: item.w, y: item.h, z: item.d },
+    })),
+    createMatteMaterial(0xc0cfd4, 0.96),
+    false,
+  );
+
   occluders.push(addBox(parent, { x: -1.6, y: 2.1, z: -44.8 }, { w: 0.7, h: 4.2, d: 0.7 }, 0x7f8f92));
   occluders.push(addBox(parent, { x: 1.6, y: 2.1, z: -44.8 }, { w: 0.7, h: 4.2, d: 0.7 }, 0x7f8f92));
   occluders.push(addBox(parent, { x: 0, y: 4.15, z: -44.8 }, { w: 4.6, h: 0.5, d: 0.6 }, 0x7f8f92));
 }
 
+/**
+ * 街道起点左侧（甜品面包店南侧空地）复古中式老街商住小楼 + 亮红铸铁消防栓（建议 5）：
+ * 位置：x ∈ [-11.4, -2.6], z ∈ [11.35, 18.85]，高 8.8m（一层 0~2.95m 暖白裙墙 + 二三层 2.95~8.8m 复古砖红墙），
+ * 与甜品面包店（南墙 z = 10.3）留 1.05m 整洁小巷，严禁侵入 x ∈ [-2.5, +2.5] 导航区。
+ */
+function buildLeftHeritageBuilding(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
+  const group = new THREE.Group();
+  group.name = 'street-heritage-left-building';
+  parent.add(group);
+
+  const cloneTint = (source: THREE.MeshStandardMaterial, color: number): THREE.MeshStandardMaterial => {
+    const mat = source.clone();
+    delete mat.userData[SHARED_RESOURCE_FLAG];
+    mat.color.setHex(color);
+    return mat;
+  };
+
+  // 二三层砖红主立面：砖纹基础偏暖棕，乘暖亮朱红使成色精准落在 #9b3b2c ~ #a84232 复古朱红
+  const redBrickMat = cloneTint(getFacadeBrickMaterial({ repeatX: 3, repeatY: 2 }), 0xeb6e58);
+  // 一层干净暖白/浅灰白粉刷裙墙 (#dcd9d0)
+  const whitePlasterMat = cloneTint(getPlasterMaterial({ repeatX: 3, repeatY: 1 }), 0xdcd9d0);
+  const plinthMat = createMatteMaterial(0x6c7274, 0.9);
+  const corniceMat = createMatteMaterial(0xcbc7be, 0.84);
+  const whiteFrameMat = createMatteMaterial(0xf3f0e8, 0.78);
+  const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x3b4447, roughness: 0.56, metalness: 0.36 });
+  const securityBarMat = new THREE.MeshStandardMaterial({ color: 0x9aa2a4, roughness: 0.5, metalness: 0.45 });
+  const glassMat = getFacadeWindowMaterial();
+  const woodDoorMat = createMatteMaterial(0x5a3e2e, 0.76);
+  const canopyMat = createMatteMaterial(0x3a6456, 0.82);
+  const copperMat = new THREE.MeshStandardMaterial({ color: 0x8f674c, roughness: 0.52, metalness: 0.45 });
+  const acUnitMat = createMatteMaterial(0xc2c6c0, 0.7);
+  const potMat = createMatteMaterial(0xb8653f, 0.86);
+  const plantMat = createMatteMaterial(0x5f8f4e, 0.9);
+
+  const cx = -7.0;
+  const cz = 15.1;
+  const w = 8.8;
+  const d = 7.5;
+  const faceX = cx + w / 2; // -2.60，贴齐面包店外侧
+  const northZ = cz - d / 2; // 11.35，与面包店南墙 z=10.3 留 1.05m 整洁巷道
+
+  // 1. 一层暖白裙墙主体（y: 0 ~ 2.95）+ 二三层复古朱红主立面（y: 2.95 ~ 8.80）
+  const lowerWall = new THREE.Mesh(new THREE.BoxGeometry(w, 2.95, d), whitePlasterMat);
+  lowerWall.name = 'heritage-lower-white-wall';
+  lowerWall.position.set(cx, 1.475, cz);
+  lowerWall.castShadow = true;
+  lowerWall.receiveShadow = true;
+  group.add(lowerWall);
+  occluders.push(lowerWall);
+
+  const upperWall = new THREE.Mesh(new THREE.BoxGeometry(w, 5.85, d), redBrickMat);
+  upperWall.name = 'heritage-upper-red-wall';
+  upperWall.position.set(cx, 2.95 + 5.85 / 2, cz);
+  upperWall.castShadow = true;
+  upperWall.receiveShadow = true;
+  group.add(upperWall);
+  occluders.push(upperWall);
+
+  // 小巷深处（z ∈ [10.3, 11.35], x = -5.1）补一道白墙红压顶院门，留呼吸感同时完全遮挡背后空白天空
+  const alleyWall = new THREE.Mesh(new THREE.BoxGeometry(0.28, 3.1, 1.2), whitePlasterMat);
+  alleyWall.position.set(-5.1, 1.55, 10.82);
+  alleyWall.castShadow = true;
+  alleyWall.receiveShadow = true;
+  group.add(alleyWall);
+  occluders.push(alleyWall);
+
+  const trimParts: BoxInstanceSpec[] = [];
+  const plinthParts: BoxInstanceSpec[] = [];
+  const whiteFrames: BoxInstanceSpec[] = [];
+  const windowPanes: Array<BoxInstanceSpec & { color: number }> = [];
+  const bars: BoxInstanceSpec[] = [];
+  const darkParts: BoxInstanceSpec[] = [];
+  const acParts: BoxInstanceSpec[] = [];
+  const pipes: SegmentInstanceSpec[] = [];
+  const pots: BoxInstanceSpec[] = [];
+  const plants: BoxInstanceSpec[] = [];
+
+  // 深灰水泥踢脚线（三面包边）+ 一二层交界浅灰出挑檐口压条 + 阶梯式女儿墙压顶
+  plinthParts.push(
+    { position: { x: faceX + 0.035, y: 0.17, z: cz }, scale: { x: 0.07, y: 0.34, z: d + 0.06 } },
+    { position: { x: cx, y: 0.17, z: northZ - 0.035 }, scale: { x: w + 0.06, y: 0.34, z: 0.07 } },
+    { position: { x: -4.96, y: 0.17, z: 10.82 }, scale: { x: 0.06, y: 0.34, z: 1.12 } },
+  );
+  // 一层裙墙细腰线与一二层出挑檐口 + 三层腰线 + 阶梯式屋顶浅色女儿墙
+  trimParts.push(
+    { position: { x: faceX + 0.09, y: 2.95, z: cz }, scale: { x: 0.18, y: 0.15, z: d + 0.16 } },
+    { position: { x: cx, y: 2.95, z: northZ - 0.09 }, scale: { x: w + 0.16, y: 0.15, z: 0.18 } },
+    { position: { x: faceX + 0.05, y: 5.85, z: cz }, scale: { x: 0.1, y: 0.09, z: d + 0.08 } },
+    { position: { x: cx, y: 5.85, z: northZ - 0.05 }, scale: { x: w + 0.08, y: 0.09, z: 0.1 } },
+    // 顶部女儿墙与阶梯山花压顶
+    { position: { x: faceX - 0.04, y: 8.98, z: cz }, scale: { x: 0.24, y: 0.36, z: d + 0.12 } },
+    { position: { x: faceX + 0.06, y: 9.18, z: cz }, scale: { x: 0.34, y: 0.09, z: d + 0.22 } },
+    { position: { x: faceX - 0.06, y: 9.38, z: cz }, scale: { x: 0.2, y: 0.36, z: 3.6 } },
+    { position: { x: faceX - 0.04, y: 9.58, z: cz }, scale: { x: 0.26, y: 0.08, z: 3.76 } },
+    { position: { x: cx, y: 8.98, z: northZ + 0.08 }, scale: { x: w + 0.08, y: 0.36, z: 0.18 } },
+    { position: { x: cx, y: 9.18, z: northZ + 0.04 }, scale: { x: w + 0.16, y: 0.09, z: 0.26 } },
+    // 巷道院墙挑檐
+    { position: { x: -5.1, y: 3.16, z: 10.82 }, scale: { x: 0.42, y: 0.14, z: 1.24 } },
+  );
+
+  // 2. 二、三层红墙：多扇白色边框双格玻璃窗（临街东立面 + 朝前北侧立面）+ 防盗栏与窗台盆栽
+  const addWhiteDoubleWindow = (
+    axis: 'east' | 'north',
+    x: number,
+    y: number,
+    z: number,
+    withBars: boolean,
+    withPlant: boolean,
+  ): void => {
+    const winW = 1.16;
+    const winH = 1.32;
+    const tint = pickWindowTone(z + x * 0.4, y);
+    if (axis === 'east') {
+      // 白外框 + 双格十字中梃 + 白色窗台板
+      whiteFrames.push(
+        { position: { x: x + 0.03, y: y + winH / 2, z }, scale: { x: 0.07, y: 0.07, z: winW + 0.08 } },
+        { position: { x: x + 0.03, y: y - winH / 2, z }, scale: { x: 0.07, y: 0.07, z: winW + 0.08 } },
+        { position: { x: x + 0.03, y, z: z - winW / 2 }, scale: { x: 0.07, y: winH, z: 0.07 } },
+        { position: { x: x + 0.03, y, z: z + winW / 2 }, scale: { x: 0.07, y: winH, z: 0.07 } },
+        // 中间双格竖梃与上横梃
+        { position: { x: x + 0.055, y, z }, scale: { x: 0.04, y: winH - 0.06, z: 0.045 } },
+        { position: { x: x + 0.055, y: y + 0.26, z }, scale: { x: 0.04, y: 0.04, z: winW - 0.06 } },
+        // 挑出窗台
+        { position: { x: x + 0.11, y: y - winH / 2 - 0.055, z }, scale: { x: 0.22, y: 0.07, z: winW + 0.18 } },
+      );
+      windowPanes.push({ position: { x: x + 0.032, y, z }, scale: { x: 0.024, y: winH - 0.08, z: winW - 0.08 }, color: tint });
+      if (withBars) {
+        for (let i = -2; i <= 2; i += 1) {
+          bars.push({ position: { x: x + 0.09, y: y - 0.08, z: z + i * 0.2 }, scale: { x: 0.016, y: winH - 0.22, z: 0.016 } });
+        }
+        bars.push(
+          { position: { x: x + 0.09, y: y - 0.34, z }, scale: { x: 0.018, y: 0.018, z: winW - 0.08 } },
+          { position: { x: x + 0.09, y: y + 0.18, z }, scale: { x: 0.018, y: 0.018, z: winW - 0.08 } },
+        );
+      }
+      if (withPlant) {
+        pots.push({ position: { x: x + 0.15, y: y - winH / 2 + 0.06, z: z + 0.24 }, scale: { x: 0.075, y: 0.12, z: 0.075 } });
+        plants.push({ position: { x: x + 0.15, y: y - winH / 2 + 0.19, z: z + 0.24 }, scale: { x: 0.11, y: 0.11, z: 0.11 } });
+      }
+    } else {
+      whiteFrames.push(
+        { position: { x, y: y + winH / 2, z: z - 0.03 }, scale: { x: winW + 0.08, y: 0.07, z: 0.07 } },
+        { position: { x, y: y - winH / 2, z: z - 0.03 }, scale: { x: winW + 0.08, y: 0.07, z: 0.07 } },
+        { position: { x: x - winW / 2, y, z: z - 0.03 }, scale: { x: 0.07, y: winH, z: 0.07 } },
+        { position: { x: x + winW / 2, y, z: z - 0.03 }, scale: { x: 0.07, y: winH, z: 0.07 } },
+        { position: { x, y, z: z - 0.055 }, scale: { x: 0.045, y: winH - 0.06, z: 0.04 } },
+        { position: { x, y: y + 0.26, z: z - 0.055 }, scale: { x: winW - 0.06, y: 0.04, z: 0.04 } },
+        { position: { x, y: y - winH / 2 - 0.055, z: z - 0.11 }, scale: { x: winW + 0.18, y: 0.07, z: 0.22 } },
+      );
+      windowPanes.push({ position: { x, y, z: z - 0.032 }, scale: { x: winW - 0.08, y: winH - 0.08, z: 0.024 }, color: tint });
+      if (withBars) {
+        for (let i = -2; i <= 2; i += 1) {
+          bars.push({ position: { x: x + i * 0.2, y: y - 0.08, z: z - 0.09 }, scale: { x: 0.016, y: winH - 0.22, z: 0.016 } });
+        }
+      }
+      if (withPlant) {
+        pots.push({ position: { x: x - 0.22, y: y - winH / 2 + 0.06, z: z - 0.15 }, scale: { x: 0.075, y: 0.12, z: 0.075 } });
+        plants.push({ position: { x: x - 0.22, y: y - winH / 2 + 0.19, z: z - 0.15 }, scale: { x: 0.11, y: 0.11, z: 0.11 } });
+      }
+    }
+  };
+
+  for (const [col, wz] of [12.7, 15.1, 17.5].entries()) {
+    addWhiteDoubleWindow('east', faceX, 4.45, wz, col !== 1, col !== 1);
+    addWhiteDoubleWindow('east', faceX, 7.2, wz, col === 1, col === 2);
+  }
+  for (const [col, wx] of [-3.95, -6.15, -8.35].entries()) {
+    addWhiteDoubleWindow('north', wx, 4.45, northZ, col === 0, col === 1);
+    addWhiteDoubleWindow('north', wx, 7.2, northZ, col === 1, false);
+  }
+
+  // 3. 一层白墙细节：临街小窗 + 深木色复古便民门头（配小坡雨棚）+ 空调外机与整洁外墙管线
+  addWhiteDoubleWindow('east', faceX, 1.56, 13.05, true, true);
+  addWhiteDoubleWindow('east', faceX, 1.56, 17.15, true, false);
+  addWhiteDoubleWindow('north', -3.95, 1.56, northZ, true, false);
+
+  // 居中深木复古门头与小雨棚（z = 15.1）
+  const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.15, 1.18), woodDoorMat);
+  doorMesh.position.set(faceX + 0.02, 1.08, cz);
+  doorMesh.castShadow = true;
+  doorMesh.receiveShadow = true;
+  group.add(doorMesh);
+  whiteFrames.push(
+    { position: { x: faceX + 0.06, y: 1.08, z: cz - 0.62 }, scale: { x: 0.12, y: 2.22, z: 0.09 } },
+    { position: { x: faceX + 0.06, y: 1.08, z: cz + 0.62 }, scale: { x: 0.12, y: 2.22, z: 0.09 } },
+    { position: { x: faceX + 0.06, y: 2.22, z: cz }, scale: { x: 0.12, y: 0.1, z: 1.34 } },
+    { position: { x: faceX + 0.08, y: 1.1, z: cz }, scale: { x: 0.04, y: 2.1, z: 0.04 } },
+  );
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.08, 1.62), canopyMat);
+  canopy.position.set(faceX + 0.34, 2.42, cz);
+  canopy.rotation.z = -0.18;
+  canopy.castShadow = true;
+  canopy.receiveShadow = true;
+  group.add(canopy);
+  for (const dz of [-0.72, 0.72]) {
+    pipes.push({
+      from: { x: faceX + 0.04, y: 2.12, z: cz + dz },
+      to: { x: faceX + 0.62, y: 2.34, z: cz + dz },
+      radius: 0.014,
+    });
+  }
+
+  // 外挂空调外机（2 台）与垂直外墙管线
+  for (const spec of [
+    { x: faceX + 0.21, y: 3.55, z: 13.95 },
+    { x: faceX + 0.21, y: 6.3, z: 16.35 },
+  ]) {
+    acParts.push({ position: spec, scale: { x: 0.36, y: 0.42, z: 0.62 } });
+    darkParts.push(
+      { position: { x: spec.x + 0.19, y: spec.y, z: spec.z - 0.08 }, scale: { x: 0.02, y: 0.28, z: 0.28 } },
+      { position: { x: spec.x - 0.02, y: spec.y - 0.24, z: spec.z - 0.22 }, scale: { x: 0.38, y: 0.035, z: 0.035 } },
+      { position: { x: spec.x - 0.02, y: spec.y - 0.24, z: spec.z + 0.22 }, scale: { x: 0.38, y: 0.035, z: 0.035 } },
+    );
+    pipes.push({
+      from: { x: spec.x + 0.06, y: spec.y - 0.15, z: spec.z + 0.28 },
+      to: { x: faceX + 0.14, y: spec.y - 0.52, z: spec.z + 0.34 },
+      radius: 0.013,
+    });
+  }
+  // 墙角竖向落水管
+  pipes.push(
+    { from: { x: faceX + 0.08, y: 0.2, z: northZ + 0.18 }, to: { x: faceX + 0.08, y: 8.95, z: northZ + 0.18 }, radius: 0.032 },
+    { from: { x: faceX + 0.08, y: 0.2, z: cz + d / 2 - 0.22 }, to: { x: faceX + 0.08, y: 8.95, z: cz + d / 2 - 0.22 }, radius: 0.032 },
+  );
+
+  // 4. 墙根亮红色铸铁小型立式消防栓（x = -2.40, z = 12.12，高约 0.66m，贴一层白墙外侧）
+  const hydrantMat = new THREE.MeshStandardMaterial({ color: 0xc93228, roughness: 0.42, metalness: 0.26 });
+  const hydrantCapMat = new THREE.MeshStandardMaterial({ color: 0xadb4b8, roughness: 0.38, metalness: 0.52 });
+  const hydrant = new THREE.Group();
+  hydrant.name = 'street-heritage-fire-hydrant';
+  hydrant.position.set(faceX + 0.22, 0.06, 12.12);
+  const hBase = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.135, 0.08, 12), hydrantMat);
+  hBase.position.y = 0.04;
+  const hBody = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.095, 0.44, 12), hydrantMat);
+  hBody.position.y = 0.28;
+  hBody.castShadow = true;
+  const hCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.112, 0.112, 0.045, 12), hydrantMat);
+  hCollar.position.y = 0.49;
+  const hDome = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hydrantMat);
+  hDome.position.y = 0.505;
+  const hNut = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.034, 0.055, 6), hydrantCapMat);
+  hNut.position.y = 0.61;
+  // 两侧对称出水阀与正面接口盖
+  const sideValveGeo = new THREE.CylinderGeometry(0.034, 0.034, 0.25, 10);
+  sideValveGeo.rotateX(Math.PI / 2);
+  const sideValves = new THREE.Mesh(sideValveGeo, hydrantMat);
+  sideValves.position.y = 0.38;
+  const frontNozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.09, 10), hydrantCapMat);
+  frontNozzle.rotation.z = Math.PI / 2;
+  frontNozzle.position.set(0.085, 0.35, 0);
+  hydrant.add(hBase, hBody, hCollar, hDome, hNut, sideValves, frontNozzle);
+  group.add(hydrant);
+
+  // 一层白墙消防栓旁增设一只同款绿色分类垃圾桶（x=-2.44, z=11.48，紧贴墙面并避开窗台下沿且不入 x∈[-2.5,+2.5] 净宽）
+  const binX = -2.44;
+  const binZ = 11.48;
+  const binBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.24, 0.24, 0.72, 16),
+    createMatteMaterial(0x4ba820, 0.72),
+  );
+  binBody.name = 'street-heritage-green-bin';
+  binBody.position.set(binX, 0.42, binZ);
+  binBody.castShadow = true;
+  binBody.receiveShadow = true;
+  const binRim = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.26, 0.25, 0.06, 16),
+    createMatteMaterial(0x2f5a1c, 0.65),
+  );
+  binRim.position.set(binX, 0.79, binZ);
+  const binMouth = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.18, 0.02, 16),
+    createMatteMaterial(0x1b2e10, 0.9),
+  );
+  binMouth.position.set(binX, 0.815, binZ);
+  group.add(binBody, binRim, binMouth);
+
+  createBoxInstances(group, 'heritage-plinths', plinthParts, plinthMat);
+  createBoxInstances(group, 'heritage-trims', trimParts, corniceMat, true);
+  createBoxInstances(group, 'heritage-window-frames', whiteFrames, whiteFrameMat, true);
+  const winMesh = createBoxInstances(group, 'heritage-window-panes', windowPanes, glassMat);
+  if (winMesh) {
+    const color = new THREE.Color();
+    windowPanes.forEach((pane, idx) => winMesh.setColorAt(idx, color.setHex(pane.color)));
+    if (winMesh.instanceColor) winMesh.instanceColor.needsUpdate = true;
+  }
+  createBoxInstances(group, 'heritage-security-bars', bars, securityBarMat);
+  createBoxInstances(group, 'heritage-dark-hardware', darkParts, darkMetalMat);
+  createBoxInstances(group, 'heritage-ac-units', acParts, acUnitMat, true);
+  createSegmentCylinderInstances(group, 'heritage-pipes', pipes, copperMat);
+  createCylinderInstances(group, 'heritage-window-pots', pots, potMat);
+  createSphereInstances(group, 'heritage-window-plants', plants, plantMat);
+
+  // 消防栓、绿色分类桶与建筑前缘接触阴影圆盘
+  const contacts = createContactShadowDiscBatch('street-heritage-contacts', [
+    { x: faceX + 0.22, z: 12.12, radius: 0.22, y: 0.068 },
+    { x: binX, z: binZ, radius: 0.31, y: 0.068 },
+    { x: faceX + 0.12, z: cz, radius: 1.05, y: 0.064 },
+  ]);
+  if (contacts) group.add(contacts);
+}
+
+/**
+ * 街道右侧油条店（晨光豆浆 z <= 4.4）与水果店（z >= 6.8）之间 2.4m 空地的黑金 Art Deco 装饰性小塔楼（建议 7）：
+ * 中心 (x: 4.25, z: 5.60)，Z 向宽 2.08m（两侧各留 16cm 呼吸缝），X 向深 2.40m（前端面 x = 3.05 内退于铺面 0.45m），
+ * 总高 7.75m，四级对称退台 + 四角金色尖顶塔冠 + 底层双层黑金拱门壁龛 + 复古塔钟 + 浅灰石材基座。
+ */
+function buildArtDecoCornerTower(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
+  const group = new THREE.Group();
+  group.name = 'street-artdeco-corner-tower';
+  parent.add(group);
+
+  const basaltMat = new THREE.MeshStandardMaterial({ color: 0x1e2126, roughness: 0.72, metalness: 0.08 });
+  const goldMat = new THREE.MeshStandardMaterial({ color: 0xd8b36a, roughness: 0.4, metalness: 0.48 });
+  const stoneBaseMat = createMatteMaterial(0x9a9f9c, 0.86);
+  const windowGlassMat = new THREE.MeshStandardMaterial({
+    color: 0x263845,
+    roughness: 0.16,
+    metalness: 0.36,
+    emissive: 0x2a3b48,
+    emissiveIntensity: 0.25,
+  });
+  const sconceGlowMat = new THREE.MeshStandardMaterial({
+    color: 0xffefc8,
+    emissive: 0xffc66e,
+    emissiveIntensity: 0.2,
+    roughness: 0.25,
+  });
+  registerStreetExtraNightMaterial(sconceGlowMat, 0.2, 0.9);
+
+  const cx = 4.25;
+  const cz = 5.6;
+
+  const darkBlocks: BoxInstanceSpec[] = [];
+  const goldParts: BoxInstanceSpec[] = [];
+  const glassPanes: BoxInstanceSpec[] = [];
+  const stoneParts: BoxInstanceSpec[] = [];
+  const pinnacles: BoxInstanceSpec[] = [];
+
+  // 底层浅灰石材台基与两级踏步（与周边老街人行道自然衔接，绝不凸出到 x < 2.60）
+  stoneParts.push(
+    { position: { x: cx, y: 0.12, z: cz }, scale: { x: 2.52, y: 0.24, z: 2.16 } },
+    { position: { x: cx - 1.32, y: 0.07, z: cz }, scale: { x: 0.26, y: 0.14, z: 1.48 } },
+    { position: { x: cx - 1.48, y: 0.035, z: cz }, scale: { x: 0.22, y: 0.07, z: 1.32 } },
+  );
+
+  // 1. 一级塔基主身（y: 0.24 ~ 2.68，宽 Z=2.06 × 深 X=2.36）
+  const tier1 = new THREE.Mesh(new THREE.BoxGeometry(2.36, 2.44, 2.06), basaltMat);
+  tier1.position.set(cx, 0.24 + 2.44 / 2, cz);
+  tier1.castShadow = true;
+  tier1.receiveShadow = true;
+  group.add(tier1);
+  occluders.push(tier1);
+
+  // 四角玄武岩主柱墩与金色竖向嵌条
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const px = cx + sx * 1.12;
+      const pz = cz + sz * 0.96;
+      darkBlocks.push({ position: { x: px, y: 1.56, z: pz }, scale: { x: 0.28, y: 2.68, z: 0.28 } });
+      goldParts.push(
+        { position: { x: px + sx * 0.145, y: 1.56, z: pz }, scale: { x: 0.03, y: 2.46, z: 0.07 } },
+        { position: { x: px, y: 1.56, z: pz + sz * 0.145 }, scale: { x: 0.07, y: 2.46, z: 0.03 } },
+        // 柱头金色檐帽 + 尖顶小塔冠
+        { position: { x: px, y: 2.94, z: pz }, scale: { x: 0.34, y: 0.1, z: 0.34 } },
+      );
+      pinnacles.push({ position: { x: px, y: 3.22, z: pz }, scale: { x: 0.12, y: 0.46, z: 0.12 } });
+    }
+  }
+  // 一级顶部香槟金挑檐与 Art Deco 几何阶梯腰线
+  goldParts.push(
+    { position: { x: cx, y: 2.72, z: cz }, scale: { x: 2.52, y: 0.12, z: 2.22 } },
+    { position: { x: cx - 1.24, y: 2.56, z: cz }, scale: { x: 0.06, y: 0.08, z: 1.72 } },
+    { position: { x: cx - 1.25, y: 2.42, z: cz }, scale: { x: 0.06, y: 0.05, z: 1.38 } },
+  );
+
+  // 底层正面（朝街 -X 面，x = cx - 1.18 = 3.07）双层黑金拱形装饰壁龛与窄拱门
+  const frontX = cx - 1.18;
+  // 外层与内层金色门框柱 + 门楣
+  for (const dz of [-0.56, 0.56]) {
+    goldParts.push({ position: { x: frontX - 0.05, y: 1.18, z: cz + dz }, scale: { x: 0.12, y: 1.88, z: 0.09 } });
+  }
+  for (const dz of [-0.4, 0.4]) {
+    goldParts.push({ position: { x: frontX - 0.03, y: 1.12, z: cz + dz }, scale: { x: 0.08, y: 1.74, z: 0.06 } });
+  }
+  // 内凹玄武岩装饰壁龛背板与双开门竖向金栅栏
+  darkBlocks.push({ position: { x: frontX - 0.01, y: 1.16, z: cz }, scale: { x: 0.04, y: 1.84, z: 0.78 } });
+  for (const dz of [-0.22, 0, 0.22]) {
+    goldParts.push({ position: { x: frontX - 0.045, y: 1.06, z: cz + dz }, scale: { x: 0.025, y: 1.54, z: 0.028 } });
+  }
+  // 拱门顶部半圆双层金色拱券（Torus 半环）
+  const outerArch = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.048, 8, 18, Math.PI), goldMat);
+  outerArch.rotation.y = Math.PI / 2;
+  outerArch.position.set(frontX - 0.05, 1.9, cz);
+  const innerArch = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.034, 8, 16, Math.PI), goldMat);
+  innerArch.rotation.y = Math.PI / 2;
+  innerArch.position.set(frontX - 0.035, 1.86, cz);
+  // 拱门内半圆深色玻璃扇窗
+  const archFan = new THREE.Mesh(new THREE.CircleGeometry(0.39, 16, 0, Math.PI), windowGlassMat);
+  archFan.rotation.y = -Math.PI / 2;
+  archFan.position.set(frontX - 0.032, 1.86, cz);
+  group.add(outerArch, innerArch, archFan);
+
+  // 门廊两侧一对微暖金色小壁灯
+  for (const dz of [-0.76, 0.76]) {
+    goldParts.push(
+      { position: { x: frontX - 0.05, y: 1.78, z: cz + dz }, scale: { x: 0.09, y: 0.16, z: 0.08 } },
+    );
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), sconceGlowMat);
+    bulb.position.set(frontX - 0.12, 1.84, cz + dz);
+    group.add(bulb);
+  }
+
+  // 2. 二级退台塔身（y: 2.78 ~ 4.92，收分至 1.80 × 1.98）
+  const tier2 = new THREE.Mesh(new THREE.BoxGeometry(1.98, 2.14, 1.8), basaltMat);
+  tier2.position.set(cx, 2.78 + 2.14 / 2, cz);
+  tier2.castShadow = true;
+  tier2.receiveShadow = true;
+  group.add(tier2);
+  occluders.push(tier2);
+
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const px = cx + sx * 0.94;
+      const pz = cz + sz * 0.84;
+      darkBlocks.push({ position: { x: px, y: 3.92, z: pz }, scale: { x: 0.22, y: 2.28, z: 0.22 } });
+      goldParts.push(
+        { position: { x: px + sx * 0.115, y: 3.92, z: pz }, scale: { x: 0.026, y: 2.08, z: 0.055 } },
+        { position: { x: px, y: 5.08, z: pz }, scale: { x: 0.26, y: 0.09, z: 0.26 } },
+      );
+      pinnacles.push({ position: { x: px, y: 5.34, z: pz }, scale: { x: 0.1, y: 0.42, z: 0.1 } });
+    }
+  }
+  goldParts.push(
+    { position: { x: cx, y: 4.94, z: cz }, scale: { x: 2.12, y: 0.11, z: 1.94 } },
+    { position: { x: cx, y: 4.74, z: cz }, scale: { x: 2.04, y: 0.05, z: 1.86 } },
+  );
+
+  // 二级正面（x = cx - 0.99）与两侧三扇纵向窄高金色细框玻璃窗
+  const front2X = cx - 0.99;
+  for (const dz of [-0.46, 0, 0.46]) {
+    glassPanes.push({ position: { x: front2X - 0.02, y: 3.84, z: cz + dz }, scale: { x: 0.028, y: 1.38, z: 0.24 } });
+    goldParts.push(
+      { position: { x: front2X - 0.036, y: 3.84, z: cz + dz - 0.13 }, scale: { x: 0.04, y: 1.44, z: 0.032 } },
+      { position: { x: front2X - 0.036, y: 3.84, z: cz + dz + 0.13 }, scale: { x: 0.04, y: 1.44, z: 0.032 } },
+      { position: { x: front2X - 0.036, y: 4.56, z: cz + dz }, scale: { x: 0.055, y: 0.06, z: 0.3 } },
+      { position: { x: front2X - 0.036, y: 3.12, z: cz + dz }, scale: { x: 0.055, y: 0.05, z: 0.3 } },
+      { position: { x: front2X - 0.038, y: 3.84, z: cz + dz }, scale: { x: 0.026, y: 0.028, z: 0.24 } },
+    );
+  }
+
+  // 3. 三级钟阁退台（y: 5.0 ~ 6.42，收分至 1.38 × 1.50）+ 复古金圈老街小塔钟
+  const tier3 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.42, 1.38), basaltMat);
+  tier3.position.set(cx, 5.0 + 1.42 / 2, cz);
+  tier3.castShadow = true;
+  tier3.receiveShadow = true;
+  group.add(tier3);
+  occluders.push(tier3);
+
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const px = cx + sx * 0.7;
+      const pz = cz + sz * 0.64;
+      goldParts.push(
+        { position: { x: px, y: 5.72, z: pz }, scale: { x: 0.15, y: 1.44, z: 0.15 } },
+        { position: { x: px, y: 6.46, z: pz }, scale: { x: 0.2, y: 0.08, z: 0.2 } },
+      );
+      pinnacles.push({ position: { x: px, y: 6.68, z: pz }, scale: { x: 0.085, y: 0.36, z: 0.085 } });
+    }
+  }
+  goldParts.push({ position: { x: cx, y: 6.44, z: cz }, scale: { x: 1.62, y: 0.1, z: 1.5 } });
+
+  // 三级正面复古塔钟（金框圆环 + 浅米金表盘 + 黑金指针）
+  const clockX = cx - 0.765;
+  const clockY = 5.72;
+  const clockRim = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.042, 8, 24), goldMat);
+  clockRim.rotation.y = Math.PI / 2;
+  clockRim.position.set(clockX, clockY, cz);
+  const clockFace = new THREE.Mesh(new THREE.CircleGeometry(0.34, 24), createMatteMaterial(0xf2e7ce, 0.72));
+  clockFace.rotation.y = -Math.PI / 2;
+  clockFace.position.set(clockX + 0.005, clockY, cz);
+  group.add(clockRim, clockFace);
+  // 时分针（指向 8:48，呼应第一章报到时间！）
+  darkBlocks.push(
+    { position: { x: clockX - 0.014, y: clockY - 0.02, z: cz + 0.08 }, scale: { x: 0.015, y: 0.028, z: 0.18 }, rotation: { x: 0.22, y: 0, z: 0 } },
+    { position: { x: clockX - 0.016, y: clockY + 0.09, z: cz + 0.07 }, scale: { x: 0.015, y: 0.24, z: 0.022 }, rotation: { x: 0.55, y: 0, z: 0 } },
+  );
+
+  // 4. 四级皇冠式塔顶与香槟金尖刹（y: 6.48 ~ 7.75）
+  darkBlocks.push(
+    { position: { x: cx, y: 6.72, z: cz }, scale: { x: 0.96, y: 0.48, z: 0.92 } },
+    { position: { x: cx, y: 7.06, z: cz }, scale: { x: 0.62, y: 0.28, z: 0.58 } },
+  );
+  goldParts.push(
+    { position: { x: cx, y: 6.96, z: cz }, scale: { x: 1.04, y: 0.08, z: 1.0 } },
+    { position: { x: cx, y: 7.22, z: cz }, scale: { x: 0.68, y: 0.07, z: 0.64 } },
+  );
+  // 顶部四棱金字塔冠与细长刹尖
+  const crownPyramid = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.48, 4), basaltMat);
+  crownPyramid.rotation.y = Math.PI / 4;
+  crownPyramid.position.set(cx, 7.46, cz);
+  const spireTip = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.36, 8), goldMat);
+  spireTip.position.set(cx, 7.82, cz);
+  const spireOrb = new THREE.Mesh(new THREE.SphereGeometry(0.068, 10, 8), goldMat);
+  spireOrb.position.set(cx, 7.66, cz);
+  group.add(crownPyramid, spireTip, spireOrb);
+
+  // 批量实例化构件与四角尖顶塔冠（ConeGeometry 4 棱锥）
+  createBoxInstances(group, 'artdeco-dark-blocks', darkBlocks, basaltMat, true);
+  createBoxInstances(group, 'artdeco-gold-trims', goldParts, goldMat, true);
+  createBoxInstances(group, 'artdeco-glass-panes', glassPanes, windowGlassMat);
+  createBoxInstances(group, 'artdeco-stone-base', stoneParts, stoneBaseMat, true);
+
+  if (pinnacles.length > 0) {
+    const pinGeo = new THREE.ConeGeometry(1, 1, 4);
+    pinGeo.rotateY(Math.PI / 4);
+    const pinMesh = new THREE.InstancedMesh(pinGeo, goldMat, pinnacles.length);
+    const t = new THREE.Object3D();
+    pinnacles.forEach((spec, idx) => {
+      t.position.set(spec.position.x, spec.position.y, spec.position.z);
+      t.scale.set(spec.scale.x, spec.scale.y, spec.scale.z);
+      t.updateMatrix();
+      pinMesh.setMatrixAt(idx, t.matrix);
+    });
+    pinMesh.instanceMatrix.needsUpdate = true;
+    pinMesh.name = 'artdeco-gold-pinnacles';
+    pinMesh.castShadow = true;
+    pinMesh.receiveShadow = true;
+    pinMesh.computeBoundingBox();
+    pinMesh.computeBoundingSphere();
+    bindInstancedDispose(pinGeo, pinMesh);
+    group.add(pinMesh);
+  }
+
+  // 底部接触阴影圆盘，稳重落地不漂浮
+  const contacts = createContactShadowDiscBatch('street-artdeco-contact', [
+    { x: cx - 0.15, z: cz, radius: 1.55, y: 0.018 },
+  ]);
+  if (contacts) group.add(contacts);
+}
+
+function buildCornerGapDetails(parent: THREE.Object3D): void {
+  // 东侧「街角便利店」(z∈[-28.5,-19.5]) 与「校园书屋」(z∈[-16.3,-7.7]) 之间的转角空隙 (z∈[-19.5,-16.3], x≥2.58，避让 x=2.1,z=-18 垃圾桶)
+  const gap = new THREE.Group();
+  gap.name = 'street-corner-gap-details';
+  parent.add(gap);
+
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x3a474b, roughness: 0.58, metalness: 0.35 });
+  const creamMat = createMatteMaterial(0xebe4d1, 0.78);
+  const terraMat = createMatteMaterial(0xb46246, 0.84);
+  const foliageMat = createMatteMaterial(0x4f7848, 0.88);
+  const copperMat = new THREE.MeshStandardMaterial({ color: 0x8f674c, roughness: 0.5, metalness: 0.45 });
+
+  // 1. 双面立式悬挑灯箱招牌「冷热饮品 / 修表 · 配钥匙」+ 铁艺支臂
+  const lightboxBody = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.32, 0.48), darkMat);
+  lightboxBody.position.set(2.74, 2.95, -17.95);
+  lightboxBody.castShadow = true;
+  gap.add(lightboxBody);
+
+  const arm1 = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.045, 0.045), darkMat);
+  arm1.position.set(2.92, 3.35, -17.95);
+  const arm2 = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.045, 0.045), darkMat);
+  arm2.position.set(2.92, 2.55, -17.95);
+  gap.add(arm1, arm2);
+
+  for (const [dir, yaw] of [[-1, -Math.PI / 2], [1, Math.PI / 2]] as const) {
+    const face = createTextSign('冷热饮品·配钥匙', 1.18, 0.38, {
+      background: '#fff5e0',
+      foreground: '#2b4046',
+      resolution: 256,
+    });
+    face.rotation.set(0, yaw, Math.PI / 2);
+    face.position.set(2.74 + dir * 0.075, 2.95, -17.95);
+    if (face.material instanceof THREE.MeshStandardMaterial) {
+      face.material.emissive.setHex(0xffcb80);
+      face.material.emissiveMap = face.material.map;
+      registerStreetExtraNightMaterial(face.material, 0.18, 0.88);
+    }
+    gap.add(face);
+  }
+
+  // 夜间暖黄地面柔光斑（白昼隐藏，夜间开启）
+  const glowDecalMat = new THREE.MeshBasicMaterial({
+    color: 0xffcf88,
+    transparent: true,
+    opacity: 0.24,
+    depthWrite: false,
+  });
+  const glowDecal = new THREE.Mesh(new THREE.CircleGeometry(1.15, 16), glowDecalMat);
+  glowDecal.rotation.x = -Math.PI / 2;
+  glowDecal.position.set(2.7, 0.015, -17.95);
+  registerStreetExtraNightDecal(glowDecal);
+  gap.add(glowDecal);
+
+  // 2. 两台壁挂空调外机 + 铜管 + PVC 雨落水管与弯头
+  for (const acY of [2.75, 5.2]) {
+    const ac = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.54, 0.78), createMatteMaterial(0xbcc2bd, 0.65));
+    ac.position.set(2.96, acY, -18.85);
+    ac.castShadow = true;
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.38, 0.42), darkMat);
+    grille.position.set(2.775, acY, -18.85);
+    gap.add(ac, grille);
+  }
+  const acPipe = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 4.8, 6), copperMat);
+  acPipe.position.set(2.86, 2.7, -18.52);
+  const downpipe = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 4.9, 8), creamMat);
+  downpipe.position.set(2.76, 2.55, -19.25);
+  const elbow = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.12), creamMat);
+  elbow.position.set(2.69, 0.08, -19.25);
+  gap.add(acPipe, downpipe, elbow);
+
+  // 3. 转角三组落地细节：双陶土盆栽 + 电表箱 + 校园单车
+  for (const pz of [-16.85, -17.35]) {
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.13, 0.34, 8), terraMat);
+    pot.position.set(2.78, 0.17, pz);
+    const shrub = new THREE.Mesh(new THREE.IcosahedronGeometry(0.24, 1), foliageMat);
+    shrub.position.set(2.78, 0.46, pz);
+    gap.add(pot, shrub);
+  }
+  const meterBox = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.56, 0.42), createMatteMaterial(0x889390, 0.68));
+  meterBox.position.set(2.94, 1.35, -18.85);
+  const bike = buildCartoonBicycle({ withKickstand: true, name: 'street-corner-gap-bike' });
+  bike.position.set(2.92, 0, -18.25);
+  bike.rotation.y = 0.25;
+  gap.add(meterBox, bike);
+
+  // 4. 「校园书屋」北侧白色悬挑挑檐下补强斜拉铁杆（防“无依托白板悬空”观感）
+  for (const rodZ of [-16.0, -14.2]) {
+    const tie = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.64, 6), darkMat);
+    tie.position.set(2.62, 2.86, rodZ);
+    tie.rotation.z = 0.68;
+    gap.add(tie);
+  }
+}
+
+/**
+ * §2.3 新增：街道右侧公交候车亭（z ∈ [-7.55, -4.45]，x ∈ [2.60, 3.98]）：
+ * 落在晨光豆浆与校园书屋之间，不遮挡甜品面包店招牌，严禁侵入 x ∈ [-2.5, +2.5] 通行带。
+ */
+function buildBusShelter(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
+  const group = new THREE.Group();
+  group.name = 'street-bus-shelter';
+  parent.add(group);
+
+  const greenMetalMat = new THREE.MeshStandardMaterial({ color: 0x2f6b5a, roughness: 0.48, metalness: 0.32 });
+  const benchWoodMat = createMatteMaterial(0xa87a4f, 0.8);
+  const blankAdMat = createMatteMaterial(0xcfd8dc, 0.72);
+  const pcRoofMat = new THREE.MeshStandardMaterial({
+    color: 0xd9eaee,
+    roughness: 0.2,
+    metalness: 0.1,
+    transparent: true,
+    opacity: 0.25,
+    depthWrite: false,
+  });
+
+  const cx = 3.28;
+  const cz = -6.0;
+  // 深绿立柱 + 顶棚框 + 广告框外框 + 站牌杆（合批 1 次绘制）
+  const greenParts: BoxInstanceSpec[] = [
+    // 两根 0.06m 方管立柱（贴后侧靠书屋/豆浆交界空位支撑）
+    { position: { x: 3.76, y: 1.3, z: cz - 1.25 }, scale: { x: 0.06, y: 2.6, z: 0.06 } },
+    { position: { x: 3.76, y: 1.3, z: cz + 1.25 }, scale: { x: 0.06, y: 2.6, z: 0.06 } },
+    // 顶棚前后横梁与纵梁
+    { position: { x: cx, y: 2.58, z: cz - 1.52 }, scale: { x: 1.38, y: 0.05, z: 0.06 } },
+    { position: { x: cx, y: 2.58, z: cz + 1.52 }, scale: { x: 1.38, y: 0.05, z: 0.06 } },
+    { position: { x: 2.62, y: 2.58, z: cz }, scale: { x: 0.06, y: 0.05, z: 3.1 } },
+    { position: { x: 3.94, y: 2.58, z: cz }, scale: { x: 0.06, y: 0.05, z: 3.1 } },
+    // 留白广告框深绿外框（z = cz + 1.32，南端贴合街道景深，避开北端站牌杆）
+    { position: { x: 3.24, y: 1.28, z: cz + 1.32 }, scale: { x: 0.96, y: 1.56, z: 0.09 } },
+    // 长凳支撑脚
+    { position: { x: 3.44, y: 0.22, z: cz - 0.56 }, scale: { x: 0.36, y: 0.44, z: 0.06 } },
+    { position: { x: 3.44, y: 0.22, z: cz + 0.56 }, scale: { x: 0.36, y: 0.44, z: 0.06 } },
+    // 高 2.2m 竖向站牌杆（停靠端北侧，错开 z=-5 电线杆）
+    { position: { x: 2.68, y: 1.1, z: cz - 1.38 }, scale: { x: 0.06, y: 2.2, z: 0.06 } },
+  ];
+  const frameMesh = createBoxInstances(group, 'street-bus-shelter-frame', greenParts, greenMetalMat, true);
+  if (frameMesh) occluders.push(frameMesh);
+
+  // 半透明 PC 顶棚（opacity 0.25, depthWrite: false）
+  const pcRoof = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.03, 3.04), pcRoofMat);
+  pcRoof.name = 'street-bus-shelter-roof';
+  pcRoof.position.set(cx, 2.62, cz);
+  group.add(pcRoof);
+
+  // 木色长凳 #a87a4f
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.07, 1.56), benchWoodMat);
+  bench.name = 'street-bus-shelter-bench';
+  bench.position.set(3.44, 0.46, cz);
+  bench.castShadow = true;
+  bench.receiveShadow = true;
+  group.add(bench);
+
+  // 留白广告框板面 #cfd8dc（不写文字）
+  const adBlank = new THREE.Mesh(new THREE.BoxGeometry(0.84, 1.42, 0.11), blankAdMat);
+  adBlank.name = 'street-bus-shelter-ad-blank';
+  adBlank.position.set(3.24, 1.28, cz + 1.32);
+  group.add(adBlank);
+
+  // 站牌「校门口」（白底深绿字，朝向街道 -X 与来路 +Z）
+  for (const yaw of [-Math.PI / 2, Math.PI / 2] as const) {
+    const sign = createTextSign('校门口', 0.44, 0.72, {
+      background: '#f7f8f6',
+      foreground: '#1f5443',
+      resolution: 256,
+    });
+    sign.position.set(2.68 + (yaw < 0 ? -0.04 : 0.04), 1.82, cz - 1.38);
+    sign.rotation.y = yaw;
+    group.add(sign);
+  }
+
+  const contacts = createContactShadowDiscBatch('street-bus-shelter-contacts', [
+    { x: 3.76, z: cz - 1.25, radius: 0.22, y: 0.015 },
+    { x: 3.76, z: cz + 1.25, radius: 0.22, y: 0.015 },
+    { x: 3.44, z: cz - 0.56, radius: 0.26, y: 0.015 },
+    { x: 3.44, z: cz + 0.56, radius: 0.26, y: 0.015 },
+    { x: 2.68, z: cz - 1.38, radius: 0.2, y: 0.015 },
+  ]);
+  if (contacts) group.add(contacts);
+}
+
+/**
+ * §2.4 新增：街道左侧老小区门洞「向阳里」（z ≈ -12.12，位于清晨早餐铺与学府文具打印之间的缺口）：
+ * 后退于街面 0.85m（x = -3.45），含两根红砖柱、弧形门洞、70° 半开铁艺大门、「向阳里」门牌，以及门内单棵树与车棚剪影。
+ */
+function buildXiangyangliGate(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
+  const group = new THREE.Group();
+  group.name = 'street-xiangyangli-gate';
+  parent.add(group);
+
+  const brickMat = getFacadeBrickMaterial({ repeatX: 2, repeatY: 2 }).clone();
+  delete brickMat.userData[SHARED_RESOURCE_FLAG];
+  brickMat.color.setHex(0xe57a62);
+  const stoneCapMat = createMatteMaterial(0xdcd9d0, 0.84);
+  const ironGateMat = new THREE.MeshStandardMaterial({ color: 0x2b2f33, roughness: 0.55, metalness: 0.35 });
+  const silhouetteTrunkMat = createMatteMaterial(0x3b3530, 0.92);
+  const silhouetteGreenMat = createMatteMaterial(0x4b7444, 0.94);
+
+  const gx = -3.45;
+  const gz = -12.12;
+  const halfSpan = 1.18;
+
+  // 两根砖柱 0.7×0.7×3.0 m（z = gz ± 1.18 -> 清净门洞宽 1.66m，总占 3.06m 严密落进 [-13.75, -10.5] 缺口）
+  for (const dz of [-halfSpan, halfSpan] as const) {
+    const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.7, 3.0, 0.7), brickMat);
+    pillar.position.set(gx, 1.5, gz + dz);
+    pillar.castShadow = true;
+    pillar.receiveShadow = true;
+    group.add(pillar);
+    occluders.push(pillar);
+  }
+
+  // 柱顶压顶 #dcd9d0 + 上方门楣压条
+  createBoxInstances(
+    group,
+    'street-xiangyangli-caps',
+    [
+      { position: { x: gx, y: 3.08, z: gz - halfSpan }, scale: { x: 0.84, y: 0.16, z: 0.84 } },
+      { position: { x: gx, y: 3.08, z: gz + halfSpan }, scale: { x: 0.84, y: 0.16, z: 0.84 } },
+      { position: { x: gx, y: 3.22, z: gz }, scale: { x: 0.78, y: 0.14, z: 3.16 } },
+    ],
+    stoneCapMat,
+    true,
+  );
+
+  // Shape + ExtrudeGeometry 生成拱高 2.2m 的砖砌门洞拱额
+  const archSpan = 1.66;
+  const archHalf = archSpan / 2;
+  const archShape = new THREE.Shape();
+  archShape.moveTo(-archHalf, 1.72);
+  archShape.lineTo(-archHalf, 2.55);
+  archShape.lineTo(archHalf, 2.55);
+  archShape.lineTo(archHalf, 1.72);
+  archShape.absarc(0, 1.72, archHalf, 0, Math.PI, false);
+  archShape.closePath();
+  const archGeo = new THREE.ExtrudeGeometry(archShape, { depth: 0.56, bevelEnabled: false });
+  archGeo.translate(0, 0, -0.28);
+  archGeo.rotateY(Math.PI / 2);
+  const archMesh = new THREE.Mesh(archGeo, brickMat);
+  archMesh.name = 'street-xiangyangli-arch';
+  archMesh.position.set(gx, 0.62, gz);
+  archMesh.castShadow = true;
+  archMesh.receiveShadow = true;
+  group.add(archMesh);
+
+  // 铁艺大门半开（绕南侧门柱铰链旋转 70° 朝院内开启，8 根竖杆 + 2 道横档）
+  const ironPivot = new THREE.Group();
+  ironPivot.name = 'street-xiangyangli-iron-gate';
+  ironPivot.position.set(gx, 0, gz + archHalf);
+  ironPivot.rotation.y = -(70 * Math.PI) / 180;
+  group.add(ironPivot);
+  const gateBars: BoxInstanceSpec[] = [
+    { position: { x: 0, y: 0.42, z: -0.78 }, scale: { x: 0.04, y: 0.05, z: 1.56 } },
+    { position: { x: 0, y: 1.48, z: -0.78 }, scale: { x: 0.04, y: 0.05, z: 1.56 } },
+  ];
+  for (let i = 0; i < 8; i += 1) {
+    gateBars.push({
+      position: { x: 0, y: 0.96, z: -0.12 - i * 0.19 },
+      scale: { x: 0.032, y: 1.82, z: 0.032 },
+    });
+  }
+  createBoxInstances(ironPivot, 'street-xiangyangli-gate-bars', gateBars, ironGateMat, true);
+
+  // 门牌 1.6 × 0.4 m：「向阳里」（朝向 +X 街道）
+  const doorplate = createTextSign('向阳里', 1.6, 0.4, {
+    background: '#ece6d8',
+    foreground: '#6c2820',
+    resolution: 256,
+  });
+  doorplate.name = 'street-xiangyangli-sign';
+  doorplate.position.set(gx + 0.32, 2.86, gz);
+  doorplate.rotation.y = Math.PI / 2;
+  group.add(doorplate);
+
+  // 门洞内剪影：1 棵小树 + 1 座自行车棚剪影（不加内部导航路径）
+  const innerParts: BoxInstanceSpec[] = [
+    // 小树干
+    { position: { x: -4.95, y: 1.25, z: gz - 0.55 }, scale: { x: 0.18, y: 2.5, z: 0.18 } },
+    // 车棚两立柱 + 斜顶
+    { position: { x: -5.2, y: 1.0, z: gz + 0.25 }, scale: { x: 0.08, y: 2.0, z: 0.08 } },
+    { position: { x: -5.2, y: 1.0, z: gz + 1.15 }, scale: { x: 0.08, y: 2.0, z: 0.08 } },
+    { position: { x: -5.05, y: 2.04, z: gz + 0.7 }, scale: { x: 1.15, y: 0.09, z: 1.4 }, rotation: { x: 0, y: 0, z: 0.08 } },
+  ];
+  createBoxInstances(group, 'street-xiangyangli-inner-shed', innerParts, silhouetteTrunkMat);
+  const innerCrown = new THREE.Mesh(new THREE.IcosahedronGeometry(0.92, 0), silhouetteGreenMat);
+  innerCrown.name = 'street-xiangyangli-inner-tree';
+  innerCrown.position.set(-4.95, 2.8, gz - 0.55);
+  group.add(innerCrown);
+
+  const contacts = createContactShadowDiscBatch('street-xiangyangli-contacts', [
+    { x: gx, z: gz - halfSpan, radius: 0.55, y: 0.015 },
+    { x: gx, z: gz + halfSpan, radius: 0.55, y: 0.015 },
+    { x: -4.95, z: gz - 0.55, radius: 0.4, y: 0.015 },
+  ]);
+  if (contacts) group.add(contacts);
+}
+
 function buildStreetEnvironment(parent: THREE.Object3D, occluders: THREE.Object3D[]): void {
+  streetShopPuffs.length = 0;
+  streetShopElapsed = 0;
+  streetSeascapeWave = null;
+  streetExtraNightBindings.length = 0;
+  streetExtraNightDecals.length = 0;
+  streetShopLightSpecs.length = 0;
   buildStreetGround(parent);
   buildStreetBuildings(parent, occluders);
+  buildCornerGapDetails(parent);
+  buildBusShelter(parent, occluders);
+  buildXiangyangliGate(parent, occluders);
+  buildLeftHeritageBuilding(parent, occluders);
+  buildStreetResidentialBuilding(parent, occluders);
+  buildArtDecoCornerTower(parent, occluders);
+  const gapCtx: ShopBuildContext = {
+    parent,
+    occluders,
+    animatedPuffs: streetShopPuffs,
+    registerNightMaterial: registerStreetExtraNightMaterial,
+    registerShopLight: registerStreetShopLight,
+  };
+  buildCampusClockTowerPlaza(gapCtx);
+  buildMilkTeaShop(gapCtx);
+  streetSeascapeWave = buildStreetSunsetSeascape(parent, occluders);
   buildVendingMachines(parent);
   buildStreetTrees(parent);
   buildStreetLamps(parent, occluders);
@@ -3447,33 +5139,9 @@ const S4_INTERACTABLES: InteractableConfig[] = [
   { id: 'help-passerby', position: { x: -1.78, y: 0.7, z: -26.4 }, lightOffsetY: 0.35, maxDistance: 4.5 },
 ];
 
-/** 程序化简易自行车（倒地状态，玩家帮忙后在运行时扶正） */
+/** 路边摔倒的剧情交互自行车：复用明快卡通彩色校园单车，玩家帮忙后在运行时扶正 */
 function buildFallenBicycle(): THREE.Group {
-  const bike = new THREE.Group();
-  bike.name = 'street-fallen-bicycle';
-  const frameMat = createMatteMaterial(0x4b6b78, 0.78);
-  const tireMat = createMatteMaterial(0x2d3236, 0.94);
-  const wheelGeo = new THREE.TorusGeometry(0.28, 0.032, 8, 18);
-  for (const offsetZ of [-0.46, 0.46]) {
-    const wheel = new THREE.Mesh(wheelGeo, tireMat);
-    wheel.position.set(0, 0.28, offsetZ);
-    wheel.rotation.y = Math.PI / 2;
-    wheel.castShadow = true;
-    bike.add(wheel);
-  }
-  const topBar = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.72), frameMat);
-  topBar.position.set(0, 0.56, 0);
-  topBar.castShadow = true;
-  const seatPost = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.36, 0.04), frameMat);
-  seatPost.position.set(0, 0.48, -0.22);
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.22), tireMat);
-  seat.position.set(0, 0.68, -0.22);
-  const stem = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.42, 0.04), frameMat);
-  stem.position.set(0, 0.52, 0.36);
-  const handlebar = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.035, 0.035), tireMat);
-  handlebar.position.set(0, 0.74, 0.36);
-  bike.add(topBar, seatPost, seat, stem, handlebar);
-  return bike;
+  return buildCartoonBicycle({ withKickstand: false, name: 'street-fallen-bicycle' });
 }
 
 /** 街道三处叙事伏笔：便利店刷手机路人、父子拎箱子、摔倒自行车与举手机围观人群（全部使用非主线差异化路人模型，避免与后续阿远/林夏父亲撞脸） */
@@ -3498,7 +5166,7 @@ function buildStreetForeshadowings(
   const dad = createCharacterActor('studentMale4', 1.78, 0x737c75, { yaw: yawToward(dadPos, kidPos) });
   dad.name = 'street-foreshadow-father';
   dad.position.set(dadPos.x, 0, dadPos.z);
-  const kid = createCharacterActor('studentFemale', 1.56, 0x9aa296, { yaw: yawToward(kidPos, dadPos) });
+  const kid = createCharacterActor('studentFemale1', 1.56, 0x9aa296, { yaw: yawToward(kidPos, dadPos) });
   kid.name = 'street-foreshadow-child';
   kid.position.set(kidPos.x, 0, kidPos.z);
   const suitcase = addBox(
@@ -3512,16 +5180,21 @@ function buildStreetForeshadowings(
   actors['foreshadow-dad'] = dad;
   actors['foreshadow-kid'] = kid;
 
-  // 3. 路边摔倒的自行车 + 4 名举着手机拍照的围观者（5 人 5 套互不重复的非主线同学模型）
-  const bikePos = { x: -1.78, z: -26.4 };
+  // 3. 路边摔倒的彩色卡通校园单车 + 4 名举着手机拍照的围观者（与女骑手双脚、药房 A 字牌及路边护栏均留出干净间隙，零穿模）
+  const bikePos = { x: -1.52, z: -26.18 };
   const bike = buildFallenBicycle();
-  bike.position.set(bikePos.x, 0.12, bikePos.z);
-  bike.rotation.set(0, 0.35, Math.PI * 0.44);
+  bike.position.set(bikePos.x, 0.18, bikePos.z);
+  // 向道路一侧（+X）斜倒，避免车轮与车把压穿左侧女骑手双脚，同时保证车篮不陷地
+  bike.rotation.set(0, 0.26, -Math.PI * 0.43);
   parent.add(bike);
   actors['fallen-bike'] = bike;
+  const fallenBikeShadow = createContactShadowDiscBatch('street-fallen-bike-contact', [
+    { x: bikePos.x + 0.18, z: bikePos.z, radius: 0.78, y: 0.024 },
+  ]);
+  if (fallenBikeShadow) parent.add(fallenBikeShadow);
 
-  const cyclistPos = { x: -2.22, z: -26.85 };
-  const cyclist = createCharacterActor('studentFemale', 1.62, 0x859099, { yaw: yawToward(cyclistPos, bikePos) });
+  const cyclistPos = { x: -2.14, z: -26.78 };
+  const cyclist = createCharacterActor('studentFemale2', 1.62, 0x859099, { yaw: yawToward(cyclistPos, bikePos) });
   cyclist.name = 'street-fallen-cyclist';
   cyclist.position.set(cyclistPos.x, 0, cyclistPos.z);
   parent.add(cyclist);
@@ -3529,9 +5202,9 @@ function buildStreetForeshadowings(
 
   const onlookers: ReadonlyArray<{ x: number; z: number; model: CharacterModelId; color: number; h: number }> = [
     { x: -2.35, z: -25.15, model: 'studentMale3', color: 0x8b867d, h: 1.71 },
-    { x: -2.42, z: -27.75, model: 'studentFemale4', color: 0x7c878f, h: 1.63 },
-    { x: -1.52, z: -25.0, model: 'studentMale2', color: 0x748188, h: 1.72 },
-    { x: -1.52, z: -27.85, model: 'studentFemale3', color: 0x91887c, h: 1.64 },
+    { x: -2.36, z: -27.85, model: 'studentFemale4', color: 0x7c878f, h: 1.63 },
+    { x: -1.52, z: -25.0, model: 'studentMale5', color: 0x748188, h: 1.72 },
+    { x: -1.96, z: -27.45, model: 'studentFemale3', color: 0x91887c, h: 1.64 },
   ];
   onlookers.forEach((spec, index) => {
     const onlooker = createCharacterActor(spec.model, spec.h, spec.color, {
@@ -3577,13 +5250,11 @@ function buildStreet(parent: THREE.Object3D): {
     actors[`npc-${index}-student`] = student;
   }
 
-  // 举牌放在角色右侧斜前方，错开 5 号商铺暖光灯（z=-12.65）避免脸部过曝，且不遮挡挥手动作
-  const volunteer = createCharacterActor('volunteer', 1.66, 0xb08a72, { yaw: -0.35 });
-  volunteer.position.set(1.88, 0, -13.75);
+  // 街边「新生报到」指引立牌：移除挡路人物，箭头指向前方校门方向（↑）
   const signAssembly = new THREE.Group();
   signAssembly.name = 'street-volunteer-sign';
-  signAssembly.position.set(0.98, 1.06, -13.25);
-  signAssembly.rotation.y = -0.22;
+  signAssembly.position.set(1.25, 1.06, -13.25);
+  signAssembly.rotation.y = -0.14;
 
   const signBack = new THREE.Mesh(
     new THREE.BoxGeometry(1.34, 0.54, 0.036),
@@ -3592,7 +5263,7 @@ function buildStreet(parent: THREE.Object3D): {
   signBack.castShadow = true;
   signBack.receiveShadow = true;
 
-  const sign = createTextSign('新生报到 →', 1.26, 0.46, {
+  const sign = createTextSign('新生报到 ↑', 1.26, 0.46, {
     background: '#dfd8c6',
     foreground: '#2b3e38',
     resolution: 320,
@@ -3623,9 +5294,8 @@ function buildStreet(parent: THREE.Object3D): {
   signBase.receiveShadow = true;
 
   signAssembly.add(signBack, sign, signPole, signBase);
-  parent.add(volunteer, signAssembly);
-  occluders.push(volunteer, signBack);
-  actors['sign-volunteer'] = volunteer;
+  parent.add(signAssembly);
+  occluders.push(signBack);
 
   buildStreetForeshadowings(parent, actors);
 
@@ -3647,10 +5317,15 @@ interface StreetAnimatedNpc {
   clips: readonly string[];
   switchSec: number;
   timer: number;
+  accumSec: number;
   clipIndex: number;
   controller: CharacterAnimationController | null;
 }
 let streetAnimatedNpcs: StreetAnimatedNpc[] = [];
+const streetShopPuffs: AnimatedSteamPuff[] = [];
+let streetShopElapsed = 0;
+let streetSeascapeAccum = 0;
+let streetSeascapeWave: SeascapeWaveState | null = null;
 
 function stopIdleMotions(): void {
   for (const dispose of idleDisposers) dispose();
@@ -3675,7 +5350,6 @@ function startStreetIdleMotions(actors: Record<string, THREE.Object3D>): void {
     'npc-0-student',
     'npc-1-greeter',
     'npc-1-student',
-    'sign-volunteer',
   ]) {
     const actor = actors[id];
     if (!actor) continue;
@@ -3690,29 +5364,30 @@ function startStreetIdleMotions(actors: Record<string, THREE.Object3D>): void {
   }
   disposeStreetAnimations();
   const specs: Array<{ id: string; clips: readonly string[]; switchSec: number }> = [
-    { id: 'sign-volunteer', clips: ['wave_goodbye_02', 'wait', 'agree'], switchSec: 7.5 },
     { id: 'npc-0-greeter', clips: ['agree', 'greet_04', 'fold_arms'], switchSec: 8.5 },
-    { id: 'npc-0-student', clips: ['look_around', 'fold_arms', 'afraid'], switchSec: 8.8 },
-    { id: 'npc-1-greeter', clips: ['agree', 'laugh_01'], switchSec: 9.2 },
-    { id: 'npc-1-student', clips: ['wait', 'cheer', 'make_a_call_02'], switchSec: 8.2 },
+    { id: 'npc-0-student', clips: ['standing_relax', 'laugh_02', 'bow', 'swagger'], switchSec: 7.6 },
+    { id: 'npc-1-greeter', clips: ['greet_04', 'fold_arms', 'cheer'], switchSec: 9.2 },
+    { id: 'npc-1-student', clips: ['standing_relax', 'cheer', 'swagger'], switchSec: 8.2 },
     { id: 'foreshadow-dad', clips: ['agree', 'look_around', 'make_a_call_02'], switchSec: 9.0 },
-    { id: 'foreshadow-kid', clips: ['wait', 'agree', 'idle'], switchSec: 7.8 },
-    { id: 'foreshadow-scroller', clips: ['wait', 'laugh_02'], switchSec: 8.4 },
+    { id: 'foreshadow-kid', clips: ['standing_relax', 'laugh_02', 'bow'], switchSec: 7.8 },
+    { id: 'foreshadow-scroller', clips: ['wait', 'laugh_02', 'make_a_call_01'], switchSec: 8.4 },
+    { id: 'fallen-cyclist', clips: ['fold_arms', 'greet_04'], switchSec: 7.2 },
     { id: 'bike-onlooker-0', clips: ['make_a_call_02', 'cheer', 'wait'], switchSec: 7.4 },
-    { id: 'bike-onlooker-1', clips: ['look_around', 'fold_arms'], switchSec: 8.6 },
-    { id: 'bike-onlooker-2', clips: ['laugh_02', 'wait'], switchSec: 7.9 },
-    { id: 'bike-onlooker-3', clips: ['laugh_01', 'agree'], switchSec: 8.3 },
+    { id: 'bike-onlooker-1', clips: ['look_around', 'fold_arms', 'make_a_call_02'], switchSec: 8.6 },
+    { id: 'bike-onlooker-2', clips: ['standing_relax', 'cheer', 'swagger'], switchSec: 7.9 },
+    { id: 'bike-onlooker-3', clips: ['agree', 'swagger', 'make_a_call_01'], switchSec: 8.3 },
   ];
   for (const spec of specs) {
     const actor = actors[spec.id];
     if (!actor) continue;
-    const controller = createActorAnimation(actor);
+    const controller = createActorAnimation(actor, { lockHorizontalRoot: true });
     const available = controller ? spec.clips.filter((c) => controller.hasAnimation(c)) : spec.clips;
     const entry: StreetAnimatedNpc = {
       actor,
       clips: available.length > 0 ? available : spec.clips,
       switchSec: spec.switchSec,
       timer: 0,
+      accumSec: 0,
       clipIndex: 0,
       controller: available.length > 0 ? controller : null,
     };
@@ -3730,6 +5405,9 @@ export const streetRuntime: SceneRuntime = {
   enter(context: SceneRuntimeContext): void {
     if (context.sceneId !== 'S4') return;
     streetNightContext = context;
+    context.setSceneLighting?.(SEASCAPE_SUNSET_LIGHTING);
+    ensureStreetShopLights();
+    tickStreetShopLights();
     applyStreetNight();
     stopIdleMotions();
     startStreetIdleMotions(context.actors);
@@ -3739,7 +5417,8 @@ export const streetRuntime: SceneRuntime = {
       const bike = context.actors['fallen-bike'];
       if (bike) {
         bike.rotation.z = 0;
-        bike.position.y = 0;
+        // 扶正后轮底严格贴齐人行道/路缘顶面（y = 0.06），既不陷地也不悬空
+        bike.position.y = 0.06;
       }
       context.setInteractableVisible('help-passerby', false);
     });
@@ -3761,11 +5440,38 @@ export const streetRuntime: SceneRuntime = {
 
   tick(dtSeconds: number): void {
     if (dtSeconds <= 0) return;
+    streetShopElapsed += dtSeconds;
+    const hasPlayer = Boolean(streetNightContext?.getPlayerFeet);
+    if (hasPlayer && streetNightContext?.getPlayerFeet) {
+      streetNightContext.getPlayerFeet(scratchNightFeet);
+    }
+    tickStreetShopAnimations(
+      streetShopPuffs,
+      streetShopElapsed,
+      hasPlayer ? scratchNightFeet.x : undefined,
+      hasPlayer ? scratchNightFeet.z : undefined,
+    );
+    const viewYaw = streetNightContext?.getViewYaw?.();
+    const facingAwayFromSea = hasPlayer
+      && scratchNightFeet.z < 2
+      && viewYaw !== undefined
+      && Math.abs(Math.atan2(Math.sin(viewYaw), Math.cos(viewYaw))) < Math.PI * 0.55;
+    if (facingAwayFromSea) {
+      streetSeascapeAccum += dtSeconds;
+      if (streetSeascapeAccum >= 0.25) {
+        streetSeascapeAccum = 0;
+        tickStreetSeascape(streetSeascapeWave, streetShopElapsed);
+      }
+    } else {
+      streetSeascapeAccum = 0;
+      tickStreetSeascape(streetSeascapeWave, streetShopElapsed);
+    }
+    tickStreetShopLights();
     tickStreetNight(dtSeconds);
     for (const entry of streetAnimatedNpcs) {
       if (!entry.actor.visible) continue;
       if (!entry.controller) {
-        const created = createActorAnimation(entry.actor);
+        const created = createActorAnimation(entry.actor, { lockHorizontalRoot: true });
         if (created) {
           const available = entry.clips.filter((c) => created.hasAnimation(c));
           if (available.length > 0) {
@@ -3785,6 +5491,21 @@ export const streetRuntime: SceneRuntime = {
         entry.clipIndex = (entry.clipIndex + 1) % entry.clips.length;
         entry.controller.play(entry.clips[entry.clipIndex], { fadeIn: 0.45, timeScale: 0.88, loop: true });
       }
+      if (hasPlayer) {
+        const dx = entry.actor.position.x - scratchNightFeet.x;
+        const dz = entry.actor.position.z - scratchNightFeet.z;
+        const dSq = dx * dx + dz * dz;
+        const minStep = dSq <= 324 ? 0 : dSq <= 1156 ? 1 / 30 : 1 / 12;
+        if (minStep > 0) {
+          entry.accumSec += dtSeconds;
+          if (entry.accumSec < minStep) continue;
+          const stepDt = entry.accumSec;
+          entry.accumSec = 0;
+          entry.controller.update(stepDt);
+          continue;
+        }
+      }
+      entry.accumSec = 0;
       entry.controller.update(dtSeconds);
     }
   },
@@ -3798,6 +5519,11 @@ export const streetRuntime: SceneRuntime = {
   exit(): void {
     // 先作废本代场景：仍在途的道具回调不能再往复用的 levelGroup 里补挂几何
     streetGeneration += 1;
+    streetShopPuffs.length = 0;
+    streetShopElapsed = 0;
+    streetSeascapeAccum = 0;
+    streetSeascapeWave = null;
+    streetNightContext?.setSceneLighting?.(null);
     resetStreetNightRig();
     stopIdleMotions();
     disposeStreetAnimations();
@@ -3814,14 +5540,16 @@ export function createStreetDefinition(_sceneId: SceneId): WorldSceneDefinition 
     sceneKey: 'street',
     spawn: SPAWN,
     nav: NAV,
-    // 进 S4 时按需预载：唯一迎新举牌女老师 + 7 位互不重复的非主线同学模型（不再混入主线阿远）
+    // 进 S4 时按需预载：7 位互不重复的非主线同学模型
     requiredModels: [
-      'volunteer',
       'studentMale',
       'studentFemale',
       'studentMale2',
       'studentMale3',
       'studentMale4',
+      'studentMale5',
+      'studentFemale1',
+      'studentFemale2',
       'studentFemale3',
       'studentFemale4',
     ],
@@ -3836,7 +5564,7 @@ export function createStreetDefinition(_sceneId: SceneId): WorldSceneDefinition 
       },
     ],
     targetGuides: [{ id: 's4-gate-guide', position: TARGET_GUIDE }],
-    fog: { color: 0xb9c6d2, near: 16, far: 68 },
+    fog: { color: 0xb9c6d2, near: 26, far: 108 },
     build: buildStreet,
   };
 }

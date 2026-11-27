@@ -26,15 +26,27 @@
 
 .stage2d__background img {
   object-fit: cover;
-  filter: saturate(.7) brightness(.9);
+  filter: saturate(.92) brightness(.96);
+}
+
+.stage2d::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-image: var(--yt-grain);
+  background-size: 160px 160px;
+  opacity: 0.06;
+  pointer-events: none;
 }
 
 .stage2d::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, #283b3b24, transparent 32%, #142a32ba),
-    radial-gradient(ellipse at 40% 35%, transparent 35%, #293d4338);
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(16, 24, 30, 0.16) 0%, transparent 26%, transparent 56%, rgba(9, 15, 21, 0.66) 100%),
+    radial-gradient(ellipse at 45% 38%, transparent 44%, rgba(16, 26, 32, 0.24));
 }
 
 .stage2d__portrait {
@@ -96,13 +108,20 @@
 
 .stage2d__title {
   position: absolute;
-  top: calc(24px + env(safe-area-inset-top));
-  left: calc(24px + env(safe-area-inset-left));
-  right: calc(24px + env(safe-area-inset-right));
+  z-index: 2;
+  top: calc(20px + env(safe-area-inset-top));
+  left: calc(22px + env(safe-area-inset-left));
   margin: 0;
-  font-size: clamp(13px, 1.4vw, 18px);
-  letter-spacing: .18em;
-  text-shadow: 0 1px 12px #fff9;
+  padding: 5px 14px;
+  border-left: 2px solid rgba(232, 199, 154, 0.72);
+  border-radius: 4px;
+  background: rgba(12, 18, 24, 0.44);
+  font-family: var(--yt-font-serif);
+  font-size: clamp(14px, 1.5vw, 18px);
+  font-weight: 600;
+  letter-spacing: .16em;
+  color: #f6efe2;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75);
 }
 
 .art-view {
@@ -116,7 +135,7 @@
   pointer-events: auto;
   padding: calc(16px + env(safe-area-inset-top))
     calc(16px + env(safe-area-inset-right))
-    calc(48px + env(safe-area-inset-bottom))
+    calc(56px + env(safe-area-inset-bottom))
     calc(16px + env(safe-area-inset-left));
   background: #17252bed;
   color: #f4efdf;

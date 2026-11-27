@@ -50,6 +50,8 @@ export interface FirstPersonCallbacks {
   onEnabledChange?: (enabled: boolean) => void;
   /** 桌面 Shift 疾跑开关状态变化（用于 HUD 角标） */
   onSprintToggleChange?: (active: boolean) => void;
+  /** 玩家主动移动视角或按键，取消场景自动演出 */
+  onInputTakeover?: () => void;
 }
 
 export interface FirstPersonControllerOptions {
@@ -83,6 +85,8 @@ export class FirstPersonController {
   private cinematic = false;
   /** 场景切换黑幕持有：淡出到淡入期间禁止输入 */
   private transitionLocked = false;
+  private scriptedLookLocked = false;
+  private lookInputTravelPx = 0;
   private lookOnly = false;
   private pointerLocked = false;
   /** 桌面 Shift 开关：按一下开启，再按一下关闭 */
@@ -325,7 +329,7 @@ export class FirstPersonController {
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
-    if (this.isBlocked()) return;
+    if (this.isBlocked() && !this.scriptedLookLocked) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
 
     if (this.pointerLocked) {
@@ -345,6 +349,7 @@ export class FirstPersonController {
       downAt: performance.now(),
     };
     this.pointerMoved = false;
+    this.lookInputTravelPx = 0;
 
     try {
       this.domElement.setPointerCapture(event.pointerId);
@@ -356,10 +361,21 @@ export class FirstPersonController {
   };
 
   private readonly handlePointerMove = (event: PointerEvent): void => {
-    if (this.isBlocked()) return;
+    if (this.isBlocked() && !this.scriptedLookLocked) return;
+
+    if (this.scriptedLookLocked && event.pointerType === 'mouse') {
+      this.lookInputTravelPx += Math.hypot(event.movementX, event.movementY);
+      if (this.lookInputTravelPx > 8) {
+        if (this.pointer) this.pointerMoved = true;
+        this.callbacks.onInputTakeover?.();
+      }
+      return;
+    }
 
     if (this.pointerLocked) {
       if (event.pointerType !== 'mouse') return;
+      this.lookInputTravelPx += Math.hypot(event.movementX, event.movementY);
+      if (this.lookInputTravelPx > 8) this.callbacks.onInputTakeover?.();
       this.rotate(event.movementX, event.movementY, this.config.mouseSensitivity);
       return;
     }
@@ -371,6 +387,8 @@ export class FirstPersonController {
     const deltaY = event.clientY - pointer.lastY;
     pointer.lastX = event.clientX;
     pointer.lastY = event.clientY;
+    this.lookInputTravelPx += Math.hypot(deltaX, deltaY);
+    if (this.lookInputTravelPx > 8) this.callbacks.onInputTakeover?.();
 
     if (
       Math.abs(event.clientX - pointer.startX) > this.config.tapMaxMovePx ||
@@ -395,6 +413,7 @@ export class FirstPersonController {
     const maxTapMove = pointer.type === 'mouse' ? MOUSE_TAP_MAX_MOVE_PX : this.config.tapMaxMovePx;
     const wasTap =
       !this.pointerMoved &&
+      this.lookInputTravelPx <= 8 &&
       elapsed <= this.config.tapMaxDurationMs &&
       Math.abs(event.clientX - pointer.startX) <= maxTapMove &&
       Math.abs(event.clientY - pointer.startY) <= maxTapMove;
@@ -544,9 +563,15 @@ export class FirstPersonController {
   };
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
-    if (this.isBlocked()) return;
     // 长按的系统连发不得反复切换疾跑
     if (event.repeat) return;
+    if (
+      (MOVE_KEYS.has(event.code) || event.code === 'KeyE' || event.code === 'KeyF')
+      && (!this.isBlocked() || this.scriptedLookLocked)
+    ) {
+      this.callbacks.onInputTakeover?.();
+    }
+    if (this.isBlocked()) return;
     if (MOVE_KEYS.has(event.code)) {
       this.keys.add(event.code);
       this.cancelAutoWalk();
@@ -655,6 +680,30 @@ export class FirstPersonController {
     this.applyCamera(0, 0);
   }
 
+  getYaw(): number {
+    return this.yaw;
+  }
+
+  setYaw(yaw: number): void {
+    this.yaw = yaw;
+    this.applyCamera(0, 0);
+  }
+
+  /** 自动转向期间冻结移动，但仍允许玩家输入接管后立即解锁 */
+  setScriptedLookLocked(value: boolean): void {
+    if (this.scriptedLookLocked === value) return;
+    this.scriptedLookLocked = value;
+    this.lookInputTravelPx = 0;
+    if (value) {
+      this.keys.clear();
+      this.pointer = null;
+      this.pointerMoved = false;
+      this.cancelAutoWalk();
+      this.exitPointerLock();
+    }
+    this.notifyEnabledChanged();
+  }
+
   isEnabled(): boolean {
     return !this.isBlocked();
   }
@@ -680,7 +729,7 @@ export class FirstPersonController {
 
   /** 三重锁中任意一把在即视为输入被禁止（HUD 隐藏、交互与注视暂停） */
   private isBlocked(): boolean {
-    return this.controlsLocked || this.cinematic || this.transitionLocked;
+    return this.controlsLocked || this.cinematic || this.transitionLocked || this.scriptedLookLocked;
   }
 
   private exitPointerLock(): void {

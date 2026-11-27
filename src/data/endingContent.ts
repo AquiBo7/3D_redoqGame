@@ -87,6 +87,7 @@ export const DRAFT_REACTIONS = {
   viewedAvatar: '那天，我看到有人点开了我的头像。',
   forwardedRoommate: '我不知道是谁，但我猜得到。',
   askedBeforeEvidence: '你先问了我。谢谢。',
+  auntieEgg: '有位阿姨多给了我一个蛋。',
 } as const;
 
 export type FinalAnswerId = NonNullable<StoryVariables['finalAnswer']>;

@@ -1,7 +1,7 @@
 import { eventBus } from '../core/eventBus';
 import { createEndingReview, type EndingReview } from '../core/endingReview';
 import { PERSPECTIVE_TABS } from '../data/legalHints';
-import { renderAssetImage } from './assetImage';
+import { renderAssetImage, renderLinPaintingCard } from './assetImage';
 import './chapterEnd.css';
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ''): HTMLElementTagNameMap[K] {
@@ -110,13 +110,20 @@ export function initChapterEnd(): () => void {
     clear();
     const hero = element('header', 'chapter-end__hero');
     const figure = element('figure', 'chapter-end__figure');
-    renderAssetImage(review.cg.assetId, figure).draggable = false;
+    if (review.cg.assetId === 'cg_ending_best_drawing') {
+      renderLinPaintingCard(
+        figure,
+        review.painting ?? { hasOrangeDot: false, hasGuardBooth: false, canFlip: false },
+      );
+    } else {
+      renderAssetImage(review.cg.assetId, figure).draggable = false;
+    }
     figure.append(element('figcaption', 'chapter-end__caption', review.cg.caption));
     const copy = element('div', 'chapter-end__hero-copy');
     title = element('h2', 'chapter-end__title', review.title);
     title.id = 'chapter-end-title';
     title.tabIndex = -1;
-    copy.append(element('p', 'chapter-end__eyebrow', '一条截图 / 回望'), title,
+    copy.append(element('p', 'chapter-end__eyebrow', 'ONE SCREENSHOT // 回望与足迹'), title,
       element('p', 'chapter-end__note', review.lead));
     hero.append(figure, copy);
 
@@ -147,6 +154,29 @@ export function initChapterEnd(): () => void {
     }
     footprint.append(footprints);
     if (!review.footprints.length) footprint.append(element('p', '', '这一段还没有留下可回放的足迹。'));
+
+    if (review.ending === 'best') {
+      const compare = element('section', 'chapter-end__compare');
+      compare.append(element('h4', 'chapter-end__subheading', '同一个画面。'));
+      const compareGrid = element('div', 'chapter-end__compare-grid');
+
+      const leftCard = element('figure', 'chapter-end__compare-card chapter-end__compare-card--photo');
+      const leftFrame = element('div', 'chapter-end__compare-frame');
+      renderAssetImage('cg_s13_walk_together', leftFrame).draggable = false;
+      leftCard.append(leftFrame, element('figcaption', 'chapter-end__caption', '那天，被转发的'));
+
+      const rightCard = element('figure', 'chapter-end__compare-card chapter-end__compare-card--painting');
+      const rightFrame = element('div', 'chapter-end__compare-frame');
+      renderLinPaintingCard(
+        rightFrame,
+        review.painting ?? { hasOrangeDot: false, hasGuardBooth: false, canFlip: false },
+      );
+      rightCard.append(rightFrame, element('figcaption', 'chapter-end__caption', '那天，她画的'));
+
+      compareGrid.append(leftCard, rightCard);
+      compare.append(compareGrid);
+      footprint.append(compare);
+    }
 
     const drafts = section('03 / 林夏的草稿箱');
     const draftList = element('ol', 'chapter-end__drafts');

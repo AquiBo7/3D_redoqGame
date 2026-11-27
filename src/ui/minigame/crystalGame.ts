@@ -201,7 +201,11 @@ export class CrystalGame {
     this.container.append(root);
     const active = (): boolean => this.session === s;
     const running = (): boolean => active() && !document.hidden && (s.model.phase === 'phase1' || s.model.phase === 'phase2');
-    const clearInput = (): void => { s.keys.clear(); s.pointers.clear(); };
+    const clearInput = (): void => {
+      s.keys.clear();
+      s.pointers.clear();
+      for (const control of [left, right, attack]) control.classList?.remove('is-pressed');
+    };
     const listen = (target: EventTarget, type: string, handler: EventListener): void => {
       const guarded: EventListener = (event) => { if (active()) handler(event); };
       target.addEventListener(type, guarded);
@@ -294,6 +298,7 @@ export class CrystalGame {
       if (running()) event.preventDefault();
       s.keys.delete(key.code || key.key);
     });
+    let lastCanvasPointerAt = Number.NEGATIVE_INFINITY;
     for (const [target, name] of [[left, 'left'], [right, 'right'], [attack, 'attack'], [canvas, 'attack']] as const) {
       listen(target, 'pointerdown', (event) => {
         const pointer = event as PointerEvent;
@@ -301,16 +306,30 @@ export class CrystalGame {
         event.preventDefault(); event.stopPropagation();
         canvas.focus({ preventScroll: true });
         s.pointers.set(pointer.pointerId, name);
+        if (target !== canvas) target.classList?.add('is-pressed');
+        else lastCanvasPointerAt = performance.now();
         if (typeof target.setPointerCapture === 'function') target.setPointerCapture(pointer.pointerId);
         if (name === 'attack') { attackCrystal(s.model); sync(); this.draw(s); }
       });
-      listen(target, 'lostpointercapture', (event) => { s.pointers.delete((event as PointerEvent).pointerId); });
-      listen(target, 'click', (event) => {
-        event.stopPropagation();
-        if (running() && name === 'attack') { attackCrystal(s.model); sync(); this.draw(s); }
+      listen(target, 'lostpointercapture', (event) => {
+        s.pointers.delete((event as PointerEvent).pointerId);
+        if (target !== canvas) target.classList?.remove('is-pressed');
       });
     }
-    for (const type of ['pointerup', 'pointercancel']) listen(window, type, (event) => { s.pointers.delete((event as PointerEvent).pointerId); });
+    // 攻击按钮只走 pointerdown，避免指针按下后再触发 click 连打两次；画布保留非触控回退点击。
+    listen(canvas, 'click', (event) => {
+      event.stopPropagation();
+      if (performance.now() - lastCanvasPointerAt < 350) return;
+      if (running()) { attackCrystal(s.model); sync(); this.draw(s); }
+    });
+    for (const type of ['pointerup', 'pointercancel']) {
+      listen(window, type, (event) => {
+        s.pointers.delete((event as PointerEvent).pointerId);
+        if (s.pointers.size === 0) {
+          for (const control of [left, right, attack]) control.classList?.remove('is-pressed');
+        }
+      });
+    }
     listen(window, 'blur', clearInput);
     listen(root, 'focusout', clearInput);
     const resize = (): void => {

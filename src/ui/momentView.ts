@@ -13,6 +13,7 @@ export type MomentOutcome = 'completed' | 'interrupted';
 const DEFAULT_NEWS_LINES = [
   '……近日，多所学校提醒学生：转发未经核实的内容，同样可能伤害他人。',
   '某学生因一张被断章取义的照片，被围攻数日，最终关闭了账号，也不再出门。',
+  '教育部门同时呼吁：面对网络争议多些宽容与理性核实，不做跟风伤害的推手，共同拒绝网络暴力。',
 ];
 
 const DEFAULT_HESITATION_LINES = [
@@ -21,23 +22,49 @@ const DEFAULT_HESITATION_LINES = [
   '安静了一会儿，她还是重新把那张纸拿了起来。',
 ];
 
-/** 最差结局概括式通知文案（严禁具体辱骂词或真实平台名） */
-const WORST_NOTIFICATIONS: ReadonlyArray<{ source: string; text: string }> = [
-  { source: '班群', text: '有人转发了一张新的对话截图' },
-  { source: '校园墙', text: '有新的跟评提到了你' },
-  { source: '私信', text: '陌生账号：刚才那段对话是真的吗？' },
-  { source: '迎新群', text: '未读消息持续增加，讨论仍在继续' },
-  { source: '校园见闻', text: '搬运帖的转发数正在上升' },
-  { source: '班群', text: '又有人截下了刚才的聊天记录' },
-  { source: '校园墙', text: '你所在的楼层多了十几条新回复' },
-  { source: '私信', text: '陌生账号：发帖的人是不是他？' },
-  { source: '群提醒', text: '那张截图又被转进了别的群' },
-  { source: '校园墙', text: '新的话题正在快速扩散' },
-  { source: '班群 · 99+', text: '有人把两个人的名字并排放在了一起' },
-  { source: '系统提醒', text: '有 37 条新回复与转发等待查看' },
+/** 最差结局概括式通知文案池（严禁具体辱骂词、真实平台名或自伤词） */
+const WORST_NOTIFICATIONS: ReadonlyArray<{
+  source: string;
+  text: string;
+  tone: 'group' | 'wall' | 'dm' | 'system';
+}> = [
+  { source: '班群', text: '有人转发了一张新的对话截图', tone: 'group' },
+  { source: '校园墙', text: '有新的跟评提到了你', tone: 'wall' },
+  { source: '私信', text: '陌生账号：刚才那段对话是真的吗？', tone: 'dm' },
+  { source: '迎新群', text: '未读消息持续增加，讨论仍在继续', tone: 'group' },
+  { source: '校园见闻', text: '搬运帖的转发数正在上升', tone: 'wall' },
+  { source: '班群', text: '又有人截下了刚才的聊天记录', tone: 'group' },
+  { source: '校园墙', text: '你所在的楼层多了十几条新回复', tone: 'wall' },
+  { source: '私信', text: '陌生账号：发帖的人是不是他？', tone: 'dm' },
+  { source: '群提醒', text: '那张截图又被转进了别的群', tone: 'group' },
+  { source: '校园墙', text: '新的话题正在快速扩散', tone: 'wall' },
+  { source: '班群 · 99+', text: '有人把两个人的名字并排放在了一起', tone: 'group' },
+  { source: '系统提醒', text: '有 37 条新回复与转发等待查看', tone: 'system' },
+  { source: '校园墙 · 热议', text: '匿名帖热度持续攀升，新增 120+ 条讨论', tone: 'wall' },
+  { source: '私信', text: '陌生账号：你当时在现场吗？怎么不说清楚', tone: 'dm' },
+  { source: '迎新群 · @你', text: '有人在群里 @ 了你，要求出来解释', tone: 'group' },
+  { source: '校园见闻', text: '有人把截图做了局部放大并重新配文', tone: 'wall' },
+  { source: '隔壁班群', text: '刚刚那张图已经传到年级大群了', tone: 'group' },
+  { source: '系统提醒', text: '短时间内收到 89 条点赞与转发通知', tone: 'system' },
+  { source: '匿名投稿', text: '话题浏览量正在快速上涨，评论不断刷新', tone: 'wall' },
+  { source: '私信请求', text: '多个陌生账号请求添加好友并附带留言', tone: 'dm' },
+  { source: '班群 · 99+', text: '有人翻出了更早之前的旧发言截图', tone: 'group' },
+  { source: '校园墙', text: '搬运合集已出现第三条关联帖子', tone: 'wall' },
+  { source: '群提醒', text: '五个群聊几乎同时出现了同一张截图', tone: 'group' },
+  { source: '系统提醒', text: '有 99+ 条未读互动消息等待处理', tone: 'system' },
+  { source: '校园墙', text: '新回复：事情到底是怎么回事？', tone: 'wall' },
+  { source: '私信', text: '陌生账号：大家都在转，你还没看到吗？', tone: 'dm' },
+  { source: '匿名楼层', text: '讨论仍在发酵，新的猜测接连涌入', tone: 'wall' },
+  { source: '系统提醒', text: '通知频率过高，消息列表持续刷新中', tone: 'system' },
 ];
 
-const WORST_INTERVALS_MS = [520, 440, 360, 290, 230, 180, 145, 115, 95, 80, 70, 65] as const;
+/** 约 7 秒（~7000ms）内逐步加速堆积 56 条全屏弹窗，节奏由慢转急 */
+const WORST_FLOOD_COUNT = 56;
+const WORST_INTERVALS_MS: readonly number[] = Array.from({ length: WORST_FLOOD_COUNT }, (_, i) => {
+  const t = i / (WORST_FLOOD_COUNT - 1);
+  // 前缓后急：从 ~395ms 指数压缩至 ~36ms，含起手 160ms 总堆积约 7.0 秒
+  return Math.max(36, Math.round(395 * Math.pow(0.068, Math.pow(t, 0.84))));
+});
 
 function prefersReducedMotion(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
@@ -184,9 +211,10 @@ export class MomentView {
     this.onEnd(session.stepId, outcome);
   }
 
-  /** 追加 A：旅馆电视早间新闻（自动播放，可随时关闭） */
+  /** 追加 A：旅馆电视早间新闻（支持自动轮播，也支持右下角「下一条」手动翻页与随时关闭） */
   private renderOpeningNews(session: { stepId: string }, lines: string[]): void {
     this.root.setAttribute('aria-label', '旅馆电视早间新闻');
+    const total = Math.max(1, lines.length);
     const card = createElement('div', 'moment-news');
 
     const bar = createElement('div', 'moment-news__bar');
@@ -204,10 +232,64 @@ export class MomentView {
     ticker.setAttribute('aria-live', 'polite');
     screen.append(anchor, ticker);
 
-    card.append(bar, screen);
+    const footer = createElement('div', 'moment-news__footer');
+    const progress = createElement('div', 'moment-news__progress');
+    const dots = createElement('span', 'moment-news__dots');
+    dots.setAttribute('aria-hidden', 'true');
+    const dotNodes = Array.from({ length: total }, (_, index) => {
+      const node = createElement('span', `moment-news__dot-item${index === 0 ? ' is-active' : ''}`);
+      dots.append(node);
+      return node;
+    });
+    const counter = createElement('span', 'moment-news__counter', `第 1 / ${total} 条`);
+    progress.append(dots, counter);
+
+    const nextBtn = createButton('moment-news__next', total > 1 ? '下一条' : '结束播报');
+    nextBtn.setAttribute('data-moment-action', 'next');
+    footer.append(progress, nextBtn);
+
+    card.append(bar, screen, footer);
     this.root.append(card);
 
+    let currentIndex = 0;
+    let manualMode = false;
+    const durations = [3800, 4200, 4500];
+
+    const renderIndex = (index: number): void => {
+      currentIndex = index;
+      ticker.textContent = lines[index] ?? '';
+      counter.textContent = `第 ${index + 1} / ${total} 条`;
+      dotNodes.forEach((node, i) => node.classList.toggle('is-active', i === index));
+      nextBtn.textContent = index >= total - 1 ? '结束播报' : '下一条';
+    };
+
+    const scheduleAutoStep = (): void => {
+      this.clearTimers();
+      if (manualMode) return;
+      const waitMs = durations[currentIndex] ?? 4200;
+      this.schedule(waitMs, () => {
+        if (this.session !== session || manualMode) return;
+        if (currentIndex < total - 1) {
+          renderIndex(currentIndex + 1);
+          scheduleAutoStep();
+        } else {
+          this.finish(session, 'completed');
+        }
+      });
+    };
+
     const onClose = (): void => this.finish(session, 'completed');
+    const onNext = (): void => {
+      if (this.session !== session) return;
+      // 玩家主动点击翻页后取消自动关闭倒计时，将阅读节奏与关闭权交还给玩家
+      manualMode = true;
+      this.clearTimers();
+      if (currentIndex < total - 1) {
+        renderIndex(currentIndex + 1);
+      } else {
+        onClose();
+      }
+    };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (this.session !== session) return;
       if (!isShortcutKey(event, 'Escape')) return;
@@ -215,26 +297,18 @@ export class MomentView {
       event.stopImmediatePropagation();
       onClose();
     };
+
     close.addEventListener('click', onClose);
+    nextBtn.addEventListener('click', onNext);
     window.addEventListener('keydown', onKeyDown, true);
     this.cleanupActive = () => {
       close.removeEventListener('click', onClose);
+      nextBtn.removeEventListener('click', onNext);
       window.removeEventListener('keydown', onKeyDown, true);
     };
 
-    const durations = [3800, 4200];
-    let elapsed = 0;
-    lines.forEach((line, index) => {
-      if (index > 0) {
-        this.schedule(elapsed, () => {
-          if (this.session !== session) return;
-          ticker.textContent = line;
-        });
-      }
-      elapsed += durations[index] ?? 3600;
-    });
-    this.schedule(elapsed, () => this.finish(session, 'completed'));
-    close.focus();
+    scheduleAutoStep();
+    nextBtn.focus();
   }
 
   /** 追加 D - 最好结局：送画前林夏犹豫三次，等待完成送画；急着点击/追问则收回 */
@@ -354,27 +428,47 @@ export class MomentView {
       window.removeEventListener('keydown', onKeyDown, true);
     };
 
-    let elapsed = 180;
-    WORST_NOTIFICATIONS.forEach((item, index) => {
-      this.schedule(elapsed, () => {
+    // 使用低差异黄金角散点 + 轻量随机扰动，让弹窗先落满屏幕各处，随后层叠无规则堆积
+    const seed = Math.floor(Math.random() * 1000);
+    let elapsed = 160;
+    for (let index = 0; index < WORST_FLOOD_COUNT; index += 1) {
+      const item = WORST_NOTIFICATIONS[(index + (index >= WORST_NOTIFICATIONS.length ? seed % 7 : 0)) % WORST_NOTIFICATIONS.length];
+      const scheduledAt = elapsed;
+      this.schedule(scheduledAt, () => {
         if (this.session !== session) return;
-        const card = createElement('article', 'moment-flood__toast');
-        card.append(
+        const tighten = (index + 1) / WORST_FLOOD_COUNT;
+        const card = createElement('article', `moment-flood__toast moment-flood__toast--${item.tone}`);
+        const head = createElement('div', 'moment-flood__head');
+        head.append(
           createElement('span', 'moment-flood__source', item.source),
-          createElement('span', 'moment-flood__text', item.text),
+          createElement('span', 'moment-flood__time', index > 32 ? '刚刚' : `${Math.max(1, Math.round((1 - tighten) * 5))}秒前`),
         );
+        card.append(head, createElement('span', 'moment-flood__text', item.text));
+
+        // 使用二维 R2 低差异序列（塑胶常数倒数，X/Y 独立无对角关联）+ 随机扰动，覆盖全屏四角与中央并无规则堆叠
+        const h1 = (((index + 1) * 0.7548776662 + seed * 0.137) % 1 + 1) % 1;
+        const h2 = (((index + 1) * 0.569840291 + seed * 0.293) % 1 + 1) % 1;
+        const jitterX = (Math.random() - 0.5) * 14;
+        const jitterY = (Math.random() - 0.5) * 12;
+        const leftPct = Math.max(2, Math.min(96, 4 + h1 * 90 + jitterX));
+        const topPct = Math.max(4, Math.min(90, 5 + h2 * 82 + jitterY));
+        const tiltDeg = ((index % 2 === 0 ? 1 : -1) * (0.8 + ((index * 17 + seed) % 38) / 10)).toFixed(2);
+        card.style.left = `clamp(10px, calc(${leftPct.toFixed(1)}% - 155px), calc(100vw - 320px))`;
+        card.style.top = `clamp(14px, calc(${topPct.toFixed(1)}% - 38px), calc(100vh - 118px))`;
+        card.style.zIndex = String(index + 1);
+        card.style.setProperty('--toast-rot', `${tiltDeg}deg`);
+
         feed.append(card);
-        const tighten = (index + 1) / WORST_NOTIFICATIONS.length;
         vignette.style.opacity = String(0.24 + tighten * 0.76);
         vignette.style.setProperty('--moment-tighten', String(tighten));
-        if (tighten >= 0.5) this.root.classList.add('is-pressured');
-        this.onMessagePop?.(0.25 + tighten * 0.75);
+        if (tighten >= 0.48) this.root.classList.add('is-pressured');
+        this.onMessagePop?.(0.22 + tighten * 0.78);
       });
-      elapsed += WORST_INTERVALS_MS[index] ?? 70;
-    });
+      elapsed += WORST_INTERVALS_MS[index] ?? 40;
+    }
 
     // 所有通知同一瞬间全部熄灭
-    const extinguishAt = elapsed + 550;
+    const extinguishAt = elapsed + 650;
     this.schedule(extinguishAt, () => {
       if (this.session !== session) return;
       feed.replaceChildren();
@@ -406,9 +500,7 @@ export class MomentView {
     );
 
     const composer = createElement('div', 'moment-bystander__composer');
-    const input = createElement('input', 'moment-bystander__input');
-    input.type = 'text';
-    input.placeholder = '写点什么……';
+    const input = createElement('p', 'moment-bystander__input', '写点什么……');
     input.setAttribute('aria-label', '旧帖评论框');
     const cursor = createElement('span', 'moment-bystander__cursor');
     cursor.setAttribute('aria-hidden', 'true');
@@ -437,9 +529,9 @@ export class MomentView {
     const resolveChoice = (): void => {
       if (this.session !== session || resolved) return;
       resolved = true;
-      // 无论输入还是退出，都不发送、不保存输入，光标始终继续闪烁到最后。
-      input.value = '';
-      input.readOnly = true;
+      // 无论点发送还是退出，都不允许真实编辑输入，光标始终继续闪烁到最后。
+      input.textContent = '';
+      input.classList.add('is-resolved');
       submitBtn.disabled = true;
       exitBtn.disabled = true;
       card.classList.add('is-dimmed');
@@ -478,7 +570,7 @@ export class MomentView {
       continueBtn.removeEventListener('click', onContinue);
       window.removeEventListener('keydown', onKeyDown, true);
     };
-    input.focus();
+    submitBtn.focus();
   }
 
   /** 追加 D - 参与者结局：黑幕浏览数上滚 → 林夏座位 → 回到发玩笑时刻 → 归零再滚一遍 */

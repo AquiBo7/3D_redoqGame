@@ -22,6 +22,7 @@ vi.mock('./materials', () => {
     getFacadeTileMaterial: material,
     getFacadeWindowMaterial: material,
     getStoreInteriorMaterial: material,
+    getBakeryInteriorMaterial: material,
     getWarmLampGlowMaterial: () => ({ map: new THREE.Texture() }),
   };
 });

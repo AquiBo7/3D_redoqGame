@@ -1,5 +1,10 @@
-/* 回望：纸张、墨色与细线，长页在移动横竖屏中自然滚动。 */
+/* 结局回望页：延续启动页的轻瓷白晨雾画廊与细线取景审美，兼顾长页舒适阅读 */
 .chapter-end {
+  --ce-ink: #1f2745;
+  --ce-muted: #5a6473;
+  --ce-amber: #d97724;
+  --ce-line: rgba(31, 39, 69, 0.15);
+
   position: fixed;
   inset: 0;
   z-index: 15;
@@ -8,16 +13,43 @@
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding: 28px calc(24px + env(safe-area-inset-right, 0px))
-    calc(48px + env(safe-area-inset-bottom, 0px))
+    calc(56px + env(safe-area-inset-bottom, 0px))
     calc(24px + env(safe-area-inset-left, 0px));
-  background: #e9e5dc;
-  color: #38433e;
+  background:
+    radial-gradient(64% 48% at 18% 14%, rgba(240, 138, 36, 0.09), transparent 68%),
+    radial-gradient(56% 44% at 86% 24%, rgba(127, 130, 216, 0.08), transparent 70%),
+    radial-gradient(120% 95% at 50% 24%, #faf7f0 32%, #e9e4da 100%);
+  color: #2f3848;
   font-family: var(--yt-font-sans, sans-serif);
   font-size: 15px;
   line-height: 1.9;
   pointer-events: auto;
   overflow-wrap: anywhere;
-  animation: chapter-end-in .35s ease both;
+  animation: chapter-end-in .45s var(--yt-ease, ease) both;
+}
+
+/* 动态氛围微环装饰（纯背景层，不阻挡点击） */
+.chapter-end::before {
+  content: '';
+  position: fixed;
+  top: -120px;
+  right: -120px;
+  width: 440px;
+  height: 440px;
+  border-radius: 50%;
+  border: 1px dashed rgba(31, 39, 69, 0.10);
+  pointer-events: none;
+  animation: chapter-end-orbit 54s linear infinite;
+}
+
+.chapter-end::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: var(--yt-grain);
+  background-size: 160px 160px;
+  opacity: 0.035;
+  pointer-events: none;
 }
 
 .chapter-end *,
@@ -27,81 +59,156 @@
 .chapter-end [hidden] { display: none; }
 
 .chapter-end__card {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: 1040px;
   margin: 0 auto;
-  padding: clamp(20px, 4vw, 52px);
-  background: #f8f4ea;
-  border: 1px solid #d6d1c4;
-  box-shadow: 0 12px 40px #4447360a;
+  padding: clamp(24px, 4vw, 54px);
+  background: linear-gradient(180deg, rgba(255, 253, 249, 0.92), rgba(248, 244, 234, 0.95));
+  border: 1px solid var(--ce-line);
+  border-top: 2px solid rgba(31, 39, 69, 0.28);
+  box-shadow: 0 24px 60px rgba(31, 39, 69, 0.08);
+  animation: chapter-end-rise .55s var(--yt-ease, ease) both;
 }
 
-.chapter-end__hero { display: grid; grid-template-columns: 1.35fr 1fr; gap: 32px; align-items: center; }
-.chapter-end__figure { margin: 0; min-width: 0; }
-.chapter-end__figure img { display: block; width: 100%; object-fit: contain; border: 1px solid #d8d1c0; }
-.chapter-end__caption { color: #636a60; font-size: 12px; line-height: 1.8; margin: 12px 0 0; }
-.chapter-end__eyebrow { font-size: 11px; letter-spacing: .2em; color: #647160; margin: 0 0 18px; }
+.chapter-end__hero {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 36px;
+  align-items: center;
+}
+
+/* 截图/画作定格区加“取景裁切角标”与悬浮微阴影 */
+.chapter-end__figure {
+  position: relative;
+  margin: 0;
+  min-width: 0;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(31, 39, 69, 0.12);
+  box-shadow: 0 14px 36px rgba(31, 39, 69, 0.08);
+}
+.chapter-end__figure::before,
+.chapter-end__figure::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+}
+.chapter-end__figure::before {
+  top: -4px; left: -4px;
+  border-top-width: 2px; border-left-width: 2px;
+  border-color: var(--ce-ink);
+}
+.chapter-end__figure::after {
+  bottom: -4px; right: -4px;
+  border-bottom-width: 2px; border-right-width: 2px;
+  border-color: var(--ce-amber);
+}
+.chapter-end__figure img { display: block; width: 100%; object-fit: contain; border: 1px solid rgba(31, 39, 69, 0.1); }
+.chapter-end__caption { color: var(--ce-muted); font-size: 12px; line-height: 1.8; margin: 12px 0 0; }
+.chapter-end__eyebrow { font-size: 11px; letter-spacing: .2em; color: #717b8d; margin: 0 0 16px; }
 .chapter-end__title {
   margin: 0;
-  color: #374b40;
+  color: var(--ce-ink);
   font-family: var(--yt-font-serif, serif);
   font-weight: 600;
   font-size: clamp(26px, 3.4vw, 38px);
-  line-height: 1.55;
+  line-height: 1.5;
   letter-spacing: .08em;
 }
-.chapter-end__note { margin: 18px 0 0; color: #596252; }
-.chapter-end__section { margin-top: 36px; padding-top: 24px; border-top: 1px solid #d7d2c6; }
-.chapter-end__heading { margin: 0 0 18px; font-family: var(--yt-font-serif, serif); font-size: 18px; font-weight: 600; letter-spacing: .06em; }
-.chapter-end__subheading { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: #465e4e; }
+.chapter-end__note { margin: 16px 0 0; color: #4e5968; }
+.chapter-end__section { margin-top: 38px; padding-top: 26px; border-top: 1px solid var(--ce-line); }
+.chapter-end__heading {
+  position: relative;
+  margin: 0 0 18px;
+  font-family: var(--yt-font-serif, serif);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--ce-ink);
+}
+.chapter-end__subheading { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: #364564; }
 .chapter-end p { margin-top: 0; }
 .chapter-end__columns { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
 .chapter-end__epilogue p { margin-bottom: 0; }
-.chapter-end__insight { margin: 24px 0 0; padding: 12px 0 12px 20px; border-left: 2px solid #99aa91; font-family: var(--yt-font-serif, serif); font-size: 18px; }
+.chapter-end__insight {
+  margin: 24px 0 0;
+  padding: 12px 0 12px 20px;
+  border-left: 2.5px solid var(--ce-amber);
+  font-family: var(--yt-font-serif, serif);
+  font-size: 18px;
+  color: var(--ce-ink);
+  background: linear-gradient(90deg, rgba(217, 119, 36, 0.07), transparent 65%);
+}
 
 .chapter-end__footprints summary { min-height: 44px; padding: 8px 0; margin: 0; cursor: pointer; }
 .chapter-end__footprint-list,
 .chapter-end__drafts,
 .chapter-end__actions { list-style: none; padding: 0; margin: 20px 0 0; }
-.chapter-end__footprint { padding: 16px 0; border-bottom: 1px dashed #d7d2c6; }
+.chapter-end__footprint { padding: 16px 0; border-bottom: 1px dashed var(--ce-line); }
 .chapter-end__footprint p { margin-bottom: 6px; }
-.chapter-end__records { padding-left: 1.25em; margin: 10px 0 0; color: #5a645b; font-size: 14px; }
+.chapter-end__records { padding-left: 1.25em; margin: 10px 0 0; color: var(--ce-muted); font-size: 14px; }
 .chapter-end__drafts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.chapter-end__draft { padding: 20px; border: 1px solid #d9d5c8; background: #f1efe4; }
+.chapter-end__draft {
+  padding: 20px;
+  border: 1px solid rgba(31, 39, 69, 0.14);
+  border-left: 2.5px solid rgba(217, 119, 36, 0.55);
+  background: rgba(255, 255, 255, 0.65);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.chapter-end__draft:hover { transform: translateY(-2px); border-color: rgba(217, 119, 36, 0.75); }
 .chapter-end__draft p { margin-bottom: 0; font-family: var(--yt-font-serif, serif); }
 .chapter-end__draft-figure { margin: 12px 0 0; }
-.chapter-end__draft-figure img { display: block; width: 100%; border: 1px solid #d8d1c0; }
-.chapter-end__draft--locked { background: transparent; border-style: dashed; color: #687065; }
-.chapter-end__draft--locked .chapter-end__subheading { color: #687065; }
+.chapter-end__draft-figure img { display: block; width: 100%; border: 1px solid rgba(31, 39, 69, 0.12); }
+.chapter-end__draft--locked { background: transparent; border-style: dashed; border-left-style: dashed; border-left-width: 1px; color: #6c7380; }
+.chapter-end__draft--locked:hover { transform: none; border-color: rgba(31, 39, 69, 0.14); }
+.chapter-end__draft--locked .chapter-end__subheading { color: #6c7380; }
 .chapter-end__actions { counter-reset: action; }
 .chapter-end__action { position: relative; padding: 12px 0 12px 42px; counter-increment: action; }
-.chapter-end__action::before { content: counter(action, decimal-leading-zero); position: absolute; left: 0; color: #667b62; font-size: 13px; }
+.chapter-end__action::before {
+  content: counter(action, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  color: var(--ce-amber);
+  font-size: 13px;
+  font-weight: 600;
+}
 .chapter-end__action p { margin-bottom: 0; }
 
-/* 关键节点三视角清单：沿用草稿箱的纸张语言，窄屏自动折成单栏。 */
+/* 关键节点三视角清单 */
 .chapter-end__tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
 .chapter-end__tab {
   min-height: 44px;
-  padding: 8px 14px;
-  border: 1px solid #cfd4c6;
-  background: transparent;
-  color: #4a5a4e;
+  padding: 8px 16px;
+  border: 1px solid rgba(31, 39, 69, 0.18);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ce-ink);
   font: inherit;
   font-size: 13px;
   letter-spacing: .04em;
   cursor: pointer;
   touch-action: manipulation;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
-.chapter-end__tab[aria-pressed="true"] { background: #dfe7d6; border-color: #9fae96; color: #2f4436; }
+.chapter-end__tab[aria-pressed="true"] {
+  background: var(--ce-ink);
+  border-color: var(--ce-ink);
+  color: #faf7f0;
+}
 .chapter-end__node-list { margin-top: 8px; }
-.chapter-end__node { padding: 20px 0; border-bottom: 1px dashed #d7d2c6; }
+.chapter-end__node { padding: 20px 0; border-bottom: 1px dashed var(--ce-line); }
 .chapter-end__node:last-child { border-bottom: 0; }
 .chapter-end__node-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
 .chapter-end__node-head .chapter-end__subheading { margin-bottom: 0; font-size: 15px; }
 .chapter-end__stamp {
   padding: 2px 8px;
-  border: 1px solid #b9a684;
-  color: #7a6444;
+  border: 1px solid rgba(217, 119, 36, 0.55);
+  color: var(--ce-amber);
   font-size: 11px;
   letter-spacing: .12em;
 }
@@ -111,37 +218,99 @@
   gap: 14px;
   margin-top: 14px;
 }
-.chapter-end__perspective { padding: 14px 16px; border: 1px solid #ded9cb; background: #f2efe4; }
-.chapter-end__perspective-label { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .06em; color: #647160; }
+.chapter-end__perspective { padding: 14px 16px; border: 1px solid rgba(31, 39, 69, 0.12); background: rgba(255, 255, 255, 0.6); }
+.chapter-end__perspective-label { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .06em; color: #54627e; }
 .chapter-end__perspective p { margin: 0; font-size: 14px; line-height: 1.85; }
-.chapter-end__node-law { margin: 12px 0 0; color: #5a645b; font-size: 12.5px; line-height: 1.8; }
+.chapter-end__node-law { margin: 12px 0 0; color: var(--ce-muted); font-size: 12.5px; line-height: 1.8; }
 
-.chapter-end__footer { margin-top: 32px; padding-top: 24px; border-top: 1px solid #d7d2c6; }
+.chapter-end__compare {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--ce-line);
+}
+.chapter-end__compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 12px;
+  align-items: start;
+}
+.chapter-end__compare-card {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid rgba(31, 39, 69, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  box-shadow: 0 10px 26px rgba(31, 39, 69, 0.06);
+}
+.chapter-end__compare-card--photo {
+  background: #eaedf0;
+  border-color: #cfd5dc;
+}
+.chapter-end__compare-frame {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.chapter-end__compare-card--photo img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.chapter-end__compare-card .chapter-end__caption {
+  margin-top: 0;
+  text-align: center;
+  font-family: var(--yt-font-serif);
+  font-size: 14px;
+  color: var(--ce-ink);
+}
+
+.chapter-end__footer { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--ce-line); }
 .chapter-end__navigation { display: flex; flex-wrap: wrap; gap: 10px; }
 .chapter-end__button {
   min-height: 44px;
   max-width: 100%;
   padding: 10px 18px;
-  border: 1px solid #aeb8a6;
-  border-radius: 2px;
-  background: transparent;
-  color: #3d5546;
+  border: 1px solid rgba(31, 39, 69, 0.22);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ce-ink);
   font: inherit;
   font-size: 14px;
   line-height: 1.5;
   white-space: normal;
   cursor: pointer;
   touch-action: manipulation;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
-.chapter-end__button:hover { background: #e5e9da; }
-.chapter-end__retry { display: block; margin: 0 0 16px; background: #dfe7d6; }
+.chapter-end__button:hover { background: #fff; border-color: var(--ce-amber); transform: translateY(-1px); }
+.chapter-end__retry {
+  display: block;
+  margin: 0 0 18px;
+  padding: 12px 32px;
+  border: 0;
+  clip-path: polygon(16px 0%, calc(100% - 16px) 0%, 100% 50%, calc(100% - 16px) 100%, 16px 100%, 0% 50%);
+  background: linear-gradient(120deg, #1f2745 0%, #31406e 60%, #b86220 100%);
+  color: #faf7f0;
+  font-family: var(--yt-font-serif, serif);
+  letter-spacing: .16em;
+}
+.chapter-end__retry:hover {
+  background: linear-gradient(120deg, #273258 0%, #3d4d82 55%, #d97724 100%);
+  color: #fff;
+}
 .chapter-end__button:focus-visible,
 .chapter-end summary:focus-visible,
-.chapter-end__title:focus-visible { outline: 2px solid #567452; outline-offset: 4px; }
+.chapter-end__title:focus-visible { outline: 2px solid var(--ce-amber); outline-offset: 4px; }
 
 @media (max-width: 680px) {
   .chapter-end { padding-top: 12px; padding-left: calc(12px + env(safe-area-inset-left, 0px)); padding-right: calc(12px + env(safe-area-inset-right, 0px)); }
-  .chapter-end__hero, .chapter-end__columns, .chapter-end__drafts { grid-template-columns: 1fr; gap: 20px; }
+  .chapter-end__hero, .chapter-end__columns, .chapter-end__drafts, .chapter-end__compare-grid { grid-template-columns: 1fr; gap: 20px; }
   .chapter-end__card { padding: 20px; }
   .chapter-end__section { margin-top: 26px; }
   .chapter-end__button { flex: 1 1 42%; }
@@ -155,4 +324,11 @@
   .chapter-end__hero { gap: 24px; }
 }
 @keyframes chapter-end-in { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .chapter-end { animation: none; } }
+@keyframes chapter-end-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes chapter-end-orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .chapter-end, .chapter-end::before, .chapter-end__card, .chapter-end__draft, .chapter-end__button {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -2,7 +2,12 @@
 import type { EventBus, GameEvents } from '../core/eventBus';
 import { ASSET_MANIFEST, type AssetId } from '../data/assetManifest';
 import type { SceneId, SpeakerId } from '../data/storySchema';
-import { renderAssetImage } from './assetImage';
+import {
+  renderAssetImage,
+  renderLinPaintingCard,
+  resolveLinPaintingFlags,
+  type LinPaintingState,
+} from './assetImage';
 import './stage2d.css';
 
 const BACKGROUNDS: Partial<Record<SceneId, AssetId>> = {
@@ -178,7 +183,7 @@ export class ArtView {
     container.append(this.root);
   }
 
-  show({ stepId, assetId }: { stepId: string; assetId: string }): void {
+  show({ stepId, assetId }: { stepId: string; assetId: string }, paintingState?: LinPaintingState): void {
     if (this.disposed) return;
     const previous = this.session ? this.previousFocus : this.doc.activeElement as HTMLElement | null;
     this.hide();
@@ -189,7 +194,9 @@ export class ArtView {
     panel.className = 'art-view__panel';
     const figure = this.doc.createElement('figure');
     figure.className = 'art-view__figure';
-    if (Object.prototype.hasOwnProperty.call(ASSET_MANIFEST, assetId)) {
+    if (assetId === 'cg_ending_best_drawing') {
+      renderLinPaintingCard(figure, resolveLinPaintingFlags(paintingState));
+    } else if (Object.prototype.hasOwnProperty.call(ASSET_MANIFEST, assetId)) {
       renderAssetImage(assetId as AssetId, figure);
     } else {
       const fallback = this.doc.createElement('p');

@@ -98,10 +98,14 @@ export class CutscenePlayer {
     return this.active !== null;
   }
 
+  isAnimating(): boolean {
+    return this.active !== null && this.preparationTimer === 0;
+  }
+
   private play(payload: CutscenePayload): void {
     this.cancel();
     this.active = { stepId: payload.stepId, key: payload.key };
-    const preparationMs = payload.key === 's3-run' ? this.getExitAnchor()?.preparationMs ?? 0 : 0;
+    const preparationMs = payload.immediate ? 0 : payload.key === 's3-run' ? this.getExitAnchor()?.preparationMs ?? 0 : 0;
     if (preparationMs > 0) {
       this.preparationTimer = window.setTimeout(() => {
         this.preparationTimer = 0;

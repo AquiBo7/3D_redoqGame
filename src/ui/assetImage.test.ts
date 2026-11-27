@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ASSET_MANIFEST, PHOTO_CROP, PHOTO_HOTSPOT, READY_EXTERNAL_ASSETS, type AssetId } from '../data/assetManifest';
-import { assetSource, renderAssetImage } from './assetImage';
+import { ASSETS, assetSource, renderAssetImage, renderLinPaintingCard, resolveLinPaintingFlags } from './assetImage';
 
 const ids = Object.keys(ASSET_MANIFEST) as AssetId[];
 const originalReady = { ...READY_EXTERNAL_ASSETS };
@@ -140,12 +140,98 @@ describe('Phase A 美术图片 API', () => {
     expect(best).toContain('data-motif="complete-companionship"');
     expect(best).toContain('data-motif="father-watching"');
     expect(best).toContain('data-motif="orange-dot"');
+    expect(best).toContain('viewBox="0 0 300 400"');
     expect(best).not.toContain('<text');
     const middle = svg('cg_ending_middle_sketch');
     expect(middle).toContain('data-motif="unfinished-empty-steps"');
+    expect(middle).toContain('stroke="#6b6b6b"');
     expect(middle).not.toContain('walking-back');
+    expect(middle).not.toContain('<text');
     expect(svg('cg_ending_bystander_seat')).not.toContain('unfinished-empty-steps');
     expect(svg('portrait_linxia_smile')).toContain('M284 281Q301 292 318 279');
     expect(svg('portrait_ayuan')).toContain('fill="#cc8153"');
+  });
+
+  it('ASSETS.lin_painting 与 renderLinPaintingCard 根据状态绘制橙点、保安亭与高好感背面字迹', () => {
+    const renderSvg = ASSETS.lin_painting as (state?: Record<string, unknown>) => string;
+    expect(typeof renderSvg).toBe('function');
+
+    const base = renderSvg({ joined: false, guardWilling: false, trust: 5 });
+    expect(base).toContain('viewBox="0 0 300 400"');
+    expect(base).toContain('#f3ead8');
+    expect(base).toContain('#f2c94c');
+    expect(base).toContain('#8c8cf0');
+    expect(base).toContain('#1f2745');
+    expect(base).not.toContain('orange-dot');
+    expect(base).not.toContain('guard-booth');
+    expect(base).not.toContain('<text');
+
+    const full = renderSvg({ outcome: '入队', guardWilling: true, trust: 7 });
+    expect(full).toContain('data-motif="orange-dot"');
+    expect(full).toContain('fill="#f08a24"');
+    expect(full).toContain('data-motif="guard-booth"');
+    expect(full).not.toContain('<text');
+
+    expect(resolveLinPaintingFlags({ joined: true, guardWilling: false, trust: 6 })).toEqual({
+      hasOrangeDot: true,
+      hasGuardBooth: false,
+      canFlip: false,
+    });
+    expect(resolveLinPaintingFlags({ outcome: '入队', guardWilling: true, trust: 7 })).toEqual({
+      hasOrangeDot: true,
+      hasGuardBooth: true,
+      canFlip: true,
+    });
+
+    // 验证独立卡片 DOM：未达最高好感不可翻面，trust >= 7 可翻面显示“开学第一天。”
+    const makeDom = () => {
+      const listeners = new Map<string, Array<(e?: unknown) => void>>();
+      const makeEl = (tag: string) => {
+        const el: Record<string, unknown> = {
+          tagName: tag.toUpperCase(),
+          className: '',
+          textContent: '',
+          dataset: {},
+          style: {},
+          attributes: {} as Record<string, string>,
+          children: [] as unknown[],
+          tabIndex: 0,
+          draggable: true,
+          append: (...nodes: unknown[]) => { (el.children as unknown[]).push(...nodes); },
+          setAttribute: (k: string, v: string) => { (el.attributes as Record<string, string>)[k] = v; },
+          addEventListener: (type: string, fn: (e?: unknown) => void) => {
+            const list = listeners.get(type) ?? [];
+            list.push(fn);
+            listeners.set(type, list);
+          },
+        };
+        return el;
+      };
+      const container = makeEl('div');
+      container.ownerDocument = { createElement: makeEl };
+      return { container: container as unknown as HTMLElement, listeners };
+    };
+
+    const lockedDom = makeDom();
+    const lockedCard = renderLinPaintingCard(lockedDom.container, { hasOrangeDot: true, hasGuardBooth: false, canFlip: false }) as unknown as {
+      className: string;
+      children: Array<{ children: Array<Record<string, unknown>> }>;
+    };
+    expect(lockedCard.className).toBe('lin-painting');
+    expect(lockedCard.children[0].children).toHaveLength(1);
+
+    const flipDom = makeDom();
+    const flipCard = renderLinPaintingCard(flipDom.container, { hasOrangeDot: true, hasGuardBooth: true, canFlip: true }) as unknown as {
+      className: string;
+      attributes: Record<string, string>;
+      children: Array<{ children: Array<Record<string, unknown>> }>;
+    };
+    expect(flipCard.className).toContain('lin-painting--flippable');
+    const back = flipCard.children[0].children[1] as { children: Array<{ textContent: string }> };
+    expect(back.children[0].textContent).toBe('开学第一天。');
+    expect(back.children[0].textContent).not.toContain('谢谢');
+    for (const fn of flipDom.listeners.get('click') ?? []) fn();
+    expect(flipCard.className).toContain('is-flipped');
+    expect(flipCard.attributes['aria-pressed']).toBe('true');
   });
 });

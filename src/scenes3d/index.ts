@@ -9,7 +9,7 @@ import type { SceneRuntime, WorldSceneDefinition } from '../world/worldSceneType
 import { buildingRuntime, createBuildingDefinition } from './building';
 import { createDeskDefinition, deskRuntime } from './desk';
 import { createGateDefinition, gateRuntime } from './gate';
-import { createRoomDefinition } from './room';
+import { createRoomDefinition, roomRuntime } from './room';
 import { createStreetDefinition, streetRuntime } from './street';
 
 let canteen: typeof import('./canteen') | null = null;
@@ -72,6 +72,10 @@ export function getSceneDefinition(sceneId: SceneId): WorldSceneDefinition {
 export function getSceneRuntime(sceneId: SceneId): SceneRuntime | null {
   if (INTERIOR_SCENES.includes(sceneId)) return interior?.schoolInteriorRuntime ?? null;
   switch (sceneId) {
+    case 'S1':
+    case 'S2':
+    case 'S3':
+      return roomRuntime;
     case 'S12':
     case 'S13':
       return canteen?.canteenRuntime ?? null;

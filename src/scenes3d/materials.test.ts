@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHARED_RESOURCE_FLAG } from '../world/resources';
 import {
-  disposeMaterialCache, getFabricMaterial, getFacadeBrickMaterial,
+  disposeMaterialCache, getBakeryInteriorMaterial, getFabricMaterial, getFacadeBrickMaterial,
   getFacadeConcreteMaterial, getFacadeTileMaterial, getFacadeWindowMaterial,
   getPlasterMaterial, getStoreInteriorMaterial,
   getWarmLampGlowMaterial, getWoodFloorMaterial, isGroundedActor,
@@ -228,8 +228,10 @@ describe('卧室程序化 PBR 纹理与所有权', () => {
     const brick = getFacadeBrickMaterial({ repeatX: 3, repeatY: 2 });
     const win = getFacadeWindowMaterial();
     const interior = getStoreInteriorMaterial();
+    const bakery = getBakeryInteriorMaterial();
 
     expect(getFacadeTileMaterial({ repeatX: 3, repeatY: 2 })).toBe(tile);
+    expect(getBakeryInteriorMaterial()).toBe(bakery);
     expect(tile.roughnessMap).toBeInstanceOf(THREE.CanvasTexture);
     expect(tile.roughnessMap!.colorSpace).toBe(THREE.NoColorSpace);
     expect(concrete.roughness).toBeGreaterThanOrEqual(0.85);
@@ -237,6 +239,7 @@ describe('卧室程序化 PBR 纹理与所有权', () => {
     expect(win.roughness).toBeLessThan(0.3);
     expect(interior.emissiveMap).toBe(interior.map);
     expect(interior.emissiveIntensity).toBeLessThanOrEqual(0.4);
+    expect(bakery.emissiveMap).toBe(bakery.map);
 
     const resources = [
       tile, tile.map!, tile.roughnessMap!,
@@ -244,6 +247,7 @@ describe('卧室程序化 PBR 纹理与所有权', () => {
       brick, brick.map!,
       win, win.map!,
       interior, interior.map!,
+      bakery, bakery.map!,
     ];
     const spies = resources.map((resource) => {
       expect(resource.userData[SHARED_RESOURCE_FLAG]).toBe(true);

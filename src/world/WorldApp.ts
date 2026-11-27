@@ -34,6 +34,7 @@ import {
 } from './resources';
 import { WorldHud } from './WorldHud';
 import type {
+  SceneLightingSettings,
   SceneRuntime,
   SceneRuntimeContext,
   WorldSceneDefinition,
@@ -51,8 +52,12 @@ const MOBILE_PIXEL_RATIO = 1.5;
 const INTEGRATED_GPU_PIXEL_RATIO = 1.25;
 /** 独显桌面端像素比上限（兼顾清晰度与帧率，避免 2x 高分屏填充率过载卡顿） */
 const DESKTOP_PIXEL_RATIO = 1.5;
+/** 核显高分屏物理像素总预算上限（1080p 原生锐利清晰度，避免 2K/4K 缩放屏触发数百万 4×MSAA 像素填充崩盘） */
+const INTEGRATED_MAX_RENDER_PIXELS = 1920 * 1080;
+/** 独显高分屏物理像素总预算上限（2K QHD 级锐利清晰度，防止 4K 150% 缩放屏过载） */
+const DESKTOP_MAX_RENDER_PIXELS = 2560 * 1440;
 /** 核显 / 移动端低功耗 GPU 特征匹配（用于关闭离屏 MSAA 与收紧像素比） */
-const INTEGRATED_GPU_PATTERN = /Radeon\(TM\)\s*610M|Radeon\s*\d{3}M|Intel.*(UHD|Iris|HD Graphics)|Mali|Adreno/i;
+const INTEGRATED_GPU_PATTERN = /Radeon(\(TM\))?\s*(Graphics|\d{3}M)|Intel.*(UHD|Iris|Arc|HD Graphics)|GeForce\s*MX|Mali|Adreno/i;
 /** 切图黑幕淡出 / 淡入时长（秒） */
 const FADE_OUT_SEC = 0.4;
 const FADE_IN_SEC = 0.55;
@@ -124,9 +129,6 @@ const DAWN_PARTICLE_COLORS = [
   new THREE.Color(0xc5d99c),
 ];
 const SUN_DIRECTION = new THREE.Vector3(-11, 6.5, 9).normalize();
-// 阴影贴图的两轴（与 three 的 lookAt 基一致），用于把跟随量按纹素对齐
-const SUN_SHADOW_RIGHT = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), SUN_DIRECTION).normalize();
-const SUN_SHADOW_UP = new THREE.Vector3().crossVectors(SUN_DIRECTION, SUN_SHADOW_RIGHT).normalize();
 
 export function smoothAtmosphereProgress(progress: number): number {
   const t = Number.isNaN(progress) ? 0 : Math.max(0, Math.min(1, progress));
@@ -142,7 +144,8 @@ const SKY_VERTEX_SHADER = /* glsl */ `
   varying vec3 vDir;
   void main() {
     vDir = position;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = clipPos.xyww;
   }
 `;
 
@@ -218,8 +221,10 @@ export interface WorldAppOptions {
 
 function disposeObjectTree(root: THREE.Object3D): void {
   const children = [...root.children];
+  const skeletons = new Set<THREE.Skeleton>();
   for (const child of children) {
     child.traverse((object) => {
+      if (object instanceof THREE.SkinnedMesh) skeletons.add(object.skeleton);
       if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
         // 共享模板资源（角色模型缓存）：几何跳过销毁；未共享的材质（如纯色覆盖）仍需释放
         if (object.geometry.userData[SHARED_RESOURCE_FLAG] !== true) {
@@ -233,6 +238,7 @@ function disposeObjectTree(root: THREE.Object3D): void {
     });
     root.remove(child);
   }
+  skeletons.forEach((skeleton) => skeleton.dispose());
 }
 
 export class WorldApp {
@@ -249,6 +255,10 @@ export class WorldApp {
   private readonly skyDome: THREE.Mesh;
   private readonly skyMaterial: THREE.ShaderMaterial;
   private readonly sun = new THREE.DirectionalLight(0xffd29b, 2.05);
+  private sunDirection = SUN_DIRECTION.clone();
+  private sunShadowRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), this.sunDirection).normalize();
+  private sunShadowUp = new THREE.Vector3().crossVectors(this.sunDirection, this.sunShadowRight).normalize();
+  private sceneLighting: SceneLightingSettings | null = null;
   /** 夜色开关要同时改半球光，故把建光时的那盏留成字段 */
   private hemisphereLight: THREE.HemisphereLight | null = null;
   private readonly nightMode: boolean;
@@ -270,8 +280,12 @@ export class WorldApp {
   private readonly unsubscribers: Array<() => void> = [];
   /** 纯触摸设备：不显示桌面准星引导 / 疾跑角标（触屏笔记本仍按桌面处理） */
   private readonly pureTouch: boolean;
+  /** 是否粗指针触控设备（用于保持手机端 DPR 红线） */
+  private readonly isCoarsePointer: boolean;
   /** 是否命中核显特征（收紧像素比上限并关闭离屏 MSAA，零画质感知损失） */
   private readonly integratedGpu: boolean;
+  /** 当前硬件档位是否允许主阳光开启实时阴影 */
+  private readonly sunCanCastShadow: boolean;
 
   private currentSceneId: SceneId;
   private currentDefinition: WorldSceneDefinition;
@@ -291,6 +305,8 @@ export class WorldApp {
   private initialMounted = false;
   /** 首屏黑幕是否已开始淡入（保证只执行一次） */
   private initialFadeDone = false;
+  /** 最近一次淡入完成并正式呈现给玩家的场景 ID */
+  private presentedSceneId: SceneId | null = null;
   private disposed = false;
   /** 当前 2D 模态界面是否阻塞控制（同步 ui:worldBlocked / lockControls） */
   private modalBlocked = false;
@@ -302,9 +318,19 @@ export class WorldApp {
   private readonly scratchWorldPos = new THREE.Vector3();
   private readonly scratchShadowFocus = new THREE.Vector3();
   private readonly scratchShadowAnchor = new THREE.Vector3();
+  private readonly lastShadowFocus = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  private readonly lastShadowAnchor = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
+  private shadowRefreshTimer = 0;
+  private modalRenderAccum = 0;
+  private smoothedFps = 60;
+  private fpsEmitTimer = 0;
+  private lowFpsDuration = 0;
+  private sceneStableTimer = 0;
+  private degraded = false;
 
   constructor(container: HTMLElement, options: WorldAppOptions = {}) {
     const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+    this.isCoarsePointer = isCoarsePointer;
     this.pureTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     this.bus = options.bus ?? defaultEventBus;
     this.currentSceneId = options.sceneId ?? 'S1';
@@ -312,17 +338,16 @@ export class WorldApp {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.integratedGpu = this.detectIntegratedGpu();
-    const maxPixelRatio = isCoarsePointer
-      ? MOBILE_PIXEL_RATIO
-      : this.integratedGpu
-        ? INTEGRATED_GPU_PIXEL_RATIO
-        : DESKTOP_PIXEL_RATIO;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+    this.sunCanCastShadow = getQualityTier() !== 'low';
+    this.renderer.setPixelRatio(this.computePixelRatio(window.innerWidth, window.innerHeight));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.94;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // 手动脏标记阴影重绘：避免玩家静止或 165Hz 桌面高刷下每帧无意义重建 2048² 阴影贴图
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
@@ -342,6 +367,7 @@ export class WorldApp {
       vertexShader: SKY_VERTEX_SHADER,
       fragmentShader: SKY_FRAGMENT_SHADER,
       side: THREE.BackSide,
+      depthFunc: THREE.LessEqualDepth,
       depthWrite: false,
       fog: false,
     });
@@ -351,6 +377,8 @@ export class WorldApp {
     );
     this.skyDome.name = 'morning-sky';
     this.skyDome.frustumCulled = false;
+    // 在不透明几何体写完深度之后最后绘制天空球，利用硬件 Early-Z 跳过被建筑/墙体/地面遮挡的 90%+ 像素噪声计算
+    this.skyDome.renderOrder = 1;
     this.scene.add(this.skyDome);
     this.scene.add(this.levelGroup);
     this.updateSkyHaze(this.baseHaze);
@@ -391,6 +419,7 @@ export class WorldApp {
           this.syncHudHints();
         },
         onSprintToggleChange: () => this.syncHudHints(),
+        onInputTakeover: () => this.bus.emit('world:inputTakeover'),
       },
     });
 
@@ -428,7 +457,7 @@ export class WorldApp {
     this.unsubscribers.push(
       this.bus.on('scene:transition', (payload) => this.handleSceneTransition(payload)),
       this.bus.on('state:changed', ({ state }) => {
-        this.storyFlags = { noticedTyper: state.noticedTyper, joined: state.joined };
+        this.storyFlags = { noticedTyper: state.noticedTyper || state.orangeClue, joined: state.joined };
       }),
       this.bus.on('scene:interactionOptions', (payload) => {
         this.interactionOptions = payload;
@@ -436,6 +465,12 @@ export class WorldApp {
       }),
       this.bus.on('ui:worldBlocked', ({ blocked }) => {
         this.modalBlocked = blocked;
+      }),
+      this.bus.on('scene:interact', ({ sceneId, targetId }) => {
+        if ((sceneId === 'S3' && (targetId === 'culture-shirt' || targetId === 'document-bag'))
+          || (sceneId === 'S7' && targetId === 'medicine-bag')) {
+          this.hud.showPickupToast('已放入口袋');
+        }
       }),
     );
 
@@ -446,6 +481,7 @@ export class WorldApp {
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__worldApp = {
         getSceneId: () => this.currentSceneId,
+        getPresentedSceneId: () => this.presentedSceneId,
         getPlayerPosition: () => ({ feet: this.controller.getFeetPosition(), camera: this.camera.position.toArray(), direction: this.camera.getWorldDirection(new THREE.Vector3()).toArray(), enabled: this.controller.isEnabled() }),
         /**
          * 美术验收三件套。renderer.info.render 在后期合成的最后一个全屏 pass 会被重置成 1，
@@ -689,6 +725,8 @@ export class WorldApp {
     this.currentRuntime?.enter(this.createRuntimeContext(sceneId));
     this.currentRuntime?.setNight?.(this.nightMode);
     this.applyInteractionOptions();
+    // 在雾效与场景运行时灯光全部就绪后、黑幕淡入前预编译精确的最终着色器变体，消除首次转头时的 D3D11 编译顿挫
+    this.renderer?.compile(this.scene, this.camera);
     if (sceneId === 'S4') this.bus.emit('ui:showObjective', { sceneId });
     this.syncHudHints();
     this.initialMounted = true;
@@ -717,7 +755,17 @@ export class WorldApp {
     if (!this.initialMounted) return;
     if (this.cutscenePlayer.isPlaying() || this.pendingDefinition !== null) return;
     this.initialFadeDone = true;
-    gsap.to(this.fadeEl, { opacity: 0, duration: INITIAL_FADE_SEC, ease: 'power1.out' });
+    gsap.to(this.fadeEl, {
+      opacity: 0,
+      duration: INITIAL_FADE_SEC,
+      ease: 'power1.out',
+      onComplete: () => {
+        if (this.disposed) return;
+        this.presentedSceneId = this.currentSceneId;
+        this.syncHudHints();
+        this.bus.emit('world:scenePresented', { sceneId: this.currentSceneId });
+      },
+    });
   }
 
   /** scene:transition：同 sceneKey 只换交互配置；异 key 黑幕淡出 → 重建 → 淡入 */
@@ -773,6 +821,10 @@ export class WorldApp {
       this.currentRuntime?.setNight?.(this.nightMode);
       this.applyInteractionOptions();
       this.syncHudHints();
+      if (this.initialFadeDone) {
+        this.presentedSceneId = payload.toSceneId;
+        this.bus.emit('world:scenePresented', { sceneId: payload.toSceneId });
+      }
       return;
     }
 
@@ -836,7 +888,14 @@ export class WorldApp {
         duration: FADE_IN_SEC,
         ease: 'power1.out',
         // 只释放 transitionLocked，绝不调用 unlockControls（不覆盖 uiLock 的 2D 界面锁）
-        onComplete: () => this.controller.setTransitionLocked(false),
+        onComplete: () => {
+          this.controller.setTransitionLocked(false);
+          if (this.disposed) return;
+          this.presentedSceneId = sceneId;
+          this.hud.setLockPromptVisible(false);
+          this.syncHudHints();
+          this.bus.emit('world:scenePresented', { sceneId });
+        },
       });
     });
   }
@@ -1012,6 +1071,18 @@ export class WorldApp {
     this.controller.setNavigation(definition.nav);
     this.controller.setSpawn(definition.spawn);
     this.applyInteraction(definition);
+    if (this.sun) {
+      // 食堂全场景无任何投射阴影网格（castShadow 全 false），关闭主阳光空阴影贴图可省去整屏无意义 PCF 采样
+      this.sun.castShadow = definition.sceneKey !== 'canteen'
+        && !this.degraded
+        && (this.sunCanCastShadow ?? true);
+    }
+    this.lastShadowFocus?.set(Number.NaN, Number.NaN, Number.NaN);
+    this.lastShadowAnchor?.set(Number.NaN, Number.NaN, Number.NaN);
+    this.shadowRefreshTimer = 0;
+    this.sceneStableTimer = 0;
+    this.lowFpsDuration = 0;
+    if (this.renderer?.shadowMap) this.renderer.shadowMap.needsUpdate = true;
   }
 
   /** 交互配置装载：occluders 复用当前关卡（同 key 切换时几何体未重建） */
@@ -1058,7 +1129,27 @@ export class WorldApp {
 
   private resetAtmosphere(): void {
     this.atmosphereProgress = 0;
+    this.sceneLighting = null;
+    this.setSunDirection(SUN_DIRECTION);
     this.applyAtmosphere(false);
+  }
+
+  private setSceneLighting(settings: SceneLightingSettings | null): void {
+    if (this.currentDefinition.sceneKey !== 'street') return;
+    this.sceneLighting = settings;
+    if (settings) {
+      this.setSunDirection(new THREE.Vector3(...settings.sunDirection));
+    } else {
+      this.setSunDirection(SUN_DIRECTION);
+    }
+    this.applyAtmosphere(false);
+  }
+
+  private setSunDirection(direction: THREE.Vector3): void {
+    this.sunDirection.copy(direction).normalize();
+    this.sunShadowRight.crossVectors(new THREE.Vector3(0, 1, 0), this.sunDirection).normalize();
+    this.sunShadowUp.crossVectors(this.sunDirection, this.sunShadowRight).normalize();
+    (this.skyMaterial.uniforms.uSunDirection.value as THREE.Vector3).copy(this.sunDirection);
   }
 
   private applyAtmosphere(building = this.currentDefinition.sceneKey === 'building'): void {
@@ -1071,10 +1162,25 @@ export class WorldApp {
     this.atmosphereHaze.copy(this.baseHaze);
     this.atmosphereHorizon.copy(DEFAULT_ATMOSPHERE.uHorizon);
     this.sun.color.copy(DEFAULT_ATMOSPHERE.sun);
+    this.sun.intensity = this.currentDefinition?.sceneKey === 'canteen' ? 0 : 2.05;
+    if (this.hemisphereLight) {
+      this.hemisphereLight.color.setHex(0xa9cada);
+      this.hemisphereLight.groundColor.setHex(0x586e68);
+      this.hemisphereLight.intensity = 0.46;
+    }
     if (building) {
       this.atmosphereHaze.lerpColors(COOL_ATMOSPHERE.fog, DAWN_ATMOSPHERE.fog, blend);
       this.atmosphereHorizon.lerpColors(COOL_ATMOSPHERE.uHorizon, DAWN_ATMOSPHERE.uHorizon, blend);
       this.sun.color.lerpColors(COOL_ATMOSPHERE.sun, DAWN_ATMOSPHERE.sun, blend);
+    }
+    if (this.sceneLighting) {
+      this.sun.color.setHex(this.sceneLighting.sunColor);
+      this.sun.intensity = this.sceneLighting.sunIntensity;
+      if (this.hemisphereLight) {
+        this.hemisphereLight.color.setHex(this.sceneLighting.ambientColor);
+        this.hemisphereLight.groundColor.setHex(this.sceneLighting.ambientColor).multiplyScalar(0.62);
+        this.hemisphereLight.intensity = this.sceneLighting.ambientIntensity;
+      }
     }
     if (this.nightMode) {
       // 夜色只改光照与天空，不动场景材质：白天分支的取值与顺序保持原样
@@ -1156,6 +1262,11 @@ export class WorldApp {
         const feet = this.controller.getFeetPosition();
         return target.set(feet.x, feet.y, feet.z);
       },
+      getViewYaw: () => this.controller.getYaw(),
+      setViewYaw: (yaw) => this.controller.setYaw(yaw),
+      setScriptedLookLocked: (locked) => this.controller.setScriptedLookLocked(locked),
+      isCinematic: () => this.cutscenePlayer.isAnimating(),
+      setSceneLighting: (settings) => this.setSceneLighting(settings),
       setAtmosphereProgress: (progress) => {
         if (this.disposed || token !== this.runtimeContextToken || level !== this.actors
           || this.pendingSceneId !== null) return;
@@ -1200,17 +1311,30 @@ export class WorldApp {
   private updateSunShadowAnchor(): void {
     const sun = this.sun;
     if (!sun.castShadow) return;
+    const focus = this.scratchShadowFocus.set(this.camera.position.x, 0, this.camera.position.z);
+    // 玩家走过 ≥0.6m 才重定位 ±9m 阴影包围盒（仍严格对齐纹素整数倍，边缘零闪烁，避免行走每帧重绘 2048² 阴影图）
+    if (
+      this.lastShadowFocus
+      && !Number.isNaN(this.lastShadowFocus.x)
+      && focus.distanceToSquared(this.lastShadowFocus) < 0.36
+    ) {
+      return;
+    }
+    this.lastShadowFocus?.copy(focus);
     const extent = Math.max(Math.abs(sun.shadow.camera.right), 0.001);
     const texel = (extent * 2) / sun.shadow.mapSize.x;
-    const focus = this.scratchShadowFocus.set(this.camera.position.x, 0, this.camera.position.z);
-    const u = Math.round(focus.dot(SUN_SHADOW_RIGHT) / texel) * texel;
-    const v = Math.round(focus.dot(SUN_SHADOW_UP) / texel) * texel;
+    const u = Math.round(focus.dot(this.sunShadowRight) / texel) * texel;
+    const v = Math.round(focus.dot(this.sunShadowUp) / texel) * texel;
     const anchor = this.scratchShadowAnchor
-      .copy(SUN_SHADOW_RIGHT)
+      .copy(this.sunShadowRight)
       .multiplyScalar(u)
-      .addScaledVector(SUN_SHADOW_UP, v);
+      .addScaledVector(this.sunShadowUp, v);
     sun.target.position.copy(anchor);
-    sun.position.copy(anchor).addScaledVector(SUN_DIRECTION, 16);
+    sun.position.copy(anchor).addScaledVector(this.sunDirection, 16);
+    if (this.lastShadowAnchor && anchor.distanceToSquared(this.lastShadowAnchor) > 1e-6) {
+      this.lastShadowAnchor.copy(anchor);
+      if (this.renderer?.shadowMap) this.renderer.shadowMap.needsUpdate = true;
+    }
   }
 
   /** 竖屏时按“保持水平视野”反推垂直 FOV 并设上限，横屏固定 62° */
@@ -1234,9 +1358,25 @@ export class WorldApp {
     this.camera.updateProjectionMatrix();
   }
 
+  private computePixelRatio(width: number, height: number): number {
+    const dpr = window.devicePixelRatio || 1;
+    if (this.isCoarsePointer) {
+      return Math.min(dpr, MOBILE_PIXEL_RATIO);
+    }
+    const baseMax = this.integratedGpu ? INTEGRATED_GPU_PIXEL_RATIO : DESKTOP_PIXEL_RATIO;
+    let ratio = Math.min(dpr, baseMax);
+    if (width > 0 && height > 0) {
+      const budget = this.integratedGpu ? INTEGRATED_MAX_RENDER_PIXELS : DESKTOP_MAX_RENDER_PIXELS;
+      const maxByPixels = Math.sqrt(budget / (width * height));
+      ratio = Math.min(ratio, Math.max(0.75, maxByPixels));
+    }
+    return ratio;
+  }
+
   private readonly handleResize = (): void => {
     const width = window.innerWidth;
     const height = window.innerHeight;
+    this.renderer.setPixelRatio(this.computePixelRatio(width, height));
     this.renderer.setSize(width, height);
     this.composer?.setSize(width, height);
     const ratio = this.renderer.getPixelRatio();
@@ -1264,10 +1404,11 @@ export class WorldApp {
     this.syncHudHints();
   }
 
-  /** HUD 提示同步：仅桌面自由控制态显示锁鼠引导与疾跑角标 */
+  /** HUD 提示同步：仅桌面自由控制态且当前场景淡入完成后显示锁鼠引导与疾跑角标 */
   private syncHudHints(): void {
     const desktopFree = !this.pureTouch && this.controller.isEnabled();
-    this.hud.setLockPromptVisible(desktopFree && !this.controller.isPointerLocked());
+    const presented = this.presentedSceneId === this.currentSceneId;
+    this.hud.setLockPromptVisible(desktopFree && presented && !this.controller.isPointerLocked());
     this.hud.setSprintHintVisible(desktopFree && this.controller.isSprintToggled());
   }
 
@@ -1275,8 +1416,33 @@ export class WorldApp {
     this.rafId = requestAnimationFrame(this.tick);
 
     const now = performance.now();
-    const dt = Math.max(0, Math.min((now - this.lastFrameTime) / 1000, 0.05));
+    const rawDt = Math.max(0.0001, (now - this.lastFrameTime) / 1000);
+    const dt = Math.max(0, Math.min(rawDt, 0.05));
     this.lastFrameTime = now;
+
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+
+    this.sceneStableTimer += dt;
+    const instFps = Math.min(240, 1 / Math.max(rawDt, 1 / 240));
+    this.smoothedFps = this.smoothedFps * 0.9 + instFps * 0.1;
+    this.fpsEmitTimer += dt;
+    if (this.fpsEmitTimer >= 0.5) {
+      this.fpsEmitTimer = 0;
+      this.bus.emit('world:fps', { fps: this.smoothedFps, degraded: this.degraded });
+    }
+    if (!this.degraded && this.sceneStableTimer > 2.0 && rawDt < 0.25) {
+      if (this.smoothedFps < 25) {
+        this.lowFpsDuration += dt;
+        if (this.lowFpsDuration >= 2.0) {
+          this.degraded = true;
+          this.sun.castShadow = false;
+          this.renderer.shadowMap.needsUpdate = true;
+          this.bus.emit('world:fps', { fps: this.smoothedFps, degraded: true });
+        }
+      } else {
+        this.lowFpsDuration = 0;
+      }
+    }
 
     this.controller.update(dt);
     this.interaction.update(dt, now);
@@ -1284,9 +1450,29 @@ export class WorldApp {
     this.updateMotionAudio(dt);
     this.skyDome.position.copy(this.camera.position);
     this.updateSunShadowAnchor();
+
+    // 全屏 2D 阻塞弹窗下以 30fps 节流渲染静态背景，不浪费高刷 PC 显卡算力
+    if (this.modalBlocked && !this.cutscenePlayer.isAnimating() && !this.controller.isEnabled()) {
+      this.modalRenderAccum += dt;
+      if (this.modalRenderAccum < 1 / 30) return;
+      this.modalRenderAccum = 0;
+    }
+
+    // 仅在有室外行进投射阴影角色的场景按适度频率刷新阴影贴图；玩家位移由 updateSunShadowAnchor 即时触发
+    const key = this.currentDefinition.sceneKey;
+    if (this.sun.castShadow && (key === 'gate' || key === 'building' || key === 'street')) {
+      const interval = key === 'street' ? 1 / 4 : 1 / 15;
+      this.shadowRefreshTimer += dt;
+      if (this.shadowRefreshTimer >= interval) {
+        this.shadowRefreshTimer = 0;
+        this.renderer.shadowMap.needsUpdate = true;
+      }
+    }
+
     this.skyMaterial.uniforms.uTime.value += dt;
     this.updateAirParticles(dt);
-    if (this.composer) this.composer.render(dt);
+    // 仅在夜间或真正需要 Bloom 时才走离屏 EffectComposer，白天走原生单 Pass MSAA 渲染，画质无损且桌面帧率翻倍
+    if (this.composer && !this.degraded && this.nightMode) this.composer.render(dt);
     else this.renderer.render(this.scene, this.camera);
   };
 

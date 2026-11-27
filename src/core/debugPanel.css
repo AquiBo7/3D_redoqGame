@@ -95,6 +95,13 @@
   margin-bottom: 8px;
   color: #ffd9a8;
   font-size: 12px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.debug-panel * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .debug-panel__state {

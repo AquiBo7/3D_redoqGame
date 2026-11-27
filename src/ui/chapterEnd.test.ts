@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eventBus } from '../core/eventBus';
 import { createInitialStoryState, type StoryState } from '../core/state';
 import { DRAWING_WITHDRAWN_LOG } from '../data/endingContent';
-import { renderAssetImage } from './assetImage';
+import { renderAssetImage, renderLinPaintingCard } from './assetImage';
 import { initChapterEnd } from './chapterEnd';
 
 vi.mock('./assetImage', () => ({
@@ -12,6 +12,21 @@ vi.mock('./assetImage', () => ({
     image.onerror = vi.fn();
     container.append(image);
     return image;
+  }),
+  renderLinPaintingCard: vi.fn((container: HTMLElement, flags: { hasOrangeDot: boolean; hasGuardBooth: boolean; canFlip: boolean }) => {
+    const card = document.createElement('div');
+    card.className = flags.canFlip ? 'lin-painting lin-painting--flippable' : 'lin-painting';
+    const image = document.createElement('img');
+    image.dataset.assetId = 'cg_ending_best_drawing';
+    image.onerror = vi.fn();
+    card.append(image);
+    if (flags.canFlip) {
+      const note = document.createElement('p');
+      note.textContent = '开学第一天。';
+      card.append(note);
+    }
+    container.append(card);
+    return card;
   }),
 }));
 
@@ -270,5 +285,15 @@ describe('结局页三视角应对与法治清单', () => {
     expect(drafts[4].textContent).toContain('那天，我看到有人点开了我的头像。');
     expect(drafts[5].textContent).toContain('你先问了我。谢谢。');
     expect(drafts[6].textContent).toContain('不对');
+
+    const compare = root.querySelectorAll('.chapter-end__compare');
+    expect(compare).toHaveLength(1);
+    expect(compare[0].textContent).toContain('同一个画面。');
+    expect(compare[0].textContent).toContain('那天，被转发的');
+    expect(compare[0].textContent).toContain('那天，她画的');
+    expect(renderLinPaintingCard).toHaveBeenCalled();
+
+    show({ ending: 'middle', trust: 4 });
+    expect(overlay().querySelectorAll('.chapter-end__compare')).toHaveLength(0);
   });
 });

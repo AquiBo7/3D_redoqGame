@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="《一条截图》：网络暴力主题的教育向第一人称叙事游戏（全部虚构）" />
+    <meta property="og:title" content="一条截图 · ONE SCREENSHOT" />
+    <meta property="og:description" content="08:47，群里有人 @ 你。五章第一人称 3D 叙事体验，看见完整的那一天。" />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:image"
+      content="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='630' viewBox='0 0 1200 630'%3E%3Crect width='1200' height='630' fill='%230e1319'/%3E%3Crect x='220' y='130' width='760' height='370' rx='22' fill='%230e1319' stroke='%23d8b36a' stroke-width='4'/%3E%3Ctext x='280' y='215' fill='%23d8b36a' font-size='32' font-family='sans-serif'%3E%E8%BF%8E%E6%96%B0%E7%BE%A4 %C2%B7 08:47%3C/text%3E%3Ctext x='280' y='305' fill='%23f6f3ec' font-size='56' font-family='sans-serif'%3E%E6%9C%89%E4%BA%BA @ %E4%BD%A0%3C/text%3E%3Ctext x='280' y='410' fill='%23b5becc' font-size='28' font-family='sans-serif'%3E%E4%B8%80%E6%9D%A1%E6%88%AA%E5%9B%BE %C2%B7 %E4%BA%94%E7%AB%A0%E7%AC%AC%E4%B8%80%E4%BA%BA%E7%A7%B0%E5%8F%99%E4%BA%8B%3C/text%3E%3C/svg%3E"
+    />
     <meta name="theme-color" content="#0e1319" />
     <link
       rel="icon"
@@ -20,24 +27,113 @@
     <!-- 2D 界面层：由 src/ui 驱动 -->
     <div id="ui-root">
       <section id="start-page" class="start-page" aria-label="开始页">
-        <p class="start-page__eyebrow">五章叙事 · 看见完整的那一天</p>
-        <h1 class="start-page__title">一条截图</h1>
-        <div class="start-page__rule" aria-hidden="true"></div>
-        <p class="start-page__notice">本作品为虚构，涉及网络暴力主题，可随时退出。</p>
-
-        <div id="portrait-hint" class="portrait-hint" hidden>
-          <span>建议横屏或使用电脑体验第一人称最佳视野</span>
-          <button id="portrait-hint-close" class="portrait-hint__close" type="button">知道了</button>
+        <!-- 轻瓷白晨雾氛围背景与缓慢漂浮几何微粒 -->
+        <div class="start-page__backdrop" aria-hidden="true">
+          <span class="start-mote start-mote--a"></span>
+          <span class="start-mote start-mote--b"></span>
+          <span class="start-mote start-mote--c"></span>
+          <span class="start-mote start-mote--d"></span>
+          <span class="start-mote start-mote--e"></span>
+          <span class="start-mote start-mote--f"></span>
+          <span class="start-mote start-mote--g"></span>
+          <span class="start-mote start-mote--h"></span>
         </div>
 
-        <div class="start-page__actions">
-          <button id="btn-continue" class="btn btn--primary" type="button" hidden>继续体验</button>
-          <button id="btn-start" class="btn btn--primary" type="button">开始体验</button>
-          <button id="btn-chapters" class="btn btn--ghost" type="button">章节选择</button>
-          <button id="btn-achievements" class="btn btn--ghost" type="button">成就</button>
-          <button id="btn-exit" class="btn btn--ghost" type="button">退出</button>
-          <button id="btn-credits" class="btn-credits" type="button">致谢</button>
+        <div class="start-page__layout">
+          <!-- 左侧标题、钩子文案、五章索引与主行动区 -->
+          <div class="start-page__panel">
+            <p class="start-page__eyebrow">ONE SCREENSHOT · 五章第一人称叙事</p>
+            <h1 class="start-page__title">一条截图</h1>
+            <p class="start-page__hook">08:47，群里有人 @ 你。</p>
+            <div class="start-page__rule" aria-hidden="true"></div>
+
+            <div id="start-chapters-strip" class="start-page__chapters" aria-label="五章目录预览"></div>
+
+            <div id="portrait-hint" class="portrait-hint" hidden>
+              <span>建议横屏或使用电脑体验第一人称最佳视野</span>
+              <button id="portrait-hint-close" class="portrait-hint__close" type="button">知道了</button>
+            </div>
+
+            <p class="start-page__notice">本作品为虚构，涉及网络暴力主题，可随时退出。</p>
+
+            <div class="start-page__actions">
+              <button id="btn-continue" class="btn btn--primary btn--diamond" type="button" hidden>继续体验</button>
+              <button id="btn-start" class="btn btn--primary btn--diamond" type="button">开始体验</button>
+              <div class="start-page__links">
+                <button id="btn-chapters" class="btn btn--link" type="button">章节选择</button>
+                <button id="btn-achievements" class="btn btn--link" type="button">成就</button>
+                <button id="btn-credits" class="btn-credits" type="button">致谢</button>
+                <button id="btn-exit" class="btn btn--link" type="button" hidden>退出</button>
+              </div>
+            </div>
+
+            <p id="start-archive-line" class="start-page__archive">
+              清晨 08:47 · 看见完整的那一天 · 点击开始后启用背景音乐
+            </p>
+          </div>
+
+          <!-- 右侧主题主视觉：悬浮浅色短信取景框（无剧透抽象消息条 + 截图 01 标签） -->
+          <div class="start-page__visual" aria-hidden="true">
+            <div class="start-hero">
+              <div class="start-hero__orbit start-hero__orbit--outer"></div>
+              <div class="start-hero__orbit start-hero__orbit--inner"></div>
+
+              <svg class="start-hero__traces" viewBox="0 0 360 400" fill="none">
+                <path d="M180 42V14H238" stroke="#1f2745" stroke-opacity="0.22" stroke-width="1" />
+                <circle cx="242" cy="14" r="3" stroke="#1f2745" stroke-opacity="0.35" stroke-width="1" />
+                <path d="M58 206H24V158" stroke="#1f2745" stroke-opacity="0.22" stroke-width="1" />
+                <circle cx="24" cy="154" r="3" stroke="#d8b36a" stroke-opacity="0.7" stroke-width="1.2" />
+                <path d="M294 268H332V326H272" stroke="#1f2745" stroke-opacity="0.2" stroke-width="1" />
+                <circle cx="268" cy="326" r="3" stroke="#1f2745" stroke-opacity="0.35" stroke-width="1" />
+                <path d="M116 332V376H164" stroke="#7f82d8" stroke-opacity="0.35" stroke-width="1" />
+                <circle cx="168" cy="376" r="2.8" fill="#d8b36a" fill-opacity="0.85" />
+              </svg>
+
+              <!-- 后层斜置透光玻璃截图薄片 -->
+              <div class="start-hero__glass start-hero__glass--back"></div>
+              <div class="start-hero__glass start-hero__glass--mid"></div>
+
+              <!-- 主体短信取景框（沿用上版抽象界面） -->
+              <div class="start-hero__card">
+                <span class="start-hero__crop start-hero__crop--tl"></span>
+                <span class="start-hero__crop start-hero__crop--tr"></span>
+                <span class="start-hero__crop start-hero__crop--bl"></span>
+                <span class="start-hero__crop start-hero__crop--br"></span>
+
+                <div class="start-hero__card-head">
+                  <span class="start-hero__dot"></span>
+                  <span class="start-hero__channel">MESSAGE // 迎新…</span>
+                  <span class="start-hero__tag">截图 01</span>
+                </div>
+
+                <div class="start-hero__skeleton">
+                  <span class="start-hero__bar start-hero__bar--short"></span>
+                  <span class="start-hero__bar start-hero__bar--long"></span>
+                  <div class="start-hero__highlight">
+                    <span class="start-hero__diamond"></span>
+                    <span class="start-hero__bar start-hero__bar--focus"></span>
+                  </div>
+                  <span class="start-hero__bar start-hero__bar--mid"></span>
+                </div>
+
+                <div class="start-hero__reply">
+                  <span class="start-hero__bar start-hero__bar--reply"></span>
+                  <span class="start-hero__cursor"></span>
+                </div>
+              </div>
+
+              <!-- 散落悬浮透光棱片 -->
+              <span class="start-hero__shard start-hero__shard--1"></span>
+              <span class="start-hero__shard start-hero__shard--2"></span>
+              <span class="start-hero__shard start-hero__shard--3"></span>
+              <span class="start-hero__shard start-hero__shard--4"></span>
+            </div>
+          </div>
         </div>
+
+        <p class="start-page__meta" aria-hidden="true">
+          虚构互动叙事 · 看见截图以外的完整那一天
+        </p>
       </section>
 
       <section id="exit-screen" class="exit-screen" hidden>

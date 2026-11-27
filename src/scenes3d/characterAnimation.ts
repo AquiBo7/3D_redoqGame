@@ -81,6 +81,21 @@ export interface CharacterAnimationController {
   dispose(): void;
 }
 
+function stripHorizontalRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const tracks = clip.tracks.map((track) => {
+    if (!/^(Root|Hip|Hips)\.position$/.test(track.name) || track.values.length < 3) return track;
+    const cloned = track.clone();
+    const x0 = cloned.values[0];
+    const z0 = cloned.values[2];
+    for (let i = 0; i < cloned.values.length; i += 3) {
+      cloned.values[i] = x0;
+      cloned.values[i + 2] = z0;
+    }
+    return cloned;
+  });
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+
 /**
  * 为一个已实例化的角色模型创建动画控制器。
  * root 必须是含骨骼层级的实例根（SkeletonUtils.clone 的产物），剪辑取 resources 缓存中的共享剪辑。
@@ -88,10 +103,12 @@ export interface CharacterAnimationController {
 export function createCharacterAnimation(
   root: THREE.Object3D,
   clips: readonly THREE.AnimationClip[],
+  options: { lockHorizontalRoot?: boolean } = {},
 ): CharacterAnimationController {
   const mixer = new THREE.AnimationMixer(root);
   const actions = new Map<string, THREE.AnimationAction>();
-  for (const clip of clips) {
+  for (const rawClip of clips) {
+    const clip = options.lockHorizontalRoot ? stripHorizontalRootMotion(rawClip) : rawClip;
     actions.set(clip.name, mixer.clipAction(clip));
   }
 

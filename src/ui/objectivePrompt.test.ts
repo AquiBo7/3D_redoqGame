@@ -10,7 +10,19 @@ class ElementStub {
   className = '';
   children: ElementStub[] = [];
   classes = new Set<string>();
-  classList = { add: (value: string) => this.classes.add(value), remove: (value: string) => this.classes.delete(value) };
+  styleProperties = new Map<string, string>();
+  style = { setProperty: (name: string, value: string) => this.styleProperties.set(name, value) };
+  classList = {
+    add: (value: string) => this.classes.add(value),
+    remove: (value: string) => this.classes.delete(value),
+    contains: (value: string) => this.classes.has(value),
+    toggle: (value: string, force?: boolean) => {
+      const enabled = force ?? !this.classes.has(value);
+      if (enabled) this.classes.add(value);
+      else this.classes.delete(value);
+      return enabled;
+    },
+  };
   append(...children: ElementStub[]): void { this.children.push(...children); }
   setAttribute(): void {}
   remove = vi.fn();
@@ -67,5 +79,54 @@ describe('主角行动提醒', () => {
     dispose();
     bus.emit('ui:showObjective', { sceneId: 'S8' });
     expect(host.children.every((child) => child.hidden)).toBe(true);
+  });
+  it('开场提醒常驻手机与房间内换场，重进不重复且新档重置', () => {
+    const [root] = host.children;
+    bus.emit('ui:showObjective', { sceneId: 'S1', persistent: true });
+    expect(root.classes.has('is-opening')).toBe(true);
+    vi.advanceTimersByTime(10000);
+    expect(root.classes.has('is-fading')).toBe(false);
+    bus.emit('scene:transition', { fromSceneId: 'S1', toSceneId: 'S2', sceneKey: 'room', role: 'bystander', title: '' });
+    bus.emit('ui:showPhone', { stepId: 's2-phone', panel: { id: 'phone', closeActionId: 'close', sections: [] } });
+    expect(root.hidden).toBe(false);
+    bus.emit('scene:transition', { fromSceneId: 'S2', toSceneId: 'S3', sceneKey: 'room', role: 'bystander', title: '' });
+    bus.emit('ui:showObjective', { sceneId: 'S3' });
+    expect(root.hidden).toBe(false);
+    bus.emit('ui:hideObjective');
+    vi.advanceTimersByTime(200);
+    expect(root.hidden).toBe(true);
+    bus.emit('ui:showObjective', { sceneId: 'S1', persistent: true });
+    expect(root.hidden).toBe(true);
+    bus.emit('game:start');
+    bus.emit('ui:showObjective', { sceneId: 'S1', persistent: true });
+    expect(root.hidden).toBe(false);
+  });
+  it('倒计时环同步剩余秒数并在结束时隐藏', () => {
+    bus.emit('ui:showObjective', { sceneId: 'S1', persistent: true });
+    const root = host.children[0];
+    const countdown = root.children[2];
+    bus.emit('ui:objectiveCountdown', { remaining: 4.2, total: 5, active: true });
+    expect(countdown.hidden).toBe(false);
+    expect(countdown.children[0].textContent).toBe('5');
+    expect(countdown.styleProperties.get('--objective-progress')).toBe(`${4.2 / 5 * 360}deg`);
+    expect(root.classes.has('is-counting')).toBe(true);
+    bus.emit('ui:objectiveCountdown', { remaining: 0, total: 5, active: false });
+    expect(countdown.hidden).toBe(true);
+    expect(root.classes.has('is-counting')).toBe(false);
+  });
+  it('常驻提醒按 0.2 秒淡出，普通提醒保留原 4.2 秒节奏', () => {
+    bus.emit('ui:showObjective', { sceneId: 'S1', persistent: true });
+    const [root] = host.children;
+    bus.emit('ui:hideObjective');
+    vi.advanceTimersByTime(199);
+    expect(root.hidden).toBe(false);
+    expect(root.classes.has('is-fading')).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(root.hidden).toBe(true);
+    bus.emit('ui:showObjective', { sceneId: 'S3' });
+    vi.advanceTimersByTime(4199);
+    expect(root.classes.has('is-fading')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(root.classes.has('is-fading')).toBe(true);
   });
 });

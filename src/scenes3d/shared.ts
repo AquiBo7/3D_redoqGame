@@ -181,11 +181,10 @@ function createCharacterProp(spec: CharacterPropSpec, heightM: number, grip: Pro
       new THREE.BoxGeometry(0.14, 0.34, 0.26),
       createMatteMaterial(spec.color ?? 0xb6a58a, 0.88),
     );
-    // 帆布手提袋悬于自然下垂的手掌正下方（内缘 0.34 - 0.07 = 0.27m 避开腿侧不穿模），
-    // 并加装竖向提手织带直连掌心高度（y≈0.74m），消除“悬空方块”感
-    baseX = sideSign * 0.34;
-    baseY = 0.41;
-    baseZ = 0.03;
+    // 帆布手提袋上提手直达父亲垂手握拳掌心高度（y≈0.85m, |x|≈0.295m），消除站立时手与提带间的悬空缝隙
+    baseX = sideSign * 0.295;
+    baseY = 0.52;
+    baseZ = 0.015;
     const strapMat = createMatteMaterial(0x6c5e4b, 0.9);
     const strapTop = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.024, 0.14), strapMat);
     strapTop.position.set(0, 0.33, 0);
@@ -358,12 +357,15 @@ export function findActorModelRoot(
 }
 
 /** 为角色实例创建骨骼动画控制器；模型无动画或仍在用胶囊体占位时返回 null */
-export function createActorAnimation(actor: THREE.Object3D): CharacterAnimationController | null {
+export function createActorAnimation(
+  actor: THREE.Object3D,
+  options?: { lockHorizontalRoot?: boolean },
+): CharacterAnimationController | null {
   const ref = findActorModelRoot(actor);
   if (!ref) return null;
   const clips = getCharacterAnimations(ref.modelId);
   if (clips.length === 0) return null;
-  return createCharacterAnimation(ref.root, clips);
+  return createCharacterAnimation(ref.root, clips, options);
 }
 
 interface PoseRestore {

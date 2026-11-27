@@ -284,6 +284,20 @@ describe('ArtView 图片与关闭生命周期', () => {
     view.hide();
     expect(key(doc, 'Escape').defaultPrevented).toBe(false);
   });
+
+  it('最好结局画作走 renderLinPaintingCard 渲染状态叠加层与最高好感翻面', () => {
+    const view = art();
+    view.show(
+      { stepId: 'e1-best-drawing', assetId: 'cg_ending_best_drawing' },
+      { joined: true, guardWilling: true, trust: 7 },
+    );
+    const images = host.querySelectorAll('img');
+    expect(images).toHaveLength(2);
+    expect(images[0].dataset.assetId).toBe('cg_ending_best_drawing');
+    expect(images[1].dataset.hasOrangeDot).toBe('true');
+    expect(images[1].dataset.hasGuardBooth).toBe('true');
+    expect(host.querySelectorAll('p')[0].textContent).toBe('开学第一天。');
+  });
 });
 
 describe('展示样式契约', () => {

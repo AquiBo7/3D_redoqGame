@@ -260,6 +260,52 @@ describe('FirstPersonController 疾跑开关', () => {
     expect(controller.getFeetPosition().y).toBeCloseTo(0.42);
   });
 
+  it('脚本转向锁期间 WASD/E/F 接管后立即恢复控制，模态锁不会误取消', () => {
+    const onTakeover = vi.fn(() => controller.setScriptedLookLocked(false));
+    controller = createController({ onInputTakeover: onTakeover });
+    controller.setScriptedLookLocked(true);
+    expect(controller.isEnabled()).toBe(false);
+    pressKey('KeyW');
+    expect(onTakeover).toHaveBeenCalledTimes(1);
+    expect(controller.isEnabled()).toBe(true);
+    controller.update(0.05);
+    expect(camera.position.z).toBeLessThan(0);
+
+    controller.lockControls();
+    pressKey('KeyE');
+    pressKey('KeyF');
+    expect(onTakeover).toHaveBeenCalledTimes(1);
+  });
+
+  it('脚本转向锁期间鼠标累计移动超过 8px 接管，拖拽抬手不误触轻点', () => {
+    const onTakeover = vi.fn(() => controller.setScriptedLookLocked(false));
+    const onTap = vi.fn(() => false);
+    controller = createController({ onInputTakeover: onTakeover, onTap });
+    controller.setScriptedLookLocked(true);
+    dispatchPointer('pointermove', { pointerType: 'mouse', movementX: 5, movementY: 0 });
+    expect(onTakeover).not.toHaveBeenCalled();
+    dispatchPointer('pointermove', { pointerType: 'mouse', movementX: 4, movementY: 0 });
+    expect(onTakeover).toHaveBeenCalledTimes(1);
+    expect(controller.isEnabled()).toBe(true);
+
+    controller.setScriptedLookLocked(true);
+    dispatchPointer('pointerdown', { pointerType: 'mouse' });
+    dispatchPointer('pointermove', { pointerType: 'mouse', clientX: 409, movementX: 9 });
+    dispatchPointer('pointerup', { pointerType: 'mouse', clientX: 409 });
+    expect(onTakeover).toHaveBeenCalledTimes(2);
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it('脚本 setYaw 只改水平朝向，不改位置与俯仰', () => {
+    controller = createController();
+    const position = camera.position.clone();
+    const pitch = camera.rotation.x;
+    controller.setYaw(-1.2);
+    expect(controller.getYaw()).toBe(-1.2);
+    expect(camera.position.equals(position)).toBe(true);
+    expect(camera.rotation.x).toBeCloseTo(pitch);
+  });
+
   it('dispose 复位疾跑并移除输入监听', () => {
     controller = createController();
     pressKey('ShiftLeft');

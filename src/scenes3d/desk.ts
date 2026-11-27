@@ -278,6 +278,7 @@ function mountPropTableStationery(table: THREE.Group): void {
     // 成品文具是"平铺俯拍"式建模：件与件的高低差落在 Y 上，直接摆就是一排悬空铅笔。
     // 克隆一份几何绕 X 转 −90° 放回台面平面并重新贴地，母本几何仍归 resources 的道具缓存。
     const flat = asset.geometry.clone();
+    delete flat.userData[SHARED_RESOURCE_FLAG];
     flat.rotateX(-Math.PI / 2);
     flat.translate(0, 0.046, 0.09);
     flat.computeBoundingBox();
@@ -500,6 +501,58 @@ function buildWelcomeStand(parent: THREE.Object3D, d: Details): THREE.Group {
   return stand;
 }
 
+/** 报到广场中景悬空迎新横幅「欢迎新生！」+ 16 盏悬垂暖光灯串（高悬 y≥3.1m，绝不遮挡登记表与药袋视距） */
+function buildWelcomeArchBannerAndLights(parent: THREE.Object3D, d: Details): void {
+  const arch = group(parent, 'desk-welcome-arch-banner');
+  const z = -12.3;
+  const span = 8.4;
+  const poleColor = d.matte(0x405552, 0.48, 0.6);
+  d.rods(arch, 'desk-welcome-banner-poles', poleColor, [
+    { a: [-4.4, 0, z - 0.12], b: [-4.4, 3.68, z - 0.12], radius: 0.045 },
+    { a: [4.4, 0, z - 0.12], b: [4.4, 3.68, z - 0.12], radius: 0.045 },
+    // 角落斜拉系绳
+    { a: [-4.4, 3.62, z - 0.12], b: [-4.1, 3.38, z], radius: 0.01 },
+    { a: [4.4, 3.62, z - 0.12], b: [4.1, 3.38, z], radius: 0.01 },
+    { a: [-4.4, 3.04, z - 0.12], b: [-4.1, 3.02, z], radius: 0.01 },
+    { a: [4.4, 3.04, z - 0.12], b: [4.1, 3.02, z], radius: 0.01 },
+  ]);
+
+  // 顶点自然弧垂的迎新条幅网格（中间下沉 12cm，正面文字清晰可见）
+  const bannerGeo = new THREE.PlaneGeometry(span, 0.56, 20, 2);
+  const posAttr = bannerGeo.getAttribute('position');
+  for (let i = 0; i < posAttr.count; i += 1) {
+    const x = posAttr.getX(i);
+    const ratio = (x / (span / 2));
+    const sag = Math.cos((ratio * Math.PI) / 2) * -0.12;
+    posAttr.setY(i, posAttr.getY(i) + sag);
+    posAttr.setZ(i, Math.cos((ratio * Math.PI) / 2) * 0.05);
+  }
+  bannerGeo.computeVertexNormals();
+  const bannerTex = createTextSign('欢迎新生！', span, 0.56, { background: '#9c4b39', foreground: '#fff6e2' }).material as THREE.MeshStandardMaterial;
+  bannerTex.side = THREE.DoubleSide;
+  const bannerMesh = new THREE.Mesh(bannerGeo, bannerTex);
+  bannerMesh.name = 'desk-welcome-banner-cloth';
+  bannerMesh.position.set(0, 3.36, z);
+  bannerMesh.castShadow = true;
+  arch.add(bannerMesh);
+
+  // 16 盏下垂小灯泡灯串（1 次 InstancedMesh DrawCall，低白昼自发光 ≤0.2 柔暖微亮）
+  const bulbMat = new THREE.MeshStandardMaterial({
+    color: 0xfff0c4,
+    emissive: 0xffc668,
+    emissiveIntensity: 0.2,
+    roughness: 0.35,
+  });
+  const bulbs: Part[] = [];
+  for (let i = 0; i < 16; i += 1) {
+    const t = i / 15;
+    const bx = -4.0 + t * 8.0;
+    const sag = Math.sin(t * Math.PI) * 0.22;
+    bulbs.push({ p: [bx, 2.94 - sag, z + 0.04], s: [0.042, 0.052, 0.042] });
+  }
+  d.instances(arch, 'desk-welcome-string-bulbs', new THREE.SphereGeometry(1, 8, 6), bulbMat, bulbs, false);
+}
+
 function buildCampus(parent: THREE.Object3D, d: Details, time: WindTime): void {
   const paving = new THREE.Mesh(new THREE.PlaneGeometry(52, 48), getPavingMaterial({ repeatX: 20, repeatY: 18 }));
   paving.name = 'desk-campus-paving';
@@ -597,6 +650,7 @@ function buildCampus(parent: THREE.Object3D, d: Details, time: WindTime): void {
     sign(guide, 'desk-guide-teaching', '教学区 ↑', 1.12, 0.3, [0, 2.35, 0.045]);
     sign(guide, 'desk-guide-library', side < 0 ? '阅览室 ←' : '活动中心 →', 1.12, 0.3, [0, 1.98, 0.045]);
   }
+  buildWelcomeArchBannerAndLights(parent, d);
   buildSchool(parent, d);
 }
 
@@ -643,6 +697,14 @@ function buildSchool(parent: THREE.Object3D, d: Details): void {
   d.boxes(school, 'desk-school-warm-interior-windows', warmGlass, warm, false);
   d.boxes(school, 'desk-school-window-frames-and-sills', d.matte(0xb2b7a7, 0.64, 0.12), frames);
   d.boxes(school, 'desk-school-window-sky-reflections', d.matte(0xbfcfd0, 0.12, 0.4), reflections, false);
+  trims.push(
+    // 卡通风格屋顶陶土压顶 & 水箱/空调外机轮廓（合并进 trims 批次，零额外 DrawCall）
+    { p: [0, 9.52, -29], s: [18.3, 0.18, 6.3] },
+    { p: [-15, 9.52, -27.5], s: [11.3, 0.18, 7.3] },
+    { p: [15, 9.52, -27.5], s: [11.3, 0.18, 7.3] },
+    { p: [-2.4, 9.95, -29.2], s: [1.4, 0.8, 1.1] },
+    { p: [3.2, 9.85, -29.4], s: [0.95, 0.55, 0.8] },
+  );
   d.boxes(school, 'desk-school-floor-and-roof-trims', d.matte(0x8c9788), trims);
   d.boxes(school, 'desk-school-entrance-glass-doors', getWindowGlassMaterial(), [
     { p: [-0.6, 1.2, -25.72], s: [1.15, 2.4, 0.045] }, { p: [0.6, 1.2, -25.72], s: [1.15, 2.4, 0.045] },
@@ -697,7 +759,7 @@ function buildDesk(parent: THREE.Object3D): { occluders: THREE.Object3D[]; actor
       s: [column.size.w, column.size.h, column.size.d] as V3,
     })),
   ));
-  const volunteer = createCharacterActor('volunteer', 1.7, 0xb08a72, { yaw: 0 });
+  const volunteer = createCharacterActor('studentFemale2', 1.64, 0xb08a72, { yaw: 0 });
   volunteer.position.set(STANDS.volunteer.x, 0, STANDS.volunteer.z);
   const linxia = createCharacterActor('linxia', 1.62, 0xe8d9a8, { yaw: -0.8 });
   linxia.position.set(STANDS.linxia.x, 0, STANDS.linxia.z);
@@ -731,13 +793,15 @@ let windTime: WindTime | null = null;
 let deskPlayerFeetGetter: ((target: THREE.Vector3) => THREE.Vector3) | undefined;
 let deskIsModalBlocked: (() => boolean) | undefined;
 let deskWasBlocked = false;
-const VOLUNTEER_IDLE_CLIPS = ['wait', 'agree', 'bow'] as const;
+const VOLUNTEER_GREET_CLIPS = ['greet_04', 'wave_goodbye_02', 'wait', 'fold_arms'] as const;
+const VOLUNTEER_IDLE_CLIPS = ['fold_arms', 'wait', 'agree', 'bow'] as const;
 let volunteerState: {
   actor: THREE.Object3D;
   controller: CharacterAnimationController | null;
   mode: 'greet' | 'idle';
   timer: number;
   idleIndex: number;
+  idleClips: string[];
 } | null = null;
 const deskPlayerFeet = new THREE.Vector3();
 
@@ -758,20 +822,26 @@ function clearRuntime(): void {
 }
 
 function triggerVolunteerGreeting(): void {
-  if (!volunteerState?.controller) return;
+  const controller = volunteerState?.controller;
+  if (!volunteerState || !controller) return;
   volunteerState.mode = 'greet';
   volunteerState.timer = 0;
-  // 进入对话或刚到登记桌时触发女老师挥手打招呼，播完自动过渡到自然待机
-  volunteerState.controller.play('wave_goodbye_02', { fadeIn: 0.25, timeScale: 1, loop: false });
+  // 原地礼貌致意，不带位移步态
+  const greetClip = VOLUNTEER_GREET_CLIPS.find((name) => controller.hasAnimation(name));
+  if (greetClip) {
+    controller.play(greetClip, { fadeIn: 0.25, timeScale: 0.85, loop: false });
+  }
 }
 
 function updateVolunteerAnimation(dt: number): void {
   if (!volunteerState || !volunteerState.actor.visible) return;
   if (!volunteerState.controller) {
-    volunteerState.controller = createActorAnimation(volunteerState.actor);
+    volunteerState.controller = createActorAnimation(volunteerState.actor, { lockHorizontalRoot: true });
     if (!volunteerState.controller) return;
+    const ctrl = volunteerState.controller;
+    volunteerState.idleClips = VOLUNTEER_IDLE_CLIPS.filter((name) => ctrl.hasAnimation(name));
     triggerVolunteerGreeting();
-    volunteerState.controller.update(dt);
+    ctrl.update(dt);
     return;
   }
   const blocked = deskIsModalBlocked?.() ?? false;
@@ -780,15 +850,18 @@ function updateVolunteerAnimation(dt: number): void {
   }
   deskWasBlocked = blocked;
   volunteerState.timer += dt;
-  if (volunteerState.mode === 'greet' && volunteerState.timer >= 5.6) {
+  if (volunteerState.mode === 'greet' && volunteerState.timer >= 4.2) {
     volunteerState.mode = 'idle';
     volunteerState.timer = 0;
     volunteerState.idleIndex = 0;
-    volunteerState.controller.play(VOLUNTEER_IDLE_CLIPS[0], { fadeIn: 0.45, timeScale: 0.85, loop: true });
-  } else if (volunteerState.mode === 'idle' && volunteerState.timer >= 8.5) {
+    const firstIdle = volunteerState.idleClips[0];
+    if (firstIdle) {
+      volunteerState.controller.play(firstIdle, { fadeIn: 0.45, timeScale: 0.85, loop: true });
+    }
+  } else if (volunteerState.mode === 'idle' && volunteerState.idleClips.length > 1 && volunteerState.timer >= 8.5) {
     volunteerState.timer = 0;
-    volunteerState.idleIndex = (volunteerState.idleIndex + 1) % VOLUNTEER_IDLE_CLIPS.length;
-    const clip = VOLUNTEER_IDLE_CLIPS[volunteerState.idleIndex];
+    volunteerState.idleIndex = (volunteerState.idleIndex + 1) % volunteerState.idleClips.length;
+    const clip = volunteerState.idleClips[volunteerState.idleIndex];
     volunteerState.controller.play(clip, { fadeIn: 0.45, timeScale: 0.85, loop: true });
   }
   volunteerState.controller.update(dt);
@@ -838,6 +911,7 @@ export const deskRuntime: SceneRuntime = {
         mode: 'greet',
         timer: 0,
         idleIndex: 0,
+        idleClips: [],
       };
       updateVolunteerAnimation(0);
     }
@@ -896,7 +970,7 @@ export function createDeskDefinition(_sceneId: SceneId): WorldSceneDefinition {
     sceneKey: 'desk',
     spawn: SPAWN,
     nav: NAV,
-    requiredModels: ['volunteer', 'linxia', 'father', 'studentFemale', 'studentMale'],
+    requiredModels: ['studentFemale2', 'linxia', 'father', 'studentFemale', 'studentMale'],
     interactables: [{ id: 'medicine-bag', position: MEDICINE_BAG.center, lightOffsetY: 0.3, hitRadius: 0.4, maxDistance: 3.5 }],
     hotspots: [{ id: 'reason-form', position: { x: 0, y: 0.85, z: -3.56 }, maxDistance: 8 }],
     fog: { color: 0xb9c6d2, near: 12, far: 44 },

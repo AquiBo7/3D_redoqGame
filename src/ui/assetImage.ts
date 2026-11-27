@@ -7,7 +7,6 @@ export type { AssetId } from '../data/assetManifest';
 // 所有形状/文案均来自本模块或静态清单；不接收用户 HTML/SVG，不加载外部字体或图片。
 const cache = new Map<AssetId, string>();
 const ink = '#4b5757';
-const paper = '#f6f0e3';
 const yellow = '#ead99c';
 
 function xml(value: string): string {
@@ -206,42 +205,152 @@ function walkTogether(): string {
     ${lines('M34 720 170 597M848 720 918 606', '#c9c9a8', 3)}`;
 }
 
-function bestDrawing(): string {
-  let steps = '';
+export interface LinPaintingState {
+  outcome?: string | null;
+  joined?: boolean;
+  guardWilling?: boolean;
+  trust?: number;
+}
+
+export interface LinPaintingFlags {
+  hasOrangeDot: boolean;
+  hasGuardBooth: boolean;
+  canFlip: boolean;
+}
+
+export function resolveLinPaintingFlags(state?: LinPaintingState | null): LinPaintingFlags {
+  const joined = Boolean(state?.joined || state?.outcome === '入队');
+  return {
+    hasOrangeDot: joined,
+    hasGuardBooth: Boolean(state?.guardWilling),
+    canFlip: typeof state?.trust === 'number' && state.trust >= 7,
+  };
+}
+
+function buildLinPaintingBody(flags: { hasOrangeDot: boolean; hasGuardBooth: boolean }, includeBase = true): string {
+  const steps: string[] = [];
   for (let i = 0; i < 7; i += 1) {
-    steps += `<path d="M${244 - i * 18} ${557 + i * 31}H${1253 + i * 20}l20 31H${226 - i * 18}Z" fill="${i % 2 ? '#dfdcc5' : '#ece6d1'}" opacity=".7"/>${lines(`M${244 - i * 18} ${557 + i * 31}Q737 ${561 + i * 31} ${1253 + i * 20} ${557 + i * 31}`, '#9faaa0', 1.5)}`;
+    const y = 178 + i * 28;
+    const xL = 34 - i * 4;
+    const xR = 266 + i * 4;
+    const tilt = i % 2 ? 1.5 : -1;
+    steps.push(
+      `<path d="M${xL} ${y}L${xR} ${y + tilt}L${xR + 3} ${y + 24 + tilt}L${xL - 3} ${y + 24}Z" fill="#ddd3bf" opacity="0.82"/>`
+      + `<path d="M${xL} ${y}Q150 ${y + 2} ${xR} ${y + tilt}" fill="none" stroke="#1f2745" stroke-width="0.9" stroke-opacity="0.34" stroke-linecap="round"/>`,
+    );
   }
-  return `<path d="M0 0H1600V900H0Z" fill="${paper}"/>
-    <path d="M81 87Q804 43 1521 88L1496 824Q768 853 90 823Z" fill="#ecebd8"/>
-    <path d="M188 214Q600 131 1419 183L1394 493 202 522Z" fill="#e6ead7" opacity=".8"/>
-    <circle cx="1071" cy="266" r="91" fill="#f5e5b1" opacity=".6"/>
-    ${tree(237, 508, 1.3, '#b2c0a5')}${tree(1371, 515, 1.1, '#b2c0a5')}
-    <path d="M807 265H1270V288H807ZM822 287H846V492H822ZM1226 287H1250V491H1226Z" fill="#b5c1ad"/>
-    ${lines('M806 264 1271 265M818 292 817 497M1254 291 1252 490M851 431H1209', '#8e9e95', 2)}
-    <g data-motif="father-watching">${backPerson(1080, 367, .65, '#8d9985')}
-      <path d="M1043 433h18l3 34h-22ZM1105 436h19l4 34h-24Z" fill="#bead89"/>
-      ${lines('M1046 434V425Q1052 416 1058 427V434M1108 436V427Q1114 418 1122 429V436', '#959a80', 2)}</g>
-    ${steps}
-    <path d="M363 809 646 579 704 588 505 817M678 808 806 578 847 585 806 818" fill="#bac5ac" opacity=".35"/>
-    <g data-motif="complete-companionship">${backPerson(684, 398, 1.35, '#93adb0')}${backPerson(815, 423, 1.2, yellow, true)}</g>
-    ${lines('M645 445 670 510M806 492 795 556M215 209 230 207M220 201 246 198M1391 361 1408 347M1400 365 1416 351', '#899b93', 1.5)}
-    <path d="M1391 776q8-11 17 0l-3 10-14-2Z" fill="#cf8656" data-motif="orange-dot"/>
-    ${lines('M75 82 69 820M95 843 1488 839', '#cec5b1', 1)}`;
+  const dewCoords = [
+    [66, 214], [92, 240], [218, 224], [244, 254], [76, 296],
+    [198, 298], [116, 336], [234, 342], [164, 368],
+  ];
+  const dews = dewCoords
+    .map(([cx, cy]) => `<circle cx="${cx}" cy="${cy}" r="1.7" fill="#ffffff" opacity="0.6"/>`)
+    .join('');
+
+  const guardOverlay = flags.hasGuardBooth
+    ? `<g data-motif="guard-booth">
+        <path d="M222 146H268V204H222Z" fill="#ddd3bf" stroke="#1f2745" stroke-width="1.1" stroke-opacity="0.58"/>
+        <path d="M218 146L245 134L272 146Z" fill="#1f2745" fill-opacity="0.22" stroke="#1f2745" stroke-width="1" stroke-opacity="0.6"/>
+        <rect x="231" y="156" width="28" height="17" fill="#f3ead8" stroke="#1f2745" stroke-width="0.8" stroke-opacity="0.45"/>
+        <path d="M241 182Q245 178 249 182L252 204H238Z" fill="#1f2745" opacity="0.72"/>
+        <circle cx="245" cy="175" r="4" fill="#e8c9a8"/>
+        <path d="M239 173Q245 168 252 173Z" fill="#1f2745"/>
+      </g>`
+    : '';
+
+  const orangeOverlay = flags.hasOrangeDot
+    ? '<circle cx="266" cy="366" r="3" fill="#f08a24" data-motif="orange-dot"/>'
+    : '';
+
+  if (!includeBase) {
+    return `${guardOverlay}${orangeOverlay}`;
+  }
+
+  return `<rect x="0" y="0" width="300" height="400" fill="#f3ead8"/>
+    <ellipse cx="48" cy="46" rx="145" ry="125" fill="#f2c94c" opacity="0.16"/>
+    <ellipse cx="42" cy="40" rx="95" ry="82" fill="#f2c94c" opacity="0.14"/>
+    <circle cx="34" cy="34" r="48" fill="#f2c94c" opacity="0.12"/>
+    <path d="M18 18H282V382H18Z" fill="none" stroke="#1f2745" stroke-width="0.75" stroke-opacity="0.2"/>
+    <g>
+      <path d="M50 86H122V94H50ZM54 94H63V168H54ZM109 94H118V168H109Z" fill="#ddd3bf" stroke="#1f2745" stroke-width="1" stroke-opacity="0.45"/>
+      <path d="M46 84H126" stroke="#1f2745" stroke-width="1.1" stroke-opacity="0.42" stroke-linecap="round"/>
+    </g>
+    <g data-motif="father-watching">
+      <circle cx="86" cy="128" r="3.8" fill="#3a3250" opacity="0.86"/>
+      <path d="M80 133Q86 130 92 133L94 152H78Z" fill="#1f2745" opacity="0.74"/>
+      <path d="M81 152V165M91 152V165" stroke="#1f2745" stroke-width="2.1" stroke-opacity="0.74" stroke-linecap="round"/>
+      <path d="M72 146H78V157H71ZM94 147H100V158H93Z" fill="#ddd3bf" stroke="#1f2745" stroke-width="0.9" stroke-opacity="0.55"/>
+    </g>
+    ${steps.join('')}
+    ${dews}
+    <g data-motif="complete-companionship">
+      <ellipse cx="150" cy="306" rx="42" ry="7" fill="#1f2745" opacity="0.1"/>
+      <g transform="translate(124 226)">
+        <circle cx="0" cy="-21" r="10.5" fill="#e8c9a8"/>
+        <path d="M-11 -20Q-14 -36 1 -35Q14 -35 12 -18Q15 -4 11 4Q0 8 -12 3Z" fill="#3a3250"/>
+        <path d="M-14 0Q0 -5 14 0L18 44Q0 49 -18 44Z" fill="#f2c94c" stroke="#1f2745" stroke-width="0.9" stroke-opacity="0.35"/>
+        <path d="M-14 3L-20 33M14 3L19 32" stroke="#1f2745" stroke-width="1" stroke-opacity="0.32" stroke-linecap="round"/>
+        <path d="M-8 44V74H-1V45M3 45V72H10V44" fill="#1f2745" opacity="0.82"/>
+        <path d="M-10 74H0M2 72H12" stroke="#1f2745" stroke-width="2.6" stroke-linecap="round"/>
+      </g>
+      <g transform="translate(173 216)">
+        <circle cx="0" cy="-23" r="11" fill="#e8c9a8"/>
+        <path d="M-11 -22Q-13 -39 1 -39Q13 -38 12 -20Q4 -16 -10 -18Z" fill="#3a3250"/>
+        <path d="M-15 0Q0 -6 15 0L18 47Q0 52 -18 47Z" fill="#f3ead8"/>
+        <path d="M-15 0Q0 -6 15 0L18 47Q0 52 -18 47Z" fill="#8c8cf0" fill-opacity="0.58" stroke="#1f2745" stroke-width="0.9" stroke-opacity="0.36"/>
+        <path d="M-15 4L-21 38M15 4L21 38" stroke="#1f2745" stroke-width="1" stroke-opacity="0.3" stroke-linecap="round"/>
+        <path d="M-9 47L-10 84H-2L0 52L3 84H11L9 47Z" fill="#1f2745" opacity="0.88"/>
+        <path d="M-12 84H0M2 84H14" stroke="#1f2745" stroke-width="2.8" stroke-linecap="round"/>
+      </g>
+    </g>
+    ${guardOverlay}
+    ${orangeOverlay}`;
+}
+
+function linPaintingSvg(state?: LinPaintingState): string {
+  const resolved = resolveLinPaintingFlags(state);
+  const body = buildLinPaintingBody(resolved, true);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400" fill="none">${body}</svg>`;
+}
+
+export const ASSETS: {
+  lin_painting: string | ((state?: LinPaintingState) => string);
+} = {
+  lin_painting: linPaintingSvg,
+};
+
+function bestDrawing(): string {
+  return buildLinPaintingBody({ hasOrangeDot: true, hasGuardBooth: false }, true);
 }
 
 function classroom(sketch: boolean): string {
   let grain = '';
   for (let i = 0; i < 7; i += 1) grain += lines(`M${131 + i * 147} 610  ${169 + i * 141} 900`, '#b18668', 2);
+  let sketchSteps = '';
+  for (let i = 0; i < 7; i += 1) {
+    const y = 638 + i * 19;
+    const xL = 428 - i * 4;
+    const xR = 682 + i * 4;
+    sketchSteps += `<path d="M${xL} ${y}H${xR}M${xL - 3} ${y + 15}H${xR + 3}" />`;
+  }
   const book = sketch ? `<g transform="rotate(-8 765 627)" data-motif="unfinished-empty-steps">
       <path d="M393 492 1128 503 1156 813 405 803Z" fill="#4e5b56" opacity=".18"/>
       <path d="M371 471Q565 451 756 481 938 459 1130 488L1134 786Q943 755 758 784 570 757 382 786Z" fill="#f7efdc"/>
       ${lines('M756 485 758 779', '#d8cdb6', 3)}
-      <g fill="none" stroke="#8e9185" stroke-width="2" opacity=".8">
-        <path d="M414 650 473 615H676M411 671 478 634H698M419 692 486 655H702M425 714 494 675H707M438 735 504 697H686"/>
-        <path d="M473 610V541H634V606M485 610V554H623M480 538H646M438 629V575L465 559M446 636V593L465 580"/>
-        <path d="M527 541 532 513 561 511M612 541V526H645M672 615 703 618M492 673 695 677" opacity=".5"/>
+      <g fill="none" stroke="#6b6b6b" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" opacity=".82">
+        <path d="M442 544H534V554H442ZM448 554V622M528 554V622M440 542H538"/>
+        <circle cx="488" cy="586" r="4"/>
+        <path d="M482 592Q488 589 494 592L496 614H480Z"/>
+        <path d="M472 606H479V618H472ZM497 606H504V618H497Z"/>
+        ${sketchSteps}
+        <circle cx="516" cy="634" r="9.5"/>
+        <path d="M506 635Q504 621 517 621Q529 622 527 636Q529 647 525 653Q515 656 505 652Z"/>
+        <path d="M503 651Q516 646 529 651L533 691Q516 696 499 691Z"/>
+        <path d="M509 691V718M523 691V716"/>
       </g>
-      <g stroke="#a49d8b" stroke-width="1" opacity=".3"><path d="M606 726 658 737M612 724 667 735M620 726 674 739M618 737 668 741M628 719 657 729"/></g>
+      <g stroke="#6b6b6b" stroke-width="1.1" opacity=".28">
+        <path d="M620 718 686 734M614 728 678 742M626 736 692 746M642 714 684 725"/>
+      </g>
       <path d="M1020 736 1106 747 1109 765 1021 754Z" fill="#eee4cf"/>
     </g>
     <g transform="rotate(24 1211 692)"><path d="M1203 552H1217V805L1210 831 1203 805Z" fill="#cfab74"/><path d="M1217 552V805H1211V552" fill="#8f8b74"/><path d="M1208 821 1210 831 1213 821Z" fill="#58615e"/></g>
@@ -431,6 +540,7 @@ export function renderAssetImage(assetId: AssetId, container: HTMLElement): HTML
   image.width = width;
   image.height = height;
   image.decoding = 'async';
+  image.draggable = false;
   image.dataset.assetId = assetId;
   image.style.maxWidth = '100%';
   image.style.height = 'auto';
@@ -447,4 +557,110 @@ export function renderAssetImage(assetId: AssetId, container: HTMLElement): HTML
   image.src = source;
   container.append(image);
   return image;
+}
+
+/**
+ * 渲染“林夏的画”交互卡片：
+ * - 底图由 ASSETS.lin_painting 提供（可随时替换为外部 AI 图片路径）；
+ * - 橙点与保安亭作为独立覆盖层渲染，不依赖图片本身像素；
+ * - canFlip 为 true（trust >= 7 最高好感档）时支持点击翻面显示“开学第一天。”。
+ */
+export function renderLinPaintingCard(
+  container: HTMLElement,
+  flags: LinPaintingFlags = { hasOrangeDot: false, hasGuardBooth: false, canFlip: false },
+): HTMLElement {
+  const doc = container.ownerDocument;
+  const card = doc.createElement('div');
+  card.className = flags.canFlip ? 'lin-painting lin-painting--flippable' : 'lin-painting';
+  if (flags.canFlip) {
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-pressed', 'false');
+    card.setAttribute('aria-label', '林夏的画，点击翻到背面查看字迹');
+  }
+
+  const inner = doc.createElement('div');
+  inner.className = 'lin-painting__inner';
+
+  const front = doc.createElement('div');
+  front.className = 'lin-painting__front';
+
+  const { width, height, alt } = ASSET_MANIFEST.cg_ending_best_drawing;
+  const img = doc.createElement('img');
+  img.alt = alt;
+  img.width = width;
+  img.height = height;
+  img.decoding = 'async';
+  img.draggable = false;
+  img.dataset.assetId = 'cg_ending_best_drawing';
+  img.className = 'lin-painting__image';
+
+  const rawPainting = ASSETS.lin_painting;
+  const baseSvg = typeof rawPainting === 'function' ? rawPainting({}) : null;
+  if (baseSvg !== null) {
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(baseSvg)}`;
+  } else {
+    const extPath = rawPainting as string;
+    img.src = extPath;
+    let failed = false;
+    img.onerror = () => {
+      if (failed) return;
+      failed = true;
+      img.onerror = null;
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(linPaintingSvg({}))}`;
+    };
+  }
+  front.append(img);
+
+  const overlayMarkup = buildLinPaintingBody(flags, false);
+  if (overlayMarkup) {
+    const overlay = doc.createElement('img');
+    overlay.alt = '';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.draggable = false;
+    overlay.className = 'lin-painting__overlay';
+    if (flags.hasOrangeDot) overlay.dataset.hasOrangeDot = 'true';
+    if (flags.hasGuardBooth) overlay.dataset.hasGuardBooth = 'true';
+    const overlaySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400" fill="none">${overlayMarkup}</svg>`;
+    overlay.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(overlaySvg)}`;
+    front.append(overlay);
+  }
+
+  inner.append(front);
+
+  if (flags.canFlip) {
+    const back = doc.createElement('div');
+    back.className = 'lin-painting__back';
+    const note = doc.createElement('p');
+    note.className = 'lin-painting__back-note';
+    note.textContent = '开学第一天。';
+    back.append(note);
+    inner.append(back);
+
+    let flipped = false;
+    const toggleFlip = (): void => {
+      flipped = !flipped;
+      card.className = flipped
+        ? 'lin-painting lin-painting--flippable is-flipped'
+        : 'lin-painting lin-painting--flippable';
+      card.setAttribute('aria-pressed', flipped ? 'true' : 'false');
+    };
+    card.addEventListener('click', toggleFlip);
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ' || event.code === 'Space') {
+        event.preventDefault();
+        toggleFlip();
+      }
+    });
+
+    const tip = doc.createElement('span');
+    tip.className = 'lin-painting__hint';
+    tip.textContent = '点击画作可翻面';
+    card.append(inner, tip);
+  } else {
+    card.append(inner);
+  }
+
+  container.append(card);
+  return card;
 }

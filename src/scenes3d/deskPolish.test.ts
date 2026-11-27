@@ -108,7 +108,7 @@ describe('S7 真实精装几何、碰撞与热点', () => {
       lightOffsetY: 0.3, hitRadius: 0.4, maxDistance: 3.5 }]);
     expect(mesh(root, 'desk-reason-form').position.toArray()).toEqual([0, 0.83, -3.56]);
     expect(actors.medicineBag.position.toArray()).toEqual([1.15, 0.09, -3.15]);
-    expect(definition.requiredModels).toEqual(['volunteer', 'linxia', 'father', 'studentFemale', 'studentMale']);
+    expect(definition.requiredModels).toEqual(['studentFemale2', 'linxia', 'father', 'studentFemale', 'studentMale']);
   });
 
   it('四柱、真实交叉斜撑、坡屋面与四边褶皱帘眉均有几何且不挤占主角通路', () => {
@@ -249,6 +249,30 @@ describe('S7 真实精装几何、碰撞与热点', () => {
 });
 
 describe('S7 运行时、角色与资源所有权', () => {
+  it('桌面文具克隆几何为场景私有，清理时保留缓存母本及共享材质', async () => {
+    const geometry = new THREE.BoxGeometry(0.2, 0.02, 0.15);
+    const material = new THREE.MeshStandardMaterial();
+    geometry.userData[resources.SHARED_RESOURCE_FLAG] = true;
+    material.userData[resources.SHARED_RESOURCE_FLAG] = true;
+    const asset = { scene: new THREE.Group(), geometry, material, heightM: 0.02 };
+    vi.spyOn(resources, 'loadPropModel').mockImplementation(async (id) => id === 'stationery' ? asset : null);
+    const { root } = build();
+    await Promise.resolve();
+    const stationery = mesh(root, 'desk-stationery-props');
+    expect(stationery.geometry).not.toBe(geometry);
+    expect(stationery.geometry.userData[resources.SHARED_RESOURCE_FLAG]).not.toBe(true);
+    expect(stationery.material).toBe(material);
+    const releaseClone = vi.spyOn(stationery.geometry, 'dispose');
+    const releaseTemplate = vi.spyOn(geometry, 'dispose');
+    const releaseMaterial = vi.spyOn(material, 'dispose');
+    disposeScene(root);
+    expect(releaseClone).toHaveBeenCalledTimes(1);
+    expect(releaseTemplate).not.toHaveBeenCalled();
+    expect(releaseMaterial).not.toHaveBeenCalled();
+    geometry.dispose();
+    material.dispose();
+  });
+
   it('现有学生 GLB 含对应原生动作，驻足男生使用 fold_arms 而非不存在的 idle', () => {
     for (const [filename, expected] of [
       ['chr_student_female.glb', ['walk', 'idle']], ['chr_student_male.glb', ['fold_arms']],

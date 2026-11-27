@@ -19,6 +19,8 @@ const canSaveEvidence: Condition = { all: [
   { key: 'picked', equals: true }, { key: 'evidence', equals: false },
 ] };
 const canAskWrong: Condition = { key: 'wrongAsks', op: '<', value: 3 };
+const hasOrangeClue: Condition = { any: [{ key: 'noticedTyper', equals: true }, { key: 'orangeClue', equals: true }] };
+const guardClue = '保安大叔：校门口台阶旁那个拿橙色手机壳的男生蹲着按过手机';
 const baseClues = ['帖子发布时间 8:52', '校园墙管理员：可以帮忙转达'];
 const orangeClue = '台阶旁低头打字的男生：橙色手机壳';
 
@@ -58,7 +60,7 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
     stageNotes: ['走廊里有目光和低语，视野边缘有暗角。林夏在最后一排画窗外，指尖有铅笔灰，笔袋里有一支铅笔。'],
     steps: [
       { kind: 'caption', id: 'c2-whispers', text: '“就是那个……”话音停了。林夏低头画着速写本。' },
-      { kind: 'choice', id: 'c2-seat', allowMovement: true, prompt: '教室里还有空位，走近你想坐的座位按 E 或点击坐下。', options: [
+      { kind: 'choice', id: 'c2-seat', allowMovement: true, prompt: '你打算坐在哪里？', options: [
         { id: 'seat-beside', interactId: 'seat-beside', text: '坐她旁边', effects: {
           set: { seat: 'beside' }, add: { trust: 1 }, log: { type: 'choice', summary: '坐在林夏旁边。' },
         } },
@@ -178,25 +180,51 @@ export const chapter3Scenes: Partial<Record<SceneId, SceneDef>> = {
       '三种方法可以反复尝试；只有主动选择继续才离开。'],
     steps: [
       { kind: 'system', id: 'c5-clues', effects: { pushClue: baseClues } },
-      { kind: 'system', id: 'c5-orange-clue', when: { key: 'noticedTyper', equals: true }, effects: { pushClue: orangeClue } },
-      { kind: 'phone', id: 'c5-memo-known', when: { key: 'noticedTyper', equals: true }, panel: {
+      { kind: 'system', id: 'c5-orange-clue', when: hasOrangeClue, effects: { pushClue: orangeClue } },
+      { kind: 'phone', id: 'c5-memo-known', when: hasOrangeClue, panel: {
         id: 'c5-memo-known', closeActionId: 'close', sections: [
           { kind: 'memo', id: 'c5-known-clues', title: '备忘录 · 找到发布者', updatedAt: '今天 下午', items: [...baseClues, orangeClue] },
         ],
       } },
-      { kind: 'phone', id: 'c5-memo-unknown', when: { key: 'noticedTyper', equals: false }, panel: {
+      { kind: 'phone', id: 'c5-memo-unknown', when: { not: hasOrangeClue }, panel: {
         id: 'c5-memo-unknown', closeActionId: 'close', sections: [
           { kind: 'memo', id: 'c5-unknown-clues', title: '备忘录 · 找到发布者', updatedAt: '今天 下午', items: baseClues },
         ],
       } },
       { kind: 'choice', id: 'c5-find-path', prompt: '你想怎么找到发布者？', options: [
         { id: 'recognize', text: '去二楼走廊辨认', goto: 'c5-recognize' },
+        { id: 'ask-guard', text: '去校门问问值班的保安大叔', when: { key: 'talkedGuard', equals: false }, goto: 'c5-guard' },
         { id: 'relay', text: '联系校园墙管理员转达', goto: 'c5-admin' },
         { id: 'shout', text: '在校园墙公开留言：“发图的同学出来聊一下”', goto: 'c5-shout-effect' },
         { id: 'c5-memo', text: '再看看备忘录', goto: 'c5-clues' },
         { id: 'c5-proceed', text: '先到这里，晚些时候再去看看',
           when: { key: 'foundAyuanWay', op: '!=', value: null }, goto: 'c5-done' },
       ] },
+      { kind: 'dialogue', id: 'c5-guard',
+        effects: {
+          set: { talkedGuard: true, orangeClue: true },
+          pushClue: guardClue,
+          log: { type: 'observe', summary: '去校门口询问值班保安大叔，记起台阶旁蹲着按橙色手机壳的男生。' },
+        },
+        lines: [
+          { speaker: 'guard', text: '小姑娘爸爸那会儿刚从门岗过去没多久，我喊了一声台阶有露水，她爸还跟我道谢呢。' },
+          { speaker: 'guard', text: '我就记得旁边台阶墩儿上有个穿蓝白校服、拿橙色手机壳的小伙子，蹲在那儿一直低头按手机。' },
+        ] },
+      { kind: 'choice', id: 'c5-guard-ask', options: [
+        { id: 'c5-guard-willing-yes', text: '“师傅，如果老师来问起那天早上的事，您愿意说一下吗？”',
+          effects: {
+            set: { guardWilling: true },
+            log: { type: 'choice', summary: '请保安大叔必要时如实向老师说明那天早晨校门前的经过。' },
+          },
+          goto: 'c5-guard-willing-reply' },
+        { id: 'c5-guard-willing-no', text: '“谢谢师傅，那我先去走廊看看。”', goto: 'c5-guard-return' },
+      ] },
+      { kind: 'dialogue', id: 'c5-guard-willing-reply', lines: [
+        { speaker: 'guard', text: '这有啥不能说的，本来就是人家爸送了一小段、人家姑娘自己进的校门嘛。' },
+        { speaker: 'guard', text: '老师来问我，我就说实话。……可大伙儿传照片那阵，也没人来问我一句啊。' },
+      ] },
+      { kind: 'caption', id: 'c5-guard-caption', tone: 'subtle', text: '……是啊，谁听呢。', durationMs: 2600 },
+      { kind: 'goto', id: 'c5-guard-return', target: 'c5-find-path' },
       { kind: 'choice', id: 'c5-recognize', allowMovement: true, prompt: '在走廊走近同学，按 E 或点击询问：“请问你是……”', options: [
         { id: 'student-1', interactId: 'student-1', text: '询问靠窗的同学', when: canAskWrong, goto: 'c5-wrong-effect' },
         { id: 'student-2', interactId: 'student-2', text: '询问抱书的同学', when: canAskWrong, goto: 'c5-wrong-effect' },

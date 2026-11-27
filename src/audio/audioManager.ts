@@ -1,20 +1,182 @@
-// audio/audioManager.ts —— 轻量叙事音频：Web Audio 合成，无外部音频文件
-// 职责：首次手势解锁、静音开关持久化、手机提示音、清晨闹钟、脚步、界面点击反馈。
+// audio/audioManager.ts —— 轻量叙事音频：Web Audio 合成音效 + 懒加载循环背景音乐
+// 职责：首次手势解锁、静音开关持久化、循环 BGM（高潮/黑屏自动暂停与续播）、手机提示音、清晨闹钟、脚步、界面点击反馈。
 // 所有播放接口在无 AudioContext / 静音 / 音频不可用时静默返回，不产生任何浏览器警告。
 
-import type { GameEvents } from '../core/eventBus';
+import type { EventBus, GameEvents } from '../core/eventBus';
 
 const MUTE_STORAGE_KEY = 'yitiaojietu:muted';
 const STEP_LENGTH = 0.65;
+const BGM_SRC = './audio/bgm_sacred_play.mp3';
+/** 背景音乐初始轻柔音量，避免盖过提示音与文字阅读节奏 */
+export const BGM_DEFAULT_VOLUME = 0.22;
 
 let context: AudioContext | null = null;
 let audioUnlocked = false;
+let bgmUnlocked = false;
 let mutedCache: boolean | null = null;
+let bgmAudio: HTMLAudioElement | null = null;
+let bgmWanted = false;
+let bgmSuspended = false;
+let bgmResumeTimer: ReturnType<typeof setTimeout> | null = null;
 let noiseBuffer: AudioBuffer | null = null;
 let noiseBufferOwner: AudioContext | null = null;
 let lastMessagePopAt = Number.NEGATIVE_INFINITY;
 let lastMessagePopOwner: AudioContext | null = null;
 const footstepSources = new Map<string, { distance: number; rightFoot: boolean }>();
+
+function clearBgmResumeTimer(): void {
+  if (bgmResumeTimer !== null) {
+    clearTimeout(bgmResumeTimer);
+    bgmResumeTimer = null;
+  }
+}
+
+function ensureBgmAudio(): HTMLAudioElement | null {
+  if (bgmAudio) return bgmAudio;
+  if (typeof Audio === 'undefined') return null;
+  try {
+    const el = new Audio(BGM_SRC);
+    el.loop = true;
+    el.preload = 'auto';
+    el.volume = BGM_DEFAULT_VOLUME;
+    bgmAudio = el;
+    return el;
+  } catch {
+    return null;
+  }
+}
+
+function syncBgmPlayback(): void {
+  const hidden = typeof document !== 'undefined' && document.hidden === true;
+  const shouldPlay = bgmWanted && !bgmSuspended && !isMuted() && bgmUnlocked && !hidden;
+  if (!bgmAudio && !shouldPlay) return;
+  const el = ensureBgmAudio();
+  if (!el) return;
+  try {
+    el.volume = BGM_DEFAULT_VOLUME;
+    el.muted = isMuted();
+    if (shouldPlay) {
+      if (el.paused) {
+        const promise = el.play();
+        if (promise && typeof promise.catch === 'function') promise.catch(() => {});
+      }
+    } else if (!el.paused) {
+      el.pause();
+    }
+  } catch {
+    // 浏览器音频策略受限时静默降级
+  }
+}
+
+/** 启动背景音乐循环（需在用户手势解锁后真正出声） */
+export function startBgm(): void {
+  clearBgmResumeTimer();
+  bgmWanted = true;
+  syncBgmPlayback();
+}
+
+/** 停止背景音乐并归零（返回标题页时使用） */
+export function stopBgm(): void {
+  clearBgmResumeTimer();
+  bgmWanted = false;
+  bgmSuspended = false;
+  if (!bgmAudio) return;
+  try {
+    bgmAudio.pause();
+    bgmAudio.currentTime = 0;
+  } catch {
+    // 静默降级
+  }
+}
+
+/** 高潮段落或黑屏过渡讲解期间自动暂停背景音乐 */
+export function suspendBgm(): void {
+  clearBgmResumeTimer();
+  bgmSuspended = true;
+  syncBgmPlayback();
+}
+
+/** 离开黑屏讲解或高潮段落进入下一段剧情后自动续播（短防抖避免连续黑屏/高潮间闪音） */
+export function resumeBgm(delayMs = 80): void {
+  clearBgmResumeTimer();
+  if (!bgmSuspended) {
+    syncBgmPlayback();
+    return;
+  }
+  if (delayMs <= 0) {
+    bgmSuspended = false;
+    syncBgmPlayback();
+    return;
+  }
+  bgmResumeTimer = setTimeout(() => {
+    bgmResumeTimer = null;
+    bgmSuspended = false;
+    syncBgmPlayback();
+  }, delayMs);
+}
+
+/** 绑定全局剧情事件总线，统一管理循环 BGM 的起播、黑屏/高潮自动暂停与续播 */
+export function bindBgmEvents(bus: EventBus): () => void {
+  const onGestureUnlock = (): void => {
+    unlockAudio();
+  };
+  const onVisibilityChange = (): void => {
+    syncBgmPlayback();
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerdown', onGestureUnlock, { passive: true });
+    window.addEventListener('keydown', onGestureUnlock, { passive: true });
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  }
+  const unsubscribers = [
+    bus.on('game:start', () => {
+      bgmSuspended = false;
+      startBgm();
+    }),
+    bus.on('ui:continueGame', () => {
+      bgmSuspended = false;
+      startBgm();
+    }),
+    bus.on('ui:selectChapter', () => {
+      bgmSuspended = false;
+      startBgm();
+    }),
+    bus.on('scene:transition', () => {
+      const startPage = typeof document === 'undefined' ? null : document.getElementById('start-page');
+      if (startPage && !startPage.hidden) return;
+      bgmWanted = true;
+      resumeBgm(80);
+    }),
+    // 黑屏过渡讲解与高潮演出/高压小游戏期间自动暂停 BGM
+    bus.on('ui:showIntertitle', () => suspendBgm()),
+    bus.on('ui:showMoment', () => suspendBgm()),
+    bus.on('ui:showMinigame', () => suspendBgm()),
+    // 进入后续普通剧情段落后自动继续播放
+    bus.on('ui:dialogueEnd', () => resumeBgm(80)),
+    bus.on('ui:momentEnd', () => resumeBgm(80)),
+    bus.on('ui:minigameEnd', () => resumeBgm(80)),
+    bus.on('ui:showDialogue', () => resumeBgm(40)),
+    bus.on('ui:showChoices', () => resumeBgm(40)),
+    bus.on('ui:showCaption', () => resumeBgm(40)),
+    bus.on('ui:showPhone', () => resumeBgm(40)),
+    bus.on('ui:showObjective', () => resumeBgm(40)),
+    bus.on('game:chapterEnd', () => resumeBgm(40)),
+    bus.on('game:title', () => stopBgm()),
+  ];
+  return () => {
+    clearBgmResumeTimer();
+    for (const off of unsubscribers) off();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pointerdown', onGestureUnlock);
+      window.removeEventListener('keydown', onGestureUnlock);
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    }
+  };
+}
 
 function safeStorage(): Storage | null {
   try {
@@ -48,6 +210,7 @@ export function setMuted(muted: boolean): void {
     // 存储被禁用时忽略，保持会话内状态
   }
   if (muted) resetFootsteps();
+  syncBgmPlayback();
 }
 
 /** 切换静音，返回切换后的状态 */
@@ -68,6 +231,8 @@ export function getAudioContext(): AudioContext {
  * 再播放一个 1 采样点的静音 AudioBuffer。
  */
 export function unlockAudio(): void {
+  bgmUnlocked = true;
+  syncBgmPlayback();
   if (typeof AudioContext === 'undefined') return;
   try {
     const ctx = getAudioContext();
@@ -169,6 +334,19 @@ export function playAlarm(): void {
       softBeep(ctx, startAt + delay, 784, 0.26, gain, 'sine');
       softBeep(ctx, startAt + delay, 1174.7, 0.2, gain * 0.35, 'triangle');
     }
+  } catch {
+    // 静默降级
+  }
+}
+
+/** 开场自动出门倒计时最后两秒的轻柔读秒滴答声（约 -18dB） */
+export function playCountdownTick(): void {
+  const ctx = playbackContext();
+  if (!ctx) return;
+
+  try {
+    const startAt = ctx.currentTime + 0.005;
+    softBeep(ctx, startAt, 880, 0.032, 0.024, 'triangle');
   } catch {
     // 静默降级
   }

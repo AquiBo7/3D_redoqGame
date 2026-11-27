@@ -9,7 +9,7 @@
   flex-direction: column;
   padding: max(18px, env(safe-area-inset-top, 0px))
     max(20px, env(safe-area-inset-right, 0px))
-    calc(48px + env(safe-area-inset-bottom, 0px))
+    calc(56px + env(safe-area-inset-bottom, 0px))
     max(20px, env(safe-area-inset-left, 0px));
   overflow: auto;
   overscroll-behavior: contain;

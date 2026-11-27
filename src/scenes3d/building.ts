@@ -30,6 +30,8 @@ import { canopyBudget, getQualityTier } from '../world/quality';
 import { advanceColorBloom, applyColorBloomShader, createColorBloomUniforms } from './colorBloom';
 import type { ColorBloomUniforms } from './colorBloom';
 import { SHARED_RESOURCE_FLAG, loadPropModel } from '../world/resources';
+import { buildBuildingSportsFields } from './buildingSports';
+import { buildBuildingCampusUpgrades, createLawKioskMaterial } from './buildingCampusUpgrades';
 
 const buildingWindTime: WindTime = { value: 0 };
 
@@ -435,71 +437,73 @@ function campusCanvasMaterial(
 }
 
 function campusPosterMaterial(): THREE.MeshStandardMaterial {
-  return campusCanvasMaterial(640, 288, (context) => {
-    context.fillStyle = '#e9dfc9';
-    context.fillRect(0, 0, 640, 288);
-    const titles = ['共读一页', '午后小展', '绿荫漫步', '交流时光'];
-    const subtitles = ['带一本书来', '发现身边的美', '放慢脚步', '听见不同声音'];
-    const dates = ['09.08 · 午后', '09.10 · 午后', '09.12 · 清晨', '每周三 · 午后'];
-    const accents = ['#bd7355', '#c49a4f', '#7d9569', '#b38172'];
+  return campusCanvasMaterial(800, 340, (context) => {
+    context.fillStyle = '#efe6cf';
+    context.fillRect(0, 0, 800, 340);
+    const titles = ['反网络暴力', '反校园霸凌', '普法小课堂', '心灵驿站'];
+    const slogans = ['键盘伤人也是伤害', '向校园欺凌说"不"', '语言暴力也是刀', '有烦恼勇敢说出来'];
+    const subs = ['不造谣 · 不信谣 · 不网暴', '不做冷漠的旁观者', '留存证据 · 法律护己', '多份倾听 · 少份伤害'];
+    const footers = ['未保法第77条 · 民法典1024', '未保法第39条 · 零容忍', '96110 反诈 · 110 求助', '青少年心理热线 12355'];
+    const accents = ['#df743c', '#459467', '#357ab8', '#d99e2b'];
     for (let i = 0; i < 4; i += 1) {
-      const x = 12 + i * 157;
-      context.fillStyle = '#faf2dc';
-      context.fillRect(x, 12, 145, 264);
+      const x = 14 + i * 195;
+      context.fillStyle = '#fffcf5';
+      context.fillRect(x, 14, 183, 312);
       context.fillStyle = accents[i];
-      context.fillRect(x, 12, 7, 264);
-      context.fillRect(x + 18, 27, 29, 4);
-      context.textAlign = 'left';
+      context.fillRect(x, 14, 183, 44);
+      context.textAlign = 'center';
       context.textBaseline = 'middle';
-      context.font = '700 21px "Microsoft YaHei", sans-serif';
-      context.fillStyle = '#594739';
-      context.fillText(titles[i], x + 18, 56, 116);
+      context.font = '700 22px "Microsoft YaHei", sans-serif';
+      context.fillStyle = '#ffffff';
+      context.fillText(titles[i], x + 91, 36, 168);
+      // 圆形图标
       context.fillStyle = accents[i];
       context.beginPath();
-      context.arc(x + 78, 130, 39, 0, Math.PI * 2);
+      context.arc(x + 91, 108, 34, 0, Math.PI * 2);
       context.fill();
-      context.fillStyle = '#faf2dc';
+      context.fillStyle = '#ffffff';
       if (i === 0) {
-        context.fillRect(x + 51, 111, 23, 35);
-        context.fillRect(x + 79, 111, 23, 35);
-        context.fillRect(x + 74, 115, 5, 37);
+        // 禁止键盘/屏幕斜杠图标
+        context.fillRect(x + 67, 94, 48, 28);
+        context.fillStyle = '#d93629';
+        context.fillRect(x + 69, 106, 44, 5);
       } else if (i === 1) {
-        context.fillRect(x + 51, 108, 49, 43);
-        context.fillStyle = accents[i];
-        context.fillRect(x + 56, 113, 39, 33);
-        context.fillStyle = '#faf2dc';
-        context.beginPath();
-        context.moveTo(x + 59, 143);
-        context.lineTo(x + 74, 123);
-        context.lineTo(x + 92, 143);
-        context.closePath();
-        context.fill();
+        // 禁止拳头斜杠图标
+        context.fillRect(x + 73, 92, 36, 30);
+        context.fillStyle = '#d93629';
+        context.fillRect(x + 69, 106, 44, 5);
       } else if (i === 2) {
-        context.beginPath();
-        context.ellipse(x + 70, 120, 11, 22, -0.6, 0, Math.PI * 2);
-        context.ellipse(x + 88, 127, 10, 21, 0.6, 0, Math.PI * 2);
-        context.fill();
-        context.fillRect(x + 77, 131, 3, 25);
+        // 天平/盾牌图标
+        context.fillRect(x + 76, 92, 30, 26);
+        context.fillRect(x + 83, 118, 16, 10);
+        context.fillStyle = '#f7d14a';
+        context.fillRect(x + 69, 98, 44, 4);
       } else {
-        context.fillRect(x + 49, 108, 40, 27);
-        context.fillRect(x + 67, 139, 36, 16);
+        // 爱心/笑脸图标
         context.beginPath();
-        context.moveTo(x + 55, 133);
-        context.lineTo(x + 55, 143);
-        context.lineTo(x + 69, 133);
+        context.arc(x + 82, 102, 11, 0, Math.PI * 2);
+        context.arc(x + 100, 102, 11, 0, Math.PI * 2);
+        context.fill();
+        context.beginPath();
+        context.moveTo(x + 72, 107);
+        context.lineTo(x + 91, 127);
+        context.lineTo(x + 110, 107);
         context.closePath();
         context.fill();
       }
-      context.fillStyle = '#776451';
-      context.font = '14px "Microsoft YaHei", sans-serif';
-      context.fillText(subtitles[i], x + 18, 189, 114);
-      context.fillStyle = '#d6c7ad';
-      context.fillRect(x + 18, 205, 106, 1);
+      context.fillStyle = '#26313a';
+      context.font = '700 18px "Microsoft YaHei", sans-serif';
+      context.fillText(slogans[i], x + 91, 170, 168);
+      context.fillStyle = '#4f5d66';
+      context.font = '700 14px "Microsoft YaHei", sans-serif';
+      context.fillText(subs[i], x + 91, 206, 168);
+      context.fillStyle = '#dfd5c0';
+      context.fillRect(x + 16, 232, 151, 2);
       context.fillStyle = accents[i];
-      context.fillRect(x + 18, 223, 112, 33);
-      context.fillStyle = '#fff5e0';
-      context.font = '700 13px "Microsoft YaHei", sans-serif';
-      context.fillText(dates[i], x + 24, 240, 100);
+      context.fillRect(x + 12, 264, 159, 44);
+      context.fillStyle = '#fff9ee';
+      context.font = '700 14px "Microsoft YaHei", sans-serif';
+      context.fillText(footers[i], x + 91, 286, 148);
     }
   }, { roughness: 0.88, emissive: 0x917047, emissiveIntensity: 0.055 });
 }
@@ -633,6 +637,7 @@ function buildBuilding(parent: THREE.Object3D): {
   foliageWind.name = 'building-bloom-canopies';
   const lobby = campusLobbyMaterial();
   const poster = campusPosterMaterial();
+  const lawPoster = createLawKioskMaterial();
   const paper = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
   const stone = new THREE.MeshStandardMaterial({ color: 0x8c9287, roughness: 0.92 });
   const cream = new THREE.MeshStandardMaterial({ color: 0xdfdac9, roughness: 0.86 });
@@ -870,10 +875,11 @@ function buildBuilding(parent: THREE.Object3D): {
     material.name = `building-bloom-meadow-${name}`;
   }
 
+  // 清除落入左侧新建四片篮球场净空区 [-34.9, -7.9] × [-8.0, +14.0] 的树木 (-10.4,-6.8)（坑位改为矮花坛）
   const grove = [
     ...TREES.map((tree) => ({ ...tree, size: 1 })),
     { x: -8.5, z: 5.5, size: 1.05 }, { x: 8.7, z: 1.8, size: 1.12 },
-    { x: -10.4, z: -6.8, size: 1.2 }, { x: 7.9, z: -10.6, size: 1.1 },
+    { x: 7.9, z: -10.6, size: 1.1 },
     { x: -12, z: -20.5, size: 1.08 }, { x: 10.5, z: -20, size: 1.28 },
     { x: -8.6, z: -29.5, size: 1.15 }, { x: 12.6, z: -34.3, size: 1.03 },
     { x: -12, z: -41.3, size: 1.18 }, { x: 8.2, z: -42.1, size: 1.16 },
@@ -905,14 +911,14 @@ function buildBuilding(parent: THREE.Object3D): {
       const y = (i < 8 ? 4.65 + (i % 3) * 0.2 : 5.75 + (i % 2) * 0.2) * size;
       crowns.push({
         p: [x, y, z], s: [(0.92 + (i % 3) * 0.12) * size, (0.72 + (i % 2) * 0.11) * size, 0.94 * size],
-        r: [0.12, angle, 0.1], color: [0x5f8a41, 0x76a04d, 0x4f7a3b, 0x88ac5c][(index + i) % 4],
+        r: [0.12, angle, 0.1], color: [0x3f7a3c, 0x6c9a4a, 0x9cc06a, 0x6c9a4a][(index + i) % 4],
       });
       for (let tip = 0; tip < 4; tip += 1) {
         const a = angle + tip * 1.57;
         leafTips.push({
           p: [x + Math.cos(a) * 1.03 * size, y + Math.sin(i + tip) * 0.55 * size, z + Math.sin(a) * size],
           s: [0.48 * size, 0.23 * size, 0.36 * size], r: [0.25, a, 0.3],
-          color: [0x9dbb6f, 0x7fa85f, 0xbdd083][(i + tip) % 3],
+          color: [0x9cc06a, 0x6c9a4a, 0x85ae5b][(i + tip) % 3],
         });
       }
     }
@@ -930,7 +936,7 @@ function buildBuilding(parent: THREE.Object3D): {
         scale: (2.85 + ((card * 5 + index) % 3) * 0.18) * size,
         yaw: angle + Math.PI / 2,
         tilt: (card % 3 - 1) * 0.17,
-        tint: [0xdfe7d6, 0xe9efe0, 0xd4dec9, 0xeef4e7][(index + card) % 4],
+        tint: [0xdff0d6, 0xecf5e3, 0xd4e8ca, 0xf2f8ea][(index + card) % 4],
       });
     }
     for (let i = 0; i < 18; i += 1) {
@@ -988,6 +994,9 @@ function buildBuilding(parent: THREE.Object3D): {
     const smallTips: CampusPart[] = [];
     for (const [index, tree] of understory.entries()) {
       if (Math.sign(tree.x) !== side) continue;
+      // 跳过落入左侧篮球场及右侧网球场清场区的林下树，避免遮挡入口与场地
+      if (tree.x > -35.2 && tree.x < -7.9 && tree.z > -8.2 && tree.z < 14.2) continue;
+      if (tree.x > 9.5 && tree.x < 25.5 && tree.z > -5.2 && tree.z < 13.2) continue;
       smallTrunks.push({ p: [tree.x, tree.height / 2, tree.z], s: [0.19 * tree.size, tree.height, 0.19 * tree.size] });
       for (let branch = 0; branch < 3; branch += 1) {
         const a = index * 0.85 + branch * 2.1;
@@ -1002,14 +1011,14 @@ function buildBuilding(parent: THREE.Object3D): {
         const y = tree.height + (cluster < 6 ? 0.05 + (cluster % 3) * 0.23 : 1.08 + (cluster % 2) * 0.28) * tree.size;
         smallCrowns.push({
           p: [x, y, z], s: [(0.86 + (cluster % 3) * 0.13) * tree.size, (0.62 + (index % 3) * 0.16) * tree.size, 0.91 * tree.size],
-          r: [0.08 * index, a, 0.16], color: [0xb4bd8c, 0x9eb17f, 0xc1c59b, 0x889e76][(index + cluster) % 4],
+          r: [0.08 * index, a, 0.16], color: [0x6c9a4a, 0x85ae5b, 0x9cc06a, 0x3f7a3c][(index + cluster) % 4],
         });
         for (let tip = 0; tip < 3; tip += 1) {
           const angle = a + tip * 2.1;
           smallTips.push({
             p: [x + Math.cos(angle) * 0.83 * tree.size, y + Math.sin(cluster + tip) * 0.32, z + Math.sin(angle) * 0.77 * tree.size],
             s: [0.38 * tree.size, 0.2 * tree.size, 0.34 * tree.size], r: [0.2, angle, 0.15],
-            color: tip % 2 ? 0xc7ca9d : 0xa5b886,
+            color: tip % 2 ? 0x9cc06a : 0x6c9a4a,
           });
         }
       }
@@ -1051,7 +1060,7 @@ function buildBuilding(parent: THREE.Object3D): {
   // 卡片走 unlit 材质，明暗已经烘在贴图里，不再让场景灯去算第二遍。
   const rowTier = canopyBudget(getQualityTier());
   const rowGolden = Math.PI * (3 - Math.sqrt(5));
-  const rowTints = [0xdfe7d6, 0xe9efe0, 0xd4dec9, 0xeef4e7];
+  const rowTints = [0xdff0d6, 0xecf5e3, 0xd4e8ca, 0xf2f8ea];
   for (const side of [-1, 1]) {
     const rowTrunks: CampusPart[] = [];
     const rowCards: CanopyCardSpec[] = [];
@@ -1102,6 +1111,9 @@ function buildBuilding(parent: THREE.Object3D): {
       for (let tree = 0; tree < 6; tree += 1) {
         const x = side * (19.5 + layer * 9 + Math.sin(tree * 1.7) * 1.4);
         const z = 9 - tree * 12.4 + (layer % 2 ? 4.6 : 0) + Math.cos(tree * 2.3) * 1.6;
+        // 移除落入左侧四片篮球场清场区 [-35.2, -7.9] × [-8.2, +14.2] 及右侧网球场清场区 [+9.8, +25.5] × [-5.2, +13.2] 的树木实例
+        if (x > -35.2 && x < -7.9 && z > -8.2 && z < 14.2) continue;
+        if (x > 9.8 && x < 25.5 && z > -5.2 && z < 13.2) continue;
         const height = 4.6 + layer * 0.8 + (tree % 3) * 0.7;
         const size = 1.35 + layer * 0.18 + (tree % 2) * 0.2;
         horizonTrunks.push({ p: [x, height / 2, z], s: [0.2 * size, height, 0.2 * size] });
@@ -1111,7 +1123,7 @@ function buildBuilding(parent: THREE.Object3D): {
           horizonCrowns.push({
             p: [x + Math.cos(angle) * radius, height + (cluster < 6 ? 0.2 + (cluster % 3) * 0.32 : 1.5) * size, z + Math.sin(angle) * radius],
             s: [1.2 * size, 0.85 * size, 1.12 * size], r: [0.1, angle, 0.06],
-            color: [0x99ad9a, 0xa8b69e, 0xb3c2af][layer],
+            color: [0x638861, 0x79996d, 0x8eab82][layer],
           });
         }
       }
@@ -1141,7 +1153,7 @@ function buildBuilding(parent: THREE.Object3D): {
     for (const y of [1.12, 2.12]) detailBox(iron, [x, y, z + 0.15], [2.45, 0.025, 0.025]);
     detailBox(cream, [x, 1.095, z + 0.16], [2.48, 0.045, 0.16]);
     detailBox(paper, [x + 1.13, 1.64, z + 0.16], [0.016, 0.87, 0.005], 0xf4ead3);
-    detailSign('校园生活', 1.5, 0.3, [x, 2.24, z + 0.16]);
+    detailSign('文明校园 · 法治护航', 1.85, 0.3, [x, 2.24, z + 0.16]);
   }
 
   const tires: CampusPart[] = [];
@@ -1166,9 +1178,13 @@ function buildBuilding(parent: THREE.Object3D): {
     detailBox(iron, [bikeX + side * 1.63, 1.02, bikeZ], [0.055, 0.055, 6.9]);
     detailSign('自行车停放', 2.15, 0.3, [bikeX - side * 1.82, 2.27, bikeZ], -side * Math.PI / 2);
     for (let bike = 0; bike < 3; bike += 1) {
+      // 3 辆差异化车型：0=橙色共享单车（黄车筐+挡泥板+直把）、1=蓝色城市通勤车（金属前筐+后座）、2=粉色淑女车（低跨梁+弯把+米色座+前筐书包）
       const x = bikeX + (bike % 2) * 0.12;
       const z = bikeZ - 2.3 + bike * 2.2;
-      const color = [0xd5a477, 0xa3b8a6, 0xb7bdc3][bike];
+      const steerYaw = (bike - 1) * 0.11;
+      const frameColor = [0xf26d21, 0x3478c6, 0xf29bb2][bike];
+      const fenderColor = [0x2a3136, 0x26323c, 0xf7b7c8][bike];
+      const saddleColor = [0xe86122, 0x2d3338, 0xe8d9be][bike];
       const rear: CampusTuple = [x, 0.36, z - 0.65];
       const front: CampusTuple = [x, 0.36, z + 0.65];
       const pedal: CampusTuple = [x, 0.36, z - 0.04];
@@ -1176,20 +1192,45 @@ function buildBuilding(parent: THREE.Object3D): {
       const head: CampusTuple = [x, 0.94, z + 0.4];
       const fork: CampusTuple = [x, 0.65, z + 0.51];
       for (const wheel of [rear, front]) {
-        tires.push({ p: wheel, s: [1, 1, 1], r: [0, Math.PI / 2, 0] });
-        rims.push({ p: wheel, s: [1, 1, 1], r: [0, Math.PI / 2, 0] });
+        const wYaw = wheel === front ? Math.PI / 2 + steerYaw : Math.PI / 2;
+        tires.push({ p: wheel, s: [1, 1, 1], r: [0, wYaw, 0] });
+        rims.push({ p: wheel, s: [1, 1, 1], r: [0, wYaw, 0] });
         for (let spoke = 0; spoke < 8; spoke += 1) {
           const angle = spoke * Math.PI / 4;
           detailRod(iron, wheel, [x, wheel[1] + Math.sin(angle) * 0.31, wheel[2] + Math.cos(angle) * 0.31], 0.0045);
         }
       }
-      for (const [a, b] of [[rear, saddle], [saddle, pedal], [pedal, rear], [saddle, head], [head, pedal], [head, fork], [fork, front]] as Array<[CampusTuple, CampusTuple]>) {
-        detailRod(iron, a, b, 0.021, color);
+      const frameEdges: Array<[CampusTuple, CampusTuple]> = bike === 2
+        ? [
+            // 淑女车：低跨梁（无高上横梁，从头管斜弯下接五通，辨识度一眼区分）
+            [rear, saddle], [saddle, pedal], [pedal, rear],
+            [[x, 0.48, z + 0.12], head], [pedal, [x, 0.48, z + 0.12]],
+            [head, fork], [fork, front],
+          ]
+        : [
+            [rear, saddle], [saddle, pedal], [pedal, rear], [saddle, head], [head, pedal], [head, fork], [fork, front],
+          ];
+      for (const [a, b] of frameEdges) {
+        detailRod(paper, a, b, bike === 0 ? 0.026 : 0.021, frameColor);
       }
+      // 挡泥板（前后轮上方弧段）
+      detailBox(paper, [x, 0.72, z - 0.58], [0.09, 0.03, 0.34], fenderColor, [0.42, 0, 0]);
+      detailBox(paper, [x, 0.72, z + 0.58], [0.09, 0.03, 0.34], fenderColor, [-0.42, 0, 0]);
+      // 车座与车把（淑女车用宽弯把，其余用直把）
       detailRod(iron, saddle, [x, 1.015, z - 0.28], 0.018);
-      detailBox(iron, [x, 1.035, z - 0.29], [0.19, 0.06, 0.28]);
+      detailBox(paper, [x, 1.035, z - 0.29], [0.19, 0.06, 0.28], saddleColor);
       detailRod(iron, head, [x, 1.09, z + 0.36], 0.018);
       detailRod(iron, [x - 0.24, 1.09, z + 0.36], [x + 0.24, 1.09, z + 0.36], 0.015);
+      // 前车筐（0=明黄共享车筐，1=银灰金属筐，2=米色藤编筐带小书包）
+      const basketColor = [0xffcc29, 0x9aa4ab, 0xd8be94][bike];
+      detailBox(paper, [x, 0.92, z + 0.56], [0.3, 0.2, 0.24], basketColor);
+      if (bike === 2) {
+        detailBox(paper, [x, 1.01, z + 0.56], [0.22, 0.14, 0.16], 0x4b74a8);
+      }
+      // 通勤车与淑女车带后座货架
+      if (bike >= 1) {
+        detailBox(paper, [x, 0.76, z - 0.58], [0.16, 0.03, 0.42], bike === 1 ? 0x3b4448 : 0xf29bb2);
+      }
       detailBox(iron, [x + 0.095, 0.34, z - 0.04], [0.18, 0.025, 0.085]);
       detailRod(iron, [x, 0.34, z - 0.08], [x + 0.24, 0.025, z - 0.23], 0.013);
       for (const rackZ of [z - 0.79, z - 0.51]) {
@@ -1216,11 +1257,11 @@ function buildBuilding(parent: THREE.Object3D): {
     detailBox(sage, [kioskX, 2.69, kioskZ], [1.94, 0.16, 2.46], 0xffffff, [side * 0.045, 0, 0]);
     detailBox(cream, [kioskX, 2.56, kioskZ], [1.84, 0.075, 2.36]);
     detailBox(iron, [kioskX, 1.59, kioskZ], [0.12, 1.55, 1.96]);
-    const display = campusMesh(parent, new THREE.PlaneGeometry(1.74, 1.28), poster, [kioskX - side * 0.071, 1.56, kioskZ], false);
+    const display = campusMesh(parent, new THREE.PlaneGeometry(1.74, 1.28), lawPoster, [kioskX - side * 0.071, 1.56, kioskZ], false);
     display.rotation.y = -side * Math.PI / 2;
     display.name = `building-announcement-kiosk-${side}`;
     display.userData.campusDetail = true;
-    detailSign('校园公告', 1.65, 0.27, [kioskX - side * 0.078, 2.34, kioskZ], -side * Math.PI / 2);
+    detailSign('普法宣传 · 用法护己', 1.65, 0.27, [kioskX - side * 0.078, 2.34, kioskZ], -side * Math.PI / 2);
     detailRod(iron, [kioskX - side * 0.72, 2.13, kioskZ - 0.91], [kioskX - side * 0.27, 2.55, kioskZ - 0.91], 0.025);
 
     // 楼前远处球场只做低面数灯杆与球架剪影，不增加实时光源或占用中央通路。
@@ -1425,9 +1466,11 @@ function buildBuilding(parent: THREE.Object3D): {
   }
   box(sage, [0, 4.36, 14.2], [14, 0.38, 1.1]);
   box(cream, [0, 4.58, 14.2], [14.6, 0.1, 1.4]);
-  const gateSign = createTextSign('校园', 2.2, 0.42, { background: '#657568', foreground: '#eee8d8' });
-  gateSign.position.set(0, 4.35, 13.635);
+  const gateSign = createTextSign('千问高中', 3.4, 0.48, { background: '#4e695c', foreground: '#faf3dc', resolution: 320 });
+  gateSign.position.set(0, 4.38, 13.635);
   gateSign.rotation.y = Math.PI;
+  buildBuildingSportsFields(parent);
+  buildBuildingCampusUpgrades(parent);
   parent.add(gateSign);
   for (const [material, parts] of boxes) {
     campusInstances(parent, new THREE.BoxGeometry(1, 1, 1), material, parts, material !== glass && material !== warm && material !== lobby);
@@ -1458,8 +1501,8 @@ function buildBuilding(parent: THREE.Object3D): {
       const height = [13.2, 18.2, 24][layer]
         + Math.sin(segment * 1.73 + layer * 0.9) * [1.7, 2.8, 3.4][layer]
         + Math.cos(segment * 0.65) * 0.6;
-      ridgeColor.setHex([0x60756f, 0x7a9299, 0x91a8b5][layer])
-        .lerp(ridgeAccent.setHex([0x788b7d, 0x91a29f, 0xa3b5c1][layer]), 0.14 + Math.cos(segment * 2.17) * 0.12)
+      ridgeColor.setHex([0x56706a, 0x6c868d, 0x899cb0][layer])
+        .lerp(ridgeAccent.setHex([0x657e78, 0x7e9498, 0x99abc0][layer]), 0.14 + Math.cos(segment * 2.17) * 0.12)
         .lerp(fogColor, 0.12 + layer * 0.14 + Math.sin(segment * 1.31 + layer) * 0.045);
       ridgeParts.push({
         p: [Math.cos(angle) * radius, -4, Math.sin(angle) * radius],
@@ -1733,7 +1776,29 @@ export const buildingRuntime: SceneRuntime = {
       context.bus.on('ui:worldBlocked', ({ blocked }) => {
         if (!blocked) beginLinxiaWalk();
       }),
+      context.bus.on('scene:interact', ({ sceneId, targetId }) => {
+        if (sceneId !== 'S8') return;
+        const messages: Record<string, string> = {
+          'board-west-anti-bully': '【文明校园 · 法治护航】键盘伤人也是伤害（《未成年人保护法》第77条）；对校园霸凌零容忍，遇欺凌及时留证求助，心理热线 12355。',
+          'board-east-anti-bully': '【反网暴 · 反霸凌 · 普法】不造谣、不信谣、不网暴；《民法典》第1024条与《刑法》第246条保护名誉权，紧急求助请拨 110 / 96110。',
+          'board-tri-panel': '【阳光成长宣传栏】拒绝网络暴力，向校园霸凌说“不”，有烦恼及时向师长倾诉（青少年服务热线 12355）。',
+        };
+        const text = messages[targetId];
+        if (!text) return;
+        context.bus.emit('ui:showCaption', {
+          stepId: `s8-${targetId}`,
+          text,
+          durationMs: 5200,
+          kind: 'observation',
+          tone: 'default',
+        });
+      }),
     );
+    if (context.sceneId === 'S8') {
+      for (const id of ['board-west-anti-bully', 'board-east-anti-bully', 'board-tri-panel']) {
+        context.setInteractableVisible(id, true);
+      }
+    }
   },
 
   tick(dtSeconds: number): void {
@@ -1827,7 +1892,14 @@ export function createBuildingDefinition(sceneId: SceneId): WorldSceneDefinition
     nav: NAV,
     // 林荫路的林夏 + 校门方向守望的爸爸
     requiredModels: ['linxia', 'father', 'studentFemale', 'studentMale'],
-    interactables: [],
+    interactables:
+      sceneId === 'S8'
+        ? [
+            { id: 'board-west-anti-bully', position: { x: -8.1, y: 1.6, z: -16.8 }, lightOffsetY: 0.45, maxDistance: 5.5 },
+            { id: 'board-east-anti-bully', position: { x: 8.2, y: 1.6, z: -32.0 }, lightOffsetY: 0.45, maxDistance: 5.5 },
+            { id: 'board-tri-panel', position: { x: 8.45, y: 1.56, z: -22.2 }, lightOffsetY: 0.45, maxDistance: 5.5 },
+          ]
+        : [],
     hotspots:
       sceneId === 'S8'
         ? [

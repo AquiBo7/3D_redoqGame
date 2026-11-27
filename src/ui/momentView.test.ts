@@ -161,13 +161,36 @@ afterEach(() => {
 });
 
 describe('MomentView 叙事演出浮层', () => {
-  it('opening-news 自动轮播两句字幕并在结束后完成，也支持点击关闭或 Esc 提前关闭', () => {
-    view.show({ stepId: 's1-news', moment: 'opening-news', lines: ['第一句新闻', '第二句新闻'] });
+  it('opening-news 自动轮播三句字幕并在结束后完成，支持右下角「下一条」手动翻页及关闭/Esc 退出', () => {
+    view.show({ stepId: 's1-news', moment: 'opening-news', lines: ['第一句新闻', '第二句新闻', '第三句新闻'] });
     expect(query('.moment-news__subtitle').textContent).toBe('第一句新闻');
+    expect(query('.moment-news__counter').textContent).toBe('第 1 / 3 条');
+    expect(query('[data-moment-action="next"]').textContent).toBe('下一条');
     vi.advanceTimersByTime(3800);
     expect(query('.moment-news__subtitle').textContent).toBe('第二句新闻');
+    expect(query('.moment-news__counter').textContent).toBe('第 2 / 3 条');
     vi.advanceTimersByTime(4200);
+    expect(query('.moment-news__subtitle').textContent).toBe('第三句新闻');
+    expect(query('.moment-news__counter').textContent).toBe('第 3 / 3 条');
+    expect(query('[data-moment-action="next"]').textContent).toBe('结束播报');
+    vi.advanceTimersByTime(4500);
     expect(onEnd).toHaveBeenCalledExactlyOnceWith('s1-news', 'completed');
+
+    // 手动点击「下一条」翻页后取消自动关闭倒计时，交由玩家从容阅读并手动结束
+    onEnd.mockClear();
+    view.show({ stepId: 's1-news-manual', moment: 'opening-news' });
+    expect(query('.moment-news__counter').textContent).toBe('第 1 / 3 条');
+    query('[data-moment-action="next"]').click();
+    expect(query('.moment-news__counter').textContent).toBe('第 2 / 3 条');
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(20000);
+    expect(onEnd).not.toHaveBeenCalled();
+    query('[data-moment-action="next"]').click();
+    expect(query('.moment-news__counter').textContent).toBe('第 3 / 3 条');
+    expect(query('.moment-news__subtitle').textContent).toContain('拒绝网络暴力');
+    expect(query('[data-moment-action="next"]').textContent).toBe('结束播报');
+    query('[data-moment-action="next"]').click();
+    expect(onEnd).toHaveBeenCalledExactlyOnceWith('s1-news-manual', 'completed');
 
     onEnd.mockClear();
     view.show({ stepId: 's1-news-2', moment: 'opening-news' });
@@ -220,19 +243,22 @@ describe('MomentView 叙事演出浮层', () => {
     expect(onEnd).toHaveBeenCalledExactlyOnceWith('mid-pause', 'completed');
   });
 
-  it('worst-flood 通知渐密且暗角收紧，随后同时熄灭只剩一行字幕', () => {
+  it('worst-flood 约 7 秒内全屏无规则加速堆积通知，随后同时熄灭只剩一行字幕', () => {
     view.show({ stepId: 'worst', moment: 'worst-flood', lines: ['话题换了一个名字，围观并没有停下。'] });
-    vi.advanceTimersByTime(180);
-    expect(doc.body.querySelectorAll('.moment-flood__toast')).toHaveLength(1);
+    vi.advanceTimersByTime(160);
+    const first = doc.body.querySelectorAll('.moment-flood__toast');
+    expect(first).toHaveLength(1);
+    expect(first[0].style.left).toMatch(/clamp\(/);
+    expect(first[0].style.top).toMatch(/clamp\(/);
     expect(query('.moment-flood__final').hidden).toBe(true);
 
-    // 推进到全部 12 条通知出现但尚未熄灭
-    vi.advanceTimersByTime(2600);
-    expect(doc.body.querySelectorAll('.moment-flood__toast')).toHaveLength(12);
+    // 推进到约 7 秒堆积完成但尚未熄灭：共 56 条全屏散点堆积且触发压迫态
+    vi.advanceTimersByTime(7100);
+    expect(doc.body.querySelectorAll('.moment-flood__toast')).toHaveLength(56);
     expect(query('.moment').classList.contains('is-pressured')).toBe(true);
 
     // 推进到同时熄灭
-    vi.advanceTimersByTime(600);
+    vi.advanceTimersByTime(800);
     expect(doc.body.querySelectorAll('.moment-flood__toast')).toHaveLength(0);
     expect(query('.moment').classList.contains('is-extinguished')).toBe(true);
 
@@ -244,13 +270,15 @@ describe('MomentView 叙事演出浮层', () => {
     expect(onEnd).toHaveBeenCalledExactlyOnceWith('worst', 'completed');
   });
 
-  it('bystander-cursor 无论输入提交还是直接退出，字幕都是“你什么都没做。”且光标一直存在', () => {
+  it('bystander-cursor 无论点发送还是退出，都不存在可编辑控件且字幕为“你什么都没做。”，光标保持闪烁', () => {
     view.show({ stepId: 'bystander-1', moment: 'bystander-cursor', lines: ['你什么都没做。'] });
+    expect(doc.body.querySelectorAll('input')).toHaveLength(0);
+    expect(doc.body.querySelectorAll('textarea')).toHaveLength(0);
     const input = query('.moment-bystander__input');
-    input.value = '其实那天她脚崴了';
+    expect(input.tagName.toLowerCase()).toBe('p');
+    expect(input.textContent).toBe('写点什么……');
     query('[data-bystander-action="submit"]').click();
-    expect(input.value).toBe('');
-    expect(input.readOnly).toBe(true);
+    expect(input.textContent).toBe('');
     expect(query('.moment-bystander__verdict').hidden).toBe(false);
     expect(query('.moment-bystander__subtitle').textContent).toBe('你什么都没做。');
     expect(doc.body.querySelector('.moment-bystander__cursor')).not.toBeNull();

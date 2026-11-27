@@ -55,6 +55,7 @@ export class DialogueBox {
   private active = false;
   private finishing = false;
   private timer = 0;
+  private lastAdvanceAt = Number.NEGATIVE_INFINITY;
   private currentSpeaker: SpeakerId | null = null;
   private currentPortraitUrl: string | null = null;
   private portraitImage: HTMLImageElement | null = null;
@@ -104,6 +105,7 @@ export class DialogueBox {
     this.stepId = payload.stepId;
     this.lineIndex = 0;
     this.finishing = false;
+    this.lastAdvanceAt = Number.NEGATIVE_INFINITY;
     this.active = true;
     this.root.hidden = false;
 
@@ -117,6 +119,7 @@ export class DialogueBox {
   hide(): void {
     this.active = false;
     this.finishing = false;
+    this.lastAdvanceAt = Number.NEGATIVE_INFINITY;
     this.stopTimer();
     this.lines = [];
     this.stepId = '';
@@ -271,6 +274,9 @@ export class DialogueBox {
 
   private advance(): void {
     if (!this.active) return;
+    const now = performance.now();
+    if (now - this.lastAdvanceAt < 150) return;
+    this.lastAdvanceAt = now;
 
     if (this.typing) {
       this.completeLine();

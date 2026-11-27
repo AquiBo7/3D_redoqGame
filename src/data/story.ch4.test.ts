@@ -322,4 +322,15 @@ describe('第四章数据与真实状态机', () => {
     expect(h.machine.getState().log.some((entry) => entry.summary.includes('陪她留存证据'))).toBe(true);
     expect(h.machine.getSceneId()).toBe('E1');
   });
+
+  it('无小票但保安大叔愿意作证时，D2 第二轮出现保安心证选项并保持 4 个选项', () => {
+    const h = harness('D1', { yuanState: 'guarded', evidence: false, picked: false, guardWilling: true });
+    reachRounds(h);
+    h.choose('d2-round-1', 'd2-r1-fact');
+    const round2Options = h.choices[h.choices.length - 1].options;
+    expect(round2Options).toHaveLength(4);
+    expect(round2Options[0].text).toContain('保安大叔');
+    h.choose('d2-round-2', 'd2-r2-fact');
+    expect(h.machine.getState().yuanKeys).toEqual(['fact', 'fact']);
+  });
 });

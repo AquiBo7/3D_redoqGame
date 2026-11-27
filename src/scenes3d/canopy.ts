@@ -18,15 +18,14 @@ import { SHARED_RESOURCE_FLAG } from '../world/resources';
 export type CanopyMode = 'mass' | 'tree';
 
 const PALETTE = {
-  barkDark: '#2B2A24',
-  barkMid: '#4A4438',
-  // 比初版整体提亮约 12%：卡片是不受光的 MeshBasic，贴图明度就是最终明度，
-  // 初版在清晨逆光街道里压成了近黑的绿块。
-  leafDark: '#3A463C',
-  leafCore: '#4A5741',
-  leafMid: '#5F6B4F',
-  leafLight: '#77825E',
-  leafRim: '#939C6A',
+  barkDark: '#2A2420',
+  barkMid: '#4A3F38',
+  // 三档绿：暗部 #3f7a3c / 中部 #6c9a4a / 受光 #9cc06a，消除清晨逆光下的炭灰石块感
+  leafDark: '#3F7A3C',
+  leafCore: '#558A43',
+  leafMid: '#6C9A4A',
+  leafLight: '#85AE5B',
+  leafRim: '#9CC06A',
 } as const;
 
 const rgb = (hex: string): string => {
@@ -123,7 +122,7 @@ function paintCanopyTexture(spec: CanopySpec): THREE.CanvasTexture {
   canvas.width = S;
   canvas.height = S;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('树冠贴图需要 Canvas 2D 上下文');
+  if (!ctx) throw new Error('树贴图需要 Canvas 2D 上下文');
   const g = ctx;
   g.clearRect(0, 0, S, S);
   g.save();

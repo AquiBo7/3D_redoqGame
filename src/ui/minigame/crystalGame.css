@@ -7,7 +7,7 @@
   gap: 12px;
   padding: max(16px, env(safe-area-inset-top, 0px))
     max(18px, env(safe-area-inset-right, 0px))
-    calc(48px + env(safe-area-inset-bottom, 0px))
+    calc(60px + env(safe-area-inset-bottom, 0px))
     max(18px, env(safe-area-inset-left, 0px));
   color: #eae6d7;
   background: radial-gradient(ellipse at 50% 35%, #294449, #0c2029 85%);
@@ -71,14 +71,25 @@
   user-select: none;
 }
 .crystal-game button:hover { background: #49635e; }
-.crystal-game button:active { background: #60766a; }
+.crystal-game button:active,
+.crystal-game button.is-pressed { background: #60766a; transform: scale(0.95); }
 .crystal-game button:disabled { opacity: 0.35; cursor: default; }
 .crystal-game button:focus-visible { outline: 2px solid #f5e5b4; outline-offset: 3px; }
 .crystal-game__canvas:focus-visible { outline: 2px solid #b2c9c3; outline-offset: -5px; }
 .crystal-game:focus { outline: none; }
 .crystal-game .crystal-game__button { min-width: 180px; }
 .crystal-game .crystal-game__skip { border-color: #819d9e; color: #c2d0ca; background: transparent; }
-.crystal-game__controls { width: min(100%, 1120px); margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
+.crystal-game__controls {
+  width: min(100%, 1120px);
+  margin: 0 auto;
+  padding-right: 68px;
+  padding-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
 .crystal-game__directions { display: flex; gap: 10px; }
 .crystal-game .crystal-game__left, .crystal-game .crystal-game__right { width: 60px; height: 60px; font-size: 23px; padding: 8px; }
 .crystal-game .crystal-game__attack { min-width: 96px; min-height: 68px; border-color: #ddc98d; background: #586252; letter-spacing: 0.12em; }

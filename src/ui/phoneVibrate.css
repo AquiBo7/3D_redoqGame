@@ -2,8 +2,8 @@
 
 .phone-vibrate {
   position: fixed;
-  right: calc(16px + env(safe-area-inset-right, 0px));
-  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  right: calc(20px + env(safe-area-inset-right, 0px));
+  bottom: calc(74px + env(safe-area-inset-bottom, 0px));
   z-index: 45;
   width: min(340px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
   padding: 14px 16px 12px 18px;

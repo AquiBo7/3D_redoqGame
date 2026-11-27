@@ -32,7 +32,10 @@ import { createCanopyCardBatch } from './canopy';
 import type { CanopyCardSpec } from './canopy';
 import { canopyBudget, getQualityTier } from '../world/quality';
 import type { XZ, Vec3 } from './shared';
+import { buildGateMorningSkyAndHorizon } from './gateMorningSky';
+import { appendBasketballHalfCourt } from './buildingSports';
 import {
+  createContactShadowDiscBatch,
   getBarkMaterial,
   getFoliageMaterial,
   getPavingMaterial,
@@ -341,8 +344,10 @@ function buildGateCampusDetails(
     boxes.clay.push([cx, height + 0.29, cz - 2.96, 12.3, 0.12, 0.28],
       [cx, height + 0.29, cz + 2.96, 12.3, 0.12, 0.28]);
 
-    const treeSpecs = [[14.4, 12.5, 0.98], [19, 6.6, 1.13], [16.2, -5, 1.08],
-      [22, -13, 1.04], [22, -26.4, 1.16]];
+    // 右侧草坪留给 4 组棋盘式篮球半场，移开遮挡球场的两株树（保留左/前/远景树不减损天际线）
+    const treeSpecs = side > 0
+      ? [[14.4, 12.5, 0.98], [19, 6.6, 1.13], [24.2, -14.2, 1.04], [22, -26.4, 1.16]]
+      : [[14.4, 12.5, 0.98], [19, 6.6, 1.13], [16.2, -5, 1.08], [22, -13, 1.04], [22, -26.4, 1.16]];
     const leafColors = [0x91ae64, 0x6e945c, 0xa3bb70, 0x537c65];
     for (const [treeIndex, [offsetX, z, scale]] of treeSpecs.entries()) {
       const x = side * offsetX;
@@ -473,17 +478,156 @@ function buildGateLandscape(parent: THREE.Object3D, occluders: THREE.Object3D[])
   box('gate-boundary-caps', caps, trim, true);
   box('gate-ironwork', rails, dark, true);
 
-  box('gate-booth-body', [[-7.65, 1.4, -2.35, 2.8, 2.8, 2.5]], stone, true);
-  box('gate-booth-roof', [[-7.65, 2.86, -2.35, 3.3, 0.22, 2.95], [-7.65, 0.2, -2.35, 2.86, 0.4, 2.56]], dark, true);
-  box('gate-booth-window', [[-7.65, 1.64, -1.085, 2.2, 0.94, 0.04], [-6.23, 1.64, -2.35, 0.04, 0.94, 1.75]], glow);
+  const boothWallMat = new THREE.MeshStandardMaterial({ color: 0xe9e4d6, roughness: 0.9 });
+  const boothRoofMat = new THREE.MeshStandardMaterial({ color: 0x2f6b5a, roughness: 0.85 });
+  const boothGlassMat = new THREE.MeshStandardMaterial({ color: 0x3c4a52, roughness: 0.18, metalness: 0.32 });
+  const boothWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf4f1e8, roughness: 0.82 });
+  const benchWoodMat = new THREE.MeshStandardMaterial({ color: 0xa87a4f, roughness: 0.8 });
+  const planterStoneMat = new THREE.MeshStandardMaterial({ color: 0x8e9598, roughness: 0.92 });
+  const soilMat = new THREE.MeshStandardMaterial({ color: 0x345e50, roughness: 1 });
+
+  const boothBodies: GateBox[] = [];
+  const boothRoofs: GateBox[] = [];
+  const boothWindows: GateBox[] = [];
   const boothFrames: GateBox[] = [];
-  for (const x of [-8.78, -8.03, -7.28, -6.52]) boothFrames.push([x, 1.64, -1.045, 0.055, 1.04, 0.065]);
-  for (const y of [1.13, 2.15]) boothFrames.push([-7.65, y, -1.045, 2.32, 0.07, 0.08]);
-  for (const z of [-3.24, -2.35, -1.46]) boothFrames.push([-6.19, 1.64, z, 0.07, 1.04, 0.05]);
-  box('gate-booth-window-frames', boothFrames, dark);
-  const boothLabel = createTextSign('值班室', 1.18, 0.31, { background: '#475b58', foreground: '#e4d9bb' });
-  boothLabel.position.set(-7.65, 2.47, -1.075);
-  parent.add(boothLabel);
+  const boothFlags: GateBox[] = [];
+  const boothChairs: GateBox[] = [];
+
+  // S5 门楼左右对称门卫室（墙体 3.0×2.2×2.8m，坡顶深绿 #2f6b5a，深蓝玻璃 #3c4a52 + 白框，旗杆，门口椅子与「校园重地」牌）
+  for (const side of [-1, 1] as const) {
+    const bx = side * 7.65;
+    const bz = -2.35;
+    const innerX = bx - side * 1.52;
+    boothBodies.push([bx, 1.4, bz, 3.0, 2.8, 2.2]);
+    boothRoofs.push(
+      [bx, 2.88, bz, 3.4, 0.18, 2.6],
+      [bx, 3.02, bz, 2.75, 0.12, 2.05],
+      [bx, 3.12, bz, 1.9, 0.1, 1.4],
+    );
+    // 门与窗（深蓝玻璃 + 白框）
+    boothWindows.push(
+      [bx, 1.64, bz + 1.11, 2.1, 0.96, 0.04],
+      [innerX, 1.54, bz - 0.32, 0.04, 0.96, 0.92],
+      [innerX, 1.12, bz + 0.56, 0.04, 2.1, 0.82],
+    );
+    for (const dx of [-1.06, -0.35, 0.35, 1.06]) {
+      boothFrames.push([bx + dx, 1.64, bz + 1.14, 0.055, 1.04, 0.065]);
+    }
+    for (const y of [1.13, 2.15]) boothFrames.push([bx, y, bz + 1.14, 2.22, 0.07, 0.07]);
+    for (const z of [bz - 0.78, bz + 0.14]) boothFrames.push([innerX - side * 0.02, 1.54, z, 0.065, 1.04, 0.055]);
+    for (const y of [1.03, 2.05]) boothFrames.push([innerX - side * 0.02, y, bz - 0.32, 0.065, 0.07, 0.98]);
+    // 门框白边
+    boothFrames.push(
+      [innerX - side * 0.02, 1.12, bz + 0.14, 0.07, 2.16, 0.06],
+      [innerX - side * 0.02, 1.12, bz + 0.98, 0.07, 2.16, 0.06],
+      [innerX - side * 0.02, 2.18, bz + 0.56, 0.07, 0.07, 0.9],
+    );
+    // 屋顶细旗杆（直径 0.04m，无旗面）
+    boothFlags.push([bx, 3.85, bz, 0.04, 1.4, 0.04]);
+    // 门口值班椅子剪影
+    const chairX = innerX - side * 0.42;
+    const chairZ = bz + 0.65;
+    boothChairs.push(
+      [chairX, 0.44, chairZ, 0.42, 0.05, 0.42],
+      [chairX, 0.72, chairZ - 0.19, 0.42, 0.54, 0.05],
+      [chairX - 0.18, 0.22, chairZ - 0.18, 0.04, 0.44, 0.04],
+      [chairX + 0.18, 0.22, chairZ - 0.18, 0.04, 0.44, 0.04],
+      [chairX - 0.18, 0.22, chairZ + 0.18, 0.04, 0.44, 0.04],
+      [chairX + 0.18, 0.22, chairZ + 0.18, 0.04, 0.44, 0.04],
+    );
+
+    const boothLabel = createTextSign('值班室', 1.05, 0.28, { background: '#475b58', foreground: '#e4d9bb' });
+    boothLabel.position.set(bx, 2.48, bz + 1.12);
+    parent.add(boothLabel);
+
+    const noticeSign = createTextSign('校园重地', 0.78, 0.24, { background: '#2f6b5a', foreground: '#f4f1e8' });
+    noticeSign.position.set(innerX - side * 0.04, 1.65, bz - 0.32);
+    noticeSign.rotation.y = -side * Math.PI / 2;
+    parent.add(noticeSign);
+  }
+  box('gate-booth-body', boothBodies, boothWallMat, true);
+  box('gate-booth-roof', boothRoofs, boothRoofMat, true);
+  box('gate-booth-window', boothWindows, boothGlassMat);
+  box('gate-booth-window-frames', boothFrames, boothWhiteMat);
+  box('gate-booth-flagpoles', boothFlags, dark);
+  box('gate-booth-chairs', boothChairs, dark, true);
+
+  // 前景两侧圆形花坛（直径 2.2m，高 0.45m，石材 #8e9598，各配 3 团灌木球）与靠后长椅 2 张
+  const forePlanterCylGeo = new THREE.CylinderGeometry(1.1, 1.14, 0.45, 16);
+  const forePlanterMesh = new THREE.InstancedMesh(forePlanterCylGeo, planterStoneMat, 2);
+  forePlanterMesh.name = 'gate-foreground-planters';
+  forePlanterMesh.castShadow = true;
+  forePlanterMesh.receiveShadow = true;
+  const foreSoilGeo = new THREE.CylinderGeometry(0.96, 0.96, 0.05, 16);
+  const foreSoilMesh = new THREE.InstancedMesh(foreSoilGeo, soilMat, 2);
+  foreSoilMesh.name = 'gate-foreground-planter-soil';
+  const foreShrubGeo = new THREE.IcosahedronGeometry(1, 0);
+  const foreShrubs = new THREE.InstancedMesh(foreShrubGeo, getFoliageMaterial(), 6);
+  foreShrubs.name = 'gate-foreground-shrubs';
+  foreShrubs.castShadow = true;
+  foreShrubs.receiveShadow = true;
+  const pTransform = new THREE.Object3D();
+  const pColor = new THREE.Color();
+  const shrubGreens = [0x3f7a3c, 0x6c9a4a, 0x9cc06a];
+  [-1, 1].forEach((side, pIdx) => {
+    const fx = side * 6.75;
+    const fz = 4.4;
+    pTransform.position.set(fx, 0.225, fz);
+    pTransform.rotation.set(0, 0, 0);
+    pTransform.scale.set(1, 1, 1);
+    pTransform.updateMatrix();
+    forePlanterMesh.setMatrixAt(pIdx, pTransform.matrix);
+    pTransform.position.set(fx, 0.455, fz);
+    pTransform.updateMatrix();
+    foreSoilMesh.setMatrixAt(pIdx, pTransform.matrix);
+    for (let s = 0; s < 3; s += 1) {
+      const a = s * 2.094 + pIdx * 0.7;
+      pTransform.position.set(fx + Math.cos(a) * 0.46, 0.68 + (s % 2) * 0.08, fz + Math.sin(a) * 0.46);
+      pTransform.scale.set(0.46, 0.36 + (s % 2) * 0.06, 0.44);
+      pTransform.rotation.set(0, a, 0);
+      pTransform.updateMatrix();
+      foreShrubs.setMatrixAt(pIdx * 3 + s, pTransform.matrix);
+      foreShrubs.setColorAt(pIdx * 3 + s, pColor.setHex(shrubGreens[s % shrubGreens.length]));
+    }
+  });
+  for (const mesh of [forePlanterMesh, foreSoilMesh, foreShrubs]) {
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }
+  if (foreShrubs.instanceColor) foreShrubs.instanceColor.needsUpdate = true;
+  forePlanterCylGeo.addEventListener('dispose', () => forePlanterMesh.dispose());
+  foreSoilGeo.addEventListener('dispose', () => foreSoilMesh.dispose());
+  foreShrubGeo.addEventListener('dispose', () => foreShrubs.dispose());
+  parent.add(forePlanterMesh, foreSoilMesh, foreShrubs);
+
+  // 2 张靠后广场休息长椅（不压人群通道）
+  const rearBenchWood: GateBox[] = [];
+  const rearBenchLegs: GateBox[] = [];
+  for (const side of [-1, 1]) {
+    const bx = side * 6.75;
+    const bz = -0.35;
+    rearBenchWood.push(
+      [bx, 0.45, bz, 0.56, 0.07, 1.68],
+      [bx + side * 0.24, 0.74, bz, 0.07, 0.34, 1.68],
+    );
+    for (const dz of [-0.66, 0.66]) {
+      for (const dx of [-0.2, 0.2]) {
+        rearBenchLegs.push([bx + dx, 0.22, bz + dz, 0.06, 0.44, 0.06]);
+      }
+    }
+  }
+  box('gate-rear-bench-seats', rearBenchWood, benchWoodMat, true);
+  box('gate-rear-bench-legs', rearBenchLegs, dark, true);
+
+  const fgContacts = createContactShadowDiscBatch('gate-foreground-contacts', [
+    { x: -6.75, z: 4.4, radius: 1.32, y: 0.014 },
+    { x: 6.75, z: 4.4, radius: 1.32, y: 0.014 },
+    { x: -6.75, z: -0.35, radius: 0.9, y: 0.014 },
+    { x: 6.75, z: -0.35, radius: 0.9, y: 0.014 },
+    { x: -7.65, z: -2.35, radius: 1.75, y: 0.014 },
+    { x: 7.65, z: -2.35, radius: 1.75, y: 0.014 },
+  ]);
+  if (fgContacts) parent.add(fgContacts);
 
   const planters: GateBox[] = [];
   const planterCaps: GateBox[] = [];
@@ -818,16 +962,193 @@ const HOTSPOTS: HotspotConfig[] = [
   { id: 'typer', position: { x: TYPER.position.x, y: 1.35, z: TYPER.position.z }, maxDistance: 18 },
   { id: 'handoff-moment', position: { x: -0.45, y: 1.45, z: 2.45 }, maxDistance: 16 },
   { id: 'father-bags', position: { x: -0.55, y: 0.6, z: 0.7 }, maxDistance: 15 },
+  { id: 'guard-steps', position: { x: -5.85, y: 1.45, z: -1.65 }, maxDistance: 14 },
 ];
+
+const BIRD_FLOCKS = [
+  { cx: -11, cz: -14, y: 15.2, rx: 10, rz: 7, speed: 0.24 },
+  { cx: 12, cz: -12, y: 16.4, rx: 11, rz: 8, speed: 0.21 },
+  { cx: 0, cz: -26, y: 18.0, rx: 14, rz: 9, speed: 0.18 },
+] as const;
+
+let gateBirdsMesh: THREE.InstancedMesh | null = null;
+const gateBirdScratch = new THREE.Object3D();
+
+/** 右侧校内草坪 2×2 棋盘式 4 片篮球半场 + 砖砌矮围边与修剪绿篱（全数收进 z<1.5 校门围栏内侧，≤3 DrawCall，树区完全净空） */
+function buildGateBasketballCourts(parent: THREE.Object3D): void {
+  const boxes: Array<{ p: readonly [number, number, number]; s: readonly [number, number, number]; c: number; r?: readonly [number, number, number] }> = [];
+  const rods: Array<{ p: readonly [number, number, number]; s: readonly [number, number, number]; c: number; r?: readonly [number, number, number] }> = [];
+  const gy = LANDING_HEIGHT + 0.024;
+  const ly = LANDING_HEIGHT + 0.036;
+
+  // 垫底浅石材广场底板 + 四片棋盘格半场（z ∈ [-15.3, +0.3]，严密避让 z=1.5 围栏与 z=-17 配楼）
+  boxes.push({ p: [17.7, gy - 0.01, -7.5], s: [11.0, 0.016, 16.4], c: 0xb7b3a5 });
+  const specs: Array<{ x: number; z: number; color: number; hoopDir: 1 | -1 }> = [
+    { x: 15.1, z: -11.6, color: 0x3f6a52, hoopDir: -1 },
+    { x: 20.3, z: -11.6, color: 0xa4553f, hoopDir: -1 },
+    { x: 15.1, z: -3.4, color: 0xa4553f, hoopDir: 1 },
+    { x: 20.3, z: -3.4, color: 0x3f6a52, hoopDir: 1 },
+  ];
+  for (const spec of specs) {
+    appendBasketballHalfCourt(boxes, rods, spec.x, spec.z, gy, ly, {
+      courtColor: spec.color,
+      width: 4.55,
+      depth: 7.4,
+      hoopDir: spec.hoopDir,
+    });
+  }
+  // 西侧与南侧砖砌低坛边框 + 矮绿篱（z=0.95 贴靠 z=1.5 围栏内侧，不穿铁栏杆）
+  boxes.push(
+    { p: [12.15, gy + 0.16, -7.5], s: [0.32, 0.34, 16.6], c: 0x9a7869 },
+    { p: [17.7, gy + 0.16, 0.85], s: [11.4, 0.34, 0.32], c: 0x9a7869 },
+  );
+
+  const makeBatch = (
+    name: string,
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    items: typeof boxes,
+  ): void => {
+    const mesh = new THREE.InstancedMesh(geometry, material, items.length);
+    const t = new THREE.Object3D();
+    const c = new THREE.Color();
+    items.forEach((item, idx) => {
+      t.position.set(item.p[0], item.p[1], item.p[2]);
+      t.scale.set(item.s[0], item.s[1], item.s[2]);
+      if (item.r) t.rotation.set(item.r[0], item.r[1], item.r[2]);
+      else t.rotation.set(0, 0, 0);
+      t.updateMatrix();
+      mesh.setMatrixAt(idx, t.matrix);
+      mesh.setColorAt(idx, c.setHex(item.c));
+    });
+    mesh.name = name;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingBox();
+    mesh.computeBoundingSphere();
+    geometry.addEventListener('dispose', () => mesh.dispose());
+    parent.add(mesh);
+  };
+  makeBatch('gate-courts-boxes', new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.84 }), boxes);
+  makeBatch('gate-courts-rods', new THREE.CylinderGeometry(1, 1, 1, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.2 }), rods);
+
+  const hedgeGeo = new THREE.IcosahedronGeometry(1, 0);
+  const hedges: typeof boxes = [];
+  for (let i = 0; i < 16; i += 1) {
+    hedges.push({ p: [12.15, gy + 0.48, -15.0 + i * 0.98], s: [0.38, 0.36, 0.56], c: i % 2 ? 0x5c8456 : 0x6f9664 });
+  }
+  for (let i = 0; i < 10; i += 1) {
+    hedges.push({ p: [12.8 + i * 1.02, gy + 0.48, 0.85], s: [0.56, 0.36, 0.38], c: i % 2 ? 0x5c8456 : 0x6f9664 });
+  }
+  makeBatch('gate-courts-hedge', hedgeGeo, getFoliageMaterial(), hedges);
+}
+
+/** 3 群×7 只高空盘旋卡通飞鸟（单批次 InstancedMesh + GPU 着色器扇翅 + 2 只门楼栖息散落鸟） */
+function buildGateSkyBirds(parent: THREE.Object3D): void {
+  const positions = new Float32Array([
+    // 细长机身菱柱 + 左右微翘滑翔翅
+    0, 0.04, 0.22, -0.05, 0, -0.05, 0.05, 0, -0.05,
+    0, 0.04, 0.22, 0.05, 0, -0.05, 0, -0.03, -0.22,
+    0, 0.04, 0.22, 0, -0.03, -0.22, -0.05, 0, -0.05,
+    // 左翼
+    -0.04, 0.01, 0.08, -0.34, 0.1, -0.02, -0.04, 0.01, -0.08,
+    -0.34, 0.1, -0.02, -0.58, 0.06, -0.14, -0.04, 0.01, -0.08,
+    // 右翼
+    0.04, 0.01, 0.08, 0.04, 0.01, -0.08, 0.34, 0.1, -0.02,
+    0.34, 0.1, -0.02, 0.04, 0.01, -0.08, 0.58, 0.06, -0.14,
+  ]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xf4f0e8,
+    roughness: 0.78,
+    side: THREE.DoubleSide,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = gateWindTime;
+    shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        float birdPhase = instanceMatrix[3][0] * 0.47 + instanceMatrix[3][2] * 0.39;
+      #else
+        float birdPhase = 0.0;
+      #endif
+      float wing = max(0.0, abs(position.x) - 0.05);
+      transformed.y += sin(uTime * 6.8 + birdPhase) * wing * 0.42;`,
+    );
+  };
+  material.customProgramCacheKey = () => 'gate-sky-birds-flap-v1';
+
+  const count = BIRD_FLOCKS.length * 7;
+  const birds = new THREE.InstancedMesh(geometry, material, count);
+  birds.name = 'gate-sky-birds';
+  birds.castShadow = false;
+  birds.receiveShadow = false;
+  birds.frustumCulled = false;
+  birds.raycast = () => {};
+  updateGateSkyBirds(0, birds);
+  geometry.addEventListener('dispose', () => birds.dispose());
+  parent.add(birds);
+  gateBirdsMesh = birds;
+
+  // 校门檐口栖息的两只静态散落剪影小鸟（合并 1 次绘制）
+  const perchGeo = new THREE.IcosahedronGeometry(0.11, 0);
+  const perchMat = new THREE.MeshStandardMaterial({ color: 0x3b484b, roughness: 0.8 });
+  const perched = new THREE.InstancedMesh(perchGeo, perchMat, 2);
+  perched.name = 'gate-perched-birds';
+  const t = new THREE.Object3D();
+  [[-1.85, 4.72, 1.5], [1.95, 4.72, 1.5]].forEach(([bx, by, bz], idx) => {
+    t.position.set(bx, by, bz);
+    t.scale.set(0.85, 0.72, 1.45);
+    t.rotation.set(0, idx === 0 ? 0.5 : -0.6, 0);
+    t.updateMatrix();
+    perched.setMatrixAt(idx, t.matrix);
+  });
+  perched.instanceMatrix.needsUpdate = true;
+  perchGeo.addEventListener('dispose', () => perched.dispose());
+  parent.add(perched);
+}
+
+function updateGateSkyBirds(elapsedSec: number, mesh = gateBirdsMesh): void {
+  if (!mesh) return;
+  let idx = 0;
+  for (const [flockIdx, flock] of BIRD_FLOCKS.entries()) {
+    for (let b = 0; b < 7; b += 1) {
+      const ang = elapsedSec * flock.speed + flockIdx * 2.1 + (b - 3) * 0.28;
+      const offsetR = ((b % 3) - 1) * 1.4;
+      const x = flock.cx + Math.cos(ang) * (flock.rx + offsetR);
+      const z = flock.cz + Math.sin(ang) * (flock.rz + offsetR * 0.7);
+      const y = flock.y + Math.sin(elapsedSec * 1.2 + b) * 0.45 + (b % 2) * 0.55;
+      const dx = -Math.sin(ang) * flock.rx;
+      const dz = Math.cos(ang) * flock.rz;
+      gateBirdScratch.position.set(x, y, z);
+      gateBirdScratch.rotation.set(0, Math.atan2(dx, dz), Math.sin(ang * 2) * 0.14);
+      gateBirdScratch.scale.setScalar(0.85 + (b % 3) * 0.14);
+      gateBirdScratch.updateMatrix();
+      mesh.setMatrixAt(idx, gateBirdScratch.matrix);
+      idx += 1;
+    }
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+}
 
 function buildGate(parent: THREE.Object3D): {
   occluders: THREE.Object3D[];
   actors: Record<string, THREE.Object3D>;
 } {
   gateWindTime.value = 0;
+  gateBirdsMesh = null;
   const occluders: THREE.Object3D[] = [];
   buildGateLandscape(parent, occluders);
   groundGateLandscape(parent);
+  buildGateBasketballCourts(parent);
+  buildGateSkyBirds(parent);
+  buildGateMorningSkyAndHorizon(parent);
   for (const object of parent.children) {
     if (!(object instanceof THREE.InstancedMesh)
       || (!object.userData.campusDetail && object.name !== 'gate-layered-canopies')) continue;
@@ -883,6 +1204,15 @@ function buildGate(parent: THREE.Object3D): {
   parent.add(typer);
   occluders.push(typer);
 
+  // 值班室门前站岗的保安大爷（面朝校门入口通道）
+  const securityGuard = createCharacterActor('securityGuard', 1.72, 0x3b4d63, {
+    yaw: Math.PI * 0.42,
+  });
+  securityGuard.name = 'gate-security-guard';
+  securityGuard.position.set(-5.85, gateGround({ x: -5.85, z: -1.65 }), -1.65);
+  parent.add(securityGuard);
+  occluders.push(securityGuard);
+
   // 合体：双骨架一体模型（父女+提袋+下背放袋），面向 -Z；仅在未加载真实 GLB 回退胶囊体时显示占位 carryLinxia
   const carryGroup = new THREE.Group();
   const carryFather = createCharacterActor('fatherCarry', 1.78, 0x8f8578, {
@@ -917,6 +1247,7 @@ function buildGate(parent: THREE.Object3D): {
       carryLinxia,
       linxiaSolo,
       typer,
+      securityGuard,
       ...crowdActors,
     },
   };
@@ -1216,6 +1547,7 @@ export const gateRuntime: SceneRuntime = {
 
   tick(dtSeconds: number): void {
     gateWindTime.value += dtSeconds;
+    updateGateSkyBirds(gateWindTime.value);
     // 持机者双手在模型热替换后才长出来，摆成功前每拍重试一次（成功后不再解算）
     poseGatePhoneHolders(gateActors);
     gatePlayerFeetGetter?.(gatePlayerFeet);
@@ -1267,6 +1599,7 @@ export const gateRuntime: SceneRuntime = {
       ['carryFather', carryClip.clip, carryClip.timeScale, false, carryClip.loop, carryClip.fadeIn],
       ['crowd-1', 'idle', 0.7, true, true, 0.25],
       ['crowd-3', 'fold_arms', 0.65, true, true, 0.25],
+      ['securityGuard', 'wave_goodbye_02', 0.68, true, true, 0.25],
     ];
     for (const path of GATE_WALKERS) {
       const actor = gateActors[path.id];
@@ -1311,6 +1644,7 @@ export const gateRuntime: SceneRuntime = {
 
   exit(): void {
     clearGateBusSubscriptions();
+    gateBirdsMesh = null;
     walkerStates.clear();
     actorThrottleState.clear();
     gatePlayerFeetGetter = undefined;
@@ -1350,6 +1684,7 @@ export function createGateDefinition(sceneId: SceneId): WorldSceneDefinition {
       'studentMale3',
       'studentFemale3',
       'studentFemale4',
+      'securityGuard',
     ],
     interactables: [],
     hotspots: isS5 ? HOTSPOTS : [],

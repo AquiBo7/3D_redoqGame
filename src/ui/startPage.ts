@@ -79,16 +79,21 @@ export function initStartPage(options: StartPageOptions = {}): () => void {
       });
     }, startPage.hidden ? 0 : FADE_DURATION_MS);
   };
-  for (const preset of CHAPTER_PRESETS) {
+  const chapterNumerals = ['壹', '贰', '叁', '肆', '伍'];
+  for (const [index, preset] of CHAPTER_PRESETS.entries()) {
     const button = document.createElement('button');
     button.className = 'chapter-select__item';
     button.type = 'button';
     button.dataset.chapterId = preset.id;
+    const numeral = document.createElement('span');
+    numeral.className = 'chapter-select__num';
+    numeral.setAttribute('aria-hidden', 'true');
+    numeral.textContent = chapterNumerals[index] ?? String(index + 1);
     const heading = document.createElement('strong');
     heading.textContent = preset.title;
     const description = document.createElement('span');
     description.textContent = preset.description;
-    button.append(heading, description);
+    button.append(numeral, heading, description);
     button.addEventListener('click', () => leaveWith(() => eventBus.emit('ui:selectChapter', { chapterId: preset.id })), listenOptions);
     card.append(button);
   }
@@ -106,14 +111,65 @@ export function initStartPage(options: StartPageOptions = {}): () => void {
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }, listenOptions);
 
+  const chapterStrip = startPage.querySelector<HTMLElement>('#start-chapters-strip');
+  if (chapterStrip) {
+    chapterStrip.replaceChildren();
+    CHAPTER_PRESETS.forEach((preset, index) => {
+      const pill = document.createElement('span');
+      pill.className = 'start-page__chapter-pill';
+      const num = document.createElement('strong');
+      num.textContent = String(index + 1).padStart(2, '0');
+      const label = document.createElement('span');
+      label.textContent = preset.title.replace(/^第[一二三四五]章\s*·\s*/, '');
+      pill.append(num, label);
+      chapterStrip.append(pill);
+    });
+  }
+
   const updateSaveButton = (hasSave: boolean): void => {
     continueButton.hidden = !hasSave;
+    continueButton.classList.toggle('btn--diamond', hasSave);
     startButton.textContent = hasSave ? '重新开始' : '开始体验';
     startButton.classList.toggle('btn--primary', !hasSave);
+    startButton.classList.toggle('btn--diamond', !hasSave);
     startButton.classList.toggle('btn--ghost', hasSave);
+    startButton.classList.toggle('btn--link', hasSave);
+    const archiveLine = startPage.querySelector<HTMLElement>('#start-archive-line');
+    if (archiveLine) {
+      archiveLine.textContent = hasSave
+        ? '已保存上次行迹 · 点击「继续体验」接着游玩，或随时切换章节'
+        : '清晨 08:47 · 看见完整的那一天 · 点击开始后启用背景音乐';
+    }
   };
   updateSaveButton(options.hasSave ?? false);
   startPage.hidden = options.autoStart ?? false;
+
+  // 桌面端鼠标轻度视差驱动左侧“悬浮短信取景框”立体漂浮感（仅细指针且非减少动态偏好时启用）
+  const hero = startPage.querySelector<HTMLElement>('.start-hero');
+  let rafParallax = 0;
+  let targetX = 0;
+  let targetY = 0;
+  const allowParallax = hero !== null
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: fine)').matches
+    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (allowParallax) {
+    startPage.addEventListener('pointermove', (event) => {
+      if (startPage.hidden || leaving) return;
+      targetX = Math.max(-1, Math.min(1, (event.clientX / Math.max(1, window.innerWidth)) * 2 - 1));
+      targetY = Math.max(-1, Math.min(1, (event.clientY / Math.max(1, window.innerHeight)) * 2 - 1));
+      if (rafParallax !== 0) return;
+      rafParallax = window.requestAnimationFrame(() => {
+        rafParallax = 0;
+        hero?.style.setProperty('--px', targetX.toFixed(3));
+        hero?.style.setProperty('--py', targetY.toFixed(3));
+      });
+    }, listenOptions);
+    startPage.addEventListener('pointerleave', () => {
+      hero?.style.setProperty('--px', '0');
+      hero?.style.setProperty('--py', '0');
+    }, listenOptions);
+  }
   const unsubscribers = [
     eventBus.on('ui:openChapters', () => {
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -153,6 +209,7 @@ export function initStartPage(options: StartPageOptions = {}): () => void {
   return () => {
     generation += 1;
     window.clearTimeout(fadeTimer);
+    if (rafParallax !== 0) window.cancelAnimationFrame(rafParallax);
     controller.abort();
     for (const unsubscribe of unsubscribers) unsubscribe();
     media.removeEventListener('change', updateHint);

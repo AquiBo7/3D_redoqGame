@@ -48,8 +48,8 @@ export const ASSET_MANIFEST = {
     alt: '斑驳树影落在林荫道上，浅黄外套的林夏独立行走，与灰蓝外套的少年并肩走向教学楼，两人都只露背影。',
   },
   cg_ending_best_drawing: {
-    path: './art/cg/ending_best_drawing.png', width: 1600, height: 900,
-    alt: '完整的铅笔淡彩画：晨光台阶上两个背影并肩，远处校门外父亲提袋守望，纸张角落留着一点橙色。',
+    path: './art/cg/ending_best_drawing.png', width: 300, height: 400,
+    alt: '铅笔淡彩画：清晨校门台阶上两个背影并肩，远处门外小人提着两只袋子没有跟上来，纸角点着橙光。',
   },
   cg_ending_middle_sketch: {
     path: './art/cg/ending_middle_sketch.png', width: 1600, height: 900,

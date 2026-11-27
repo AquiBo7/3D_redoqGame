@@ -28,12 +28,16 @@ function definition(sceneKey: SceneKey): WorldSceneDefinition {
 }
 
 function createWorld(sceneKey: SceneKey = 'building') {
-  const uniforms: Record<string, THREE.IUniform> = { uTime: { value: 0 } };
+  const uniforms: Record<string, THREE.IUniform> = {
+    uTime: { value: 0 },
+    uSunDirection: { value: new THREE.Vector3(-11, 6.5, 9).normalize() },
+  };
   for (const key of colorKeys) uniforms[key] = { value: new THREE.Color() };
   const methods = Object.create(WorldApp.prototype) as {
     applyFog(definition: WorldSceneDefinition): void;
     applyAtmosphere(building?: boolean): void;
     resetAtmosphere(): void;
+    setSceneLighting(settings: import('./worldSceneTypes').SceneLightingSettings | null): void;
     rebuildAirParticles(sceneKey: SceneKey): void;
     disposeAirParticles(): void;
     updateAirParticles(dt: number): void;
@@ -47,6 +51,11 @@ function createWorld(sceneKey: SceneKey = 'building') {
     camera: new THREE.PerspectiveCamera(),
     skyMaterial: new THREE.ShaderMaterial({ uniforms }),
     sun: new THREE.DirectionalLight(0xffd29b, 2.05),
+    sunDirection: new THREE.Vector3(-11, 6.5, 9).normalize(),
+    sunShadowRight: new THREE.Vector3(1, 0, 0),
+    sunShadowUp: new THREE.Vector3(0, 1, 0),
+    sceneLighting: null as import('./worldSceneTypes').SceneLightingSettings | null,
+    hemisphereLight: new THREE.HemisphereLight(0xa9cada, 0x586e68, 0.46),
     baseHaze: new THREE.Color(0xa7bec8),
     atmosphereHaze: new THREE.Color(),
     atmosphereHorizon: new THREE.Color(),
@@ -139,6 +148,39 @@ afterEach(() => {
 });
 
 describe('异步场景生命周期', () => {
+  it('重建场景释放实例骨骼贴图，保留共享模型几何与材质', () => {
+    const world = createWorld('street');
+    const geometry = new THREE.BoxGeometry();
+    const material = new THREE.MeshStandardMaterial();
+    geometry.userData.sharedResource = true;
+    material.userData.sharedResource = true;
+    const skeleton = new THREE.Skeleton([new THREE.Bone()]);
+    skeleton.boneTexture = new THREE.DataTexture(new Float32Array(16 * 16 * 4), 16, 16);
+    const boneTexture = skeleton.boneTexture;
+    const actor = new THREE.Group();
+    for (let i = 0; i < 2; i += 1) {
+      const mesh = new THREE.SkinnedMesh(geometry, material);
+      mesh.skeleton = skeleton;
+      actor.add(mesh);
+    }
+    world.levelGroup.add(actor);
+    const releaseSkeleton = vi.spyOn(skeleton, 'dispose');
+    const releaseTexture = vi.spyOn(boneTexture, 'dispose');
+    const releaseGeometry = vi.spyOn(geometry, 'dispose');
+    const releaseMaterial = vi.spyOn(material, 'dispose');
+    world.mountDefinition(definition('room'), 'S1');
+    expect(actor.parent).toBeNull();
+    expect(releaseSkeleton).toHaveBeenCalledTimes(1);
+    expect(releaseTexture).toHaveBeenCalledTimes(1);
+    expect(skeleton.boneTexture).toBeNull();
+    expect(releaseGeometry).not.toHaveBeenCalled();
+    expect(releaseMaterial).not.toHaveBeenCalled();
+    world.mountDefinition(definition('room'), 'S2');
+    expect(releaseSkeleton).toHaveBeenCalledTimes(1);
+    geometry.dispose();
+    material.dispose();
+  });
+
   it('返回已挂载场景会取消旧模块加载并释放切场锁', async () => {
     const world = createWorld('building');
     let resolve!: () => void;
@@ -458,6 +500,27 @@ describe('WorldApp 氛围与运行时钩子', () => {
     world.disposed = true;
     current.setAtmosphereProgress!(1);
     expect(world.atmosphereProgress).toBe(0);
+  });
+
+  it('S4 夕阳灯光接入世界平行光与环境光，离场完整复位', () => {
+    const world = createWorld('street');
+    const direction = new THREE.Vector3(8.5, 15, 86).normalize();
+    world.createRuntimeContext('S4').setSceneLighting!({
+      sunDirection: [direction.x, direction.y, direction.z],
+      sunColor: 0xffb877,
+      sunIntensity: 1.2,
+      ambientColor: 0x6e7fa8,
+      ambientIntensity: 0.45,
+    });
+    expect(world.sun.color.getHex()).toBe(0xffb877);
+    expect(world.sun.intensity).toBe(1.2);
+    expect(world.hemisphereLight!.color.getHex()).toBe(0x6e7fa8);
+    expect(world.hemisphereLight!.intensity).toBe(0.45);
+    expect((world.skyMaterial.uniforms.uSunDirection.value as THREE.Vector3).angleTo(direction)).toBeCloseTo(0, 6);
+    world.resetAtmosphere();
+    expect(world.sun.intensity).toBe(2.05);
+    expect(world.hemisphereLight!.intensity).toBe(0.46);
+    expect((world.skyMaterial.uniforms.uSunDirection.value as THREE.Vector3).angleTo(new THREE.Vector3(-11, 6.5, 9).normalize())).toBeCloseTo(0, 6);
   });
 
   it('重复粒子 rebuild 释放每代 geometry、map、material，离场不残留 Points', () => {

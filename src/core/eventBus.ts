@@ -42,6 +42,7 @@ export interface GameEvents {
   };
   'audio:reset': void;
   'audio:alarm': void;
+  'audio:tick': void;
 
   // UI → Core
   'ui:chooseOption': { stepId: string; choiceId: string };
@@ -95,12 +96,19 @@ export interface GameEvents {
     options: Array<{ id: string; text: string; hasInteract?: boolean }>;
   };
   'ui:phoneVibrate': { vibrationId: string; preview: string };
-  'ui:showObjective': { sceneId: SceneId };
+  'ui:showObjective': { sceneId: SceneId; persistent?: boolean };
+  'ui:hideObjective': void;
+  'ui:objectiveCountdown': { remaining: number; total: number; active: boolean };
+  'ui:c2SeatReady': { sceneId: SceneId };
+  'world:scenePresented': { sceneId: SceneId };
+  'world:inputTakeover': void;
+  'world:fps': { fps: number; degraded: boolean };
   'scene:cutscene': {
     stepId: string;
     key: string;
     durationMs: number;
     skippable: boolean;
+    immediate?: boolean;
   };
   'game:chapterEnd': {
     chapterId: 'ch1';

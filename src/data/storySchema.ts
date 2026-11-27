@@ -22,7 +22,7 @@ export function isRole(value: unknown): value is Role {
 /** 场景 key，包含独立 3D 场景与 2D 叙事舞台 */
 export type SceneKey = 'room' | 'street' | 'gate' | 'desk' | 'building' | 'canteen' | 'interior' | 'stage2d';
 
-export type SpeakerId = 'linxia' | 'father' | 'volunteer' | 'mom' | 'xiaochen' | 'ayuan' | 'teacher' | 'admin' | 'passerby';
+export type SpeakerId = 'linxia' | 'father' | 'volunteer' | 'mom' | 'xiaochen' | 'ayuan' | 'teacher' | 'admin' | 'passerby' | 'guard' | 'auntie';
 
 export type LogType = 'choice' | 'observe' | 'ignore' | 'system';
 
@@ -63,6 +63,10 @@ export interface StoryVariables {
   fatherKnows: boolean;
   clues: string[];
   wrongAsks: number;
+  talkedGuard: boolean;
+  guardWilling: boolean;
+  orangeClue: boolean;
+  talkedAunt: boolean;
   foundAyuanWay: 'recognize' | 'relay' | 'shout' | null;
   yuanState: 'unprepared' | 'guarded' | 'hostile' | null;
   yuanScore: number;

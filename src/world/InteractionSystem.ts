@@ -67,11 +67,13 @@ interface InteractableItem {
   spriteMaterial: THREE.SpriteMaterial;
   hitMesh: THREE.Mesh;
   baseScale: number;
+  currentScale: number;
   phase: number;
   occluded: boolean;
   /** 由场景 Runtime 手动隐藏（如捡起药袋后） */
   hidden: boolean;
   nextOcclusionCheck: number;
+  lastOcclusionCamPos: THREE.Vector3;
 }
 
 interface HotspotState {
@@ -96,22 +98,70 @@ interface ZoneState {
 interface TargetState {
   config: TargetGuideConfig;
   position: THREE.Vector3;
+  hidden: boolean;
 }
 
+/** 128×128 三层高对比交互光点：中心暖白金亮核 + 中层暖琥珀光晕 + 外圈细亮指示环 */
 function createGlowTexture(): THREE.CanvasTexture {
-  const size = 64;
+  const size = 128;
+  const center = size / 2;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
 
   if (context) {
-    const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    gradient.addColorStop(0, 'rgba(255, 246, 218, 1)');
-    gradient.addColorStop(0.35, 'rgba(255, 236, 190, 0.85)');
-    gradient.addColorStop(1, 'rgba(255, 236, 190, 0)');
-    context.fillStyle = gradient;
+    // 1. 柔暗衬底边缘（极淡暖棕阴影，确保浅色床头/阳光墙面下仍有清晰轮廓）
+    const contrastBase = context.createRadialGradient(center, center, size * 0.14, center, center, size * 0.48);
+    contrastBase.addColorStop(0, 'rgba(34, 24, 12, 0.24)');
+    contrastBase.addColorStop(0.62, 'rgba(34, 24, 12, 0.16)');
+    contrastBase.addColorStop(1, 'rgba(34, 24, 12, 0)');
+    context.fillStyle = contrastBase;
     context.fillRect(0, 0, size, size);
+
+    // 2. 中层暖琥珀色光晕 (#ffd078)
+    const halo = context.createRadialGradient(center, center, size * 0.08, center, center, size * 0.45);
+    halo.addColorStop(0, 'rgba(255, 244, 206, 0.96)');
+    halo.addColorStop(0.32, 'rgba(255, 208, 120, 0.88)');
+    halo.addColorStop(0.62, 'rgba(255, 196, 98, 0.34)');
+    halo.addColorStop(1, 'rgba(255, 196, 98, 0)');
+    context.fillStyle = halo;
+    context.fillRect(0, 0, size, size);
+
+    // 3. 外圈清晰细亮环形光圈 + 中心实心亮核（无头测试极简 Canvas 存根缺少路径 API 时安全回退为双层渐变光晕）
+    if (
+      typeof context.beginPath === 'function'
+      && typeof context.arc === 'function'
+      && typeof context.stroke === 'function'
+      && typeof context.fill === 'function'
+    ) {
+      context.save?.();
+      context.beginPath();
+      context.arc(center, center, size * 0.34, 0, Math.PI * 2);
+      context.lineWidth = 4.6;
+      context.strokeStyle = 'rgba(28, 20, 10, 0.42)';
+      context.stroke();
+
+      context.beginPath();
+      context.arc(center, center, size * 0.34, 0, Math.PI * 2);
+      context.lineWidth = 2.8;
+      context.strokeStyle = 'rgba(255, 240, 186, 0.98)';
+      context.stroke();
+      context.restore?.();
+
+      // 4. 中心实心亮核 (#fffbe6，透明度 1.0，轮廓清晰)
+      context.save?.();
+      context.beginPath();
+      context.arc(center, center, size * 0.15, 0, Math.PI * 2);
+      context.fillStyle = '#fffbe6';
+      context.shadowColor = 'rgba(255, 212, 122, 0.95)';
+      context.shadowBlur = 10;
+      context.fill();
+      context.lineWidth = 1.6;
+      context.strokeStyle = 'rgba(255, 208, 120, 0.95)';
+      context.stroke();
+      context.restore?.();
+    }
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -140,7 +190,8 @@ export class InteractionSystem {
   private hotspots: HotspotState[] = [];
   private zones: ZoneState[] = [];
   private targets: TargetState[] = [];
-  private occluders: THREE.Object3D[] = [];
+  /** 预扁平化的静态遮挡网格列表（剔除 SkinnedMesh 骨骼蒙皮角色，避免 CPU 逐顶点蒙皮射线抖动） */
+  private occlusionMeshes: THREE.Mesh[] = [];
 
   private readonly aimRaycaster = new THREE.Raycaster();
   private readonly occlusionRaycaster = new THREE.Raycaster();
@@ -149,9 +200,12 @@ export class InteractionSystem {
   private readonly cameraSpace = new THREE.Vector3();
   private readonly scratchPosition = new THREE.Vector3();
   private readonly scratchDirection = new THREE.Vector3();
+  private readonly lastGazeCamPos = new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN);
 
   private aimedItem: InteractableItem | null = null;
   private gazeAimedId: string | null = null;
+  private lastGazeHotspotId: string | null = null;
+  private lastGazeBlocked = false;
   private elapsed = 0;
   private lastInteractAt = Number.NEGATIVE_INFINITY;
 
@@ -177,7 +231,7 @@ export class InteractionSystem {
   setup(input: InteractionSetupInput): void {
     this.clear();
 
-    this.occluders = input.occluders;
+    this.occlusionMeshes = this.collectStaticOcclusionMeshes(input.occluders);
 
     const interactables = input.interactables ?? [];
     interactables.forEach((config, index) => {
@@ -189,14 +243,14 @@ export class InteractionSystem {
 
       const spriteMaterial = new THREE.SpriteMaterial({
         map: this.glowTexture,
-        color: 0xfff2cc,
+        color: 0xffffff,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.94,
         depthWrite: false,
       });
       const sprite = new THREE.Sprite(spriteMaterial);
       sprite.position.copy(anchor);
-      sprite.scale.setScalar(0.24);
+      sprite.scale.setScalar(0.38);
       sprite.renderOrder = 3;
 
       const hitMesh = new THREE.Mesh(
@@ -215,11 +269,13 @@ export class InteractionSystem {
         sprite,
         spriteMaterial,
         hitMesh,
-        baseScale: 0.24,
+        baseScale: 0.38,
+        currentScale: 0.38,
         phase: index * 1.7,
         occluded: false,
         hidden: false,
-        nextOcclusionCheck: 0,
+        nextOcclusionCheck: (index / Math.max(1, interactables.length)) * this.config.occlusionIntervalSec,
+        lastOcclusionCamPos: new THREE.Vector3(Number.NaN, Number.NaN, Number.NaN),
       };
 
       this.items.push(item);
@@ -256,6 +312,7 @@ export class InteractionSystem {
       this.targets.push({
         config,
         position: new THREE.Vector3(config.position.x, config.position.y, config.position.z),
+        hidden: false,
       });
     }
   }
@@ -284,8 +341,9 @@ export class InteractionSystem {
   update(dt: number, nowMs: number): void {
     this.elapsed += dt;
 
-    this.updateInteractableVisuals();
+    this.updateOcclusion();
     this.updateAim();
+    this.updateInteractableVisuals(dt);
 
     if (this.isInputEnabled()) {
       this.updateGaze(nowMs);
@@ -297,23 +355,44 @@ export class InteractionSystem {
     this.updateTargets();
   }
 
-  private updateInteractableVisuals(): void {
+  private updateOcclusion(): void {
     const time = this.elapsed;
+    const camPos = this.camera.position;
     for (const item of this.items) {
+      if (item.hidden) continue;
       if (time >= item.nextOcclusionCheck) {
-        item.occluded = this.isOccluded(item.anchor);
+        if (
+          Number.isNaN(item.lastOcclusionCamPos.x)
+          || camPos.distanceToSquared(item.lastOcclusionCamPos) > 0.0004
+        ) {
+          item.occluded = this.isOccluded(item.anchor);
+          item.lastOcclusionCamPos.copy(camPos);
+        }
         item.nextOcclusionCheck = time + this.config.occlusionIntervalSec;
       }
+    }
+  }
 
+  private updateInteractableVisuals(dt: number): void {
+    const time = this.elapsed;
+    const cameraPosition = this.camera.position;
+    const lerpFactor = Math.min(1, Math.max(0.08, dt * 10));
+    for (const item of this.items) {
       if (item.occluded || item.hidden) {
         item.sprite.visible = false;
         continue;
       }
 
       item.sprite.visible = true;
-      const breathe = Math.sin(time * 1.8 + item.phase);
-      item.sprite.scale.setScalar(item.baseScale * (1 + breathe * 0.12));
-      item.spriteMaterial.opacity = 0.72 + breathe * 0.18;
+      const isAimed = item === this.aimedItem;
+      const near = cameraPosition.distanceTo(item.anchor) <= item.maxDistance;
+      // 玩家靠近到可交互半径内且尚未瞄准时略加快脉冲频率，强化视线牵引
+      const freq = !isAimed && near ? 3.0 : 2.0;
+      const breathe = Math.sin(time * freq + item.phase);
+      const targetScale = isAimed ? 0.46 + breathe * 0.018 : item.baseScale * (1 + breathe * (near ? 0.14 : 0.1));
+      item.currentScale += (targetScale - item.currentScale) * lerpFactor;
+      item.sprite.scale.setScalar(item.currentScale);
+      item.spriteMaterial.opacity = isAimed ? 1 : 0.925 + breathe * 0.075;
     }
   }
 
@@ -359,11 +438,20 @@ export class InteractionSystem {
       const angle = angleBetweenDeg(this.cameraForward, this.scratchDirection);
       if (angle > hotspot.maxAngleDeg) continue;
 
-      if (
-        hotspot.requireLineOfSight &&
-        this.isBlocked(cameraPosition, hotspot.position, 0.15)
-      ) {
-        continue;
+      if (hotspot.requireLineOfSight) {
+        let blocked: boolean;
+        if (
+          this.lastGazeHotspotId === hotspot.config.id
+          && cameraPosition.distanceToSquared(this.lastGazeCamPos) <= 0.0004
+        ) {
+          blocked = this.lastGazeBlocked;
+        } else {
+          blocked = this.isBlocked(cameraPosition, hotspot.position, 0.15);
+          this.lastGazeHotspotId = hotspot.config.id;
+          this.lastGazeCamPos.copy(cameraPosition);
+          this.lastGazeBlocked = blocked;
+        }
+        if (blocked) continue;
       }
 
       if (angle < bestAngle) {
@@ -446,6 +534,7 @@ export class InteractionSystem {
     const markers: TargetMarkerState[] = [];
 
     for (const target of this.targets) {
+      if (target.hidden) continue;
       this.cameraSpace.copy(target.position).applyMatrix4(this.camera.matrixWorldInverse);
       this.scratchPosition.copy(target.position).project(this.camera);
 
@@ -569,7 +658,25 @@ export class InteractionSystem {
     if (this.debug) console.info('[world] scene:enterZone', sceneId, zone.id);
   }
 
+  private collectStaticOcclusionMeshes(roots: THREE.Object3D[]): THREE.Mesh[] {
+    const seen = new Set<THREE.Mesh>();
+    const meshes: THREE.Mesh[] = [];
+    for (const root of roots) {
+      root.traverse((obj) => {
+        if (!(obj instanceof THREE.Mesh) || obj instanceof THREE.SkinnedMesh) return;
+        if (seen.has(obj)) return;
+        if (!Array.isArray(obj.material) && obj.material.transparent && obj.material.opacity < 0.35) {
+          return;
+        }
+        seen.add(obj);
+        meshes.push(obj);
+      });
+    }
+    return meshes;
+  }
+
   private isOccluded(anchor: THREE.Vector3): boolean {
+    if (this.occlusionMeshes.length === 0) return false;
     const cameraPosition = this.camera.position;
     this.scratchDirection.copy(anchor).sub(cameraPosition);
     const distance = this.scratchDirection.length();
@@ -578,10 +685,11 @@ export class InteractionSystem {
     this.scratchDirection.divideScalar(distance);
     this.occlusionRaycaster.set(cameraPosition, this.scratchDirection);
     this.occlusionRaycaster.far = Math.max(0, distance - 0.08);
-    return this.occlusionRaycaster.intersectObjects(this.occluders, true).length > 0;
+    return this.occlusionRaycaster.intersectObjects(this.occlusionMeshes, false).length > 0;
   }
 
   private isBlocked(from: THREE.Vector3, to: THREE.Vector3, skipDistance: number): boolean {
+    if (this.occlusionMeshes.length === 0) return false;
     this.scratchDirection.copy(to).sub(from);
     const distance = this.scratchDirection.length();
     if (distance <= skipDistance + 0.01) return false;
@@ -589,7 +697,7 @@ export class InteractionSystem {
     this.scratchDirection.divideScalar(distance);
     this.occlusionRaycaster.set(from, this.scratchDirection);
     this.occlusionRaycaster.far = Math.max(0.01, distance - skipDistance);
-    return this.occlusionRaycaster.intersectObjects(this.occluders, true).length > 0;
+    return this.occlusionRaycaster.intersectObjects(this.occlusionMeshes, false).length > 0;
   }
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
@@ -602,16 +710,20 @@ export class InteractionSystem {
     this.tryInteractNearby();
   };
 
-  /** 供场景 Runtime 显式隐藏/恢复某交互物（如捡起药袋后隐藏光点与命中体） */
+  /** 供场景 Runtime 显式隐藏/恢复某交互物（如捡起药袋/拿走文化衫后同步隐藏光点、命中体与同名边缘引导） */
   setItemVisible(id: string, visible: boolean): void {
     const item = this.itemById.get(id);
-    if (!item || item.hidden === !visible) return;
-    item.hidden = !visible;
-    item.hitMesh.visible = visible;
-    item.sprite.visible = visible && !item.occluded;
-    if (item.hidden && this.aimedItem === item) {
-      this.aimedItem = null;
-      this.hud.setAimed(false);
+    if (item && item.hidden !== !visible) {
+      item.hidden = !visible;
+      item.hitMesh.visible = visible;
+      item.sprite.visible = visible && !item.occluded;
+      if (item.hidden && this.aimedItem === item) {
+        this.aimedItem = null;
+        this.hud.setAimed(false);
+      }
+    }
+    for (const target of this.targets) {
+      if (target.config.id === id) target.hidden = !visible;
     }
   }
 
@@ -629,9 +741,12 @@ export class InteractionSystem {
     this.hotspots = [];
     this.zones = [];
     this.targets = [];
-    this.occluders = [];
+    this.occlusionMeshes = [];
     this.aimedItem = null;
     this.gazeAimedId = null;
+    this.lastGazeHotspotId = null;
+    this.lastGazeBlocked = false;
+    this.lastGazeCamPos.set(Number.NaN, Number.NaN, Number.NaN);
     this.elapsed = 0;
     this.lastInteractAt = Number.NEGATIVE_INFINITY;
 

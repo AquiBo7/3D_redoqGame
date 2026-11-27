@@ -39,6 +39,7 @@ function makeParams(overrides: Partial<UrlParams> = {}): UrlParams {
     modelViewer: false,
     phonePreview: false,
     night: false,
+    autoDepartSec: null,
     role: 'bystander' as Role,
     scene: null as SceneId | null,
     ...overrides,
@@ -276,6 +277,8 @@ describe('GameEngine URL 直达与隔离调试', () => {
     expect(engine.getDebugSnapshot().state.canteenSeen).toBe(3);
     expect(storage.getItem(CHECKPOINT_SAVE_KEYS.ch2_canteen)).toBe(checkpointRaw);
     bus.emit('scene:interact', { sceneId: 'S12', targetId: 'window-three' });
+    bus.emit('ui:dialogueEnd', { stepId: 's12-auntie' });
+    bus.emit('ui:chooseOption', { stepId: 's12-auntie-choice', choiceId: 's12-auntie-leave' });
     bus.emit('ui:dialogueEnd', { stepId: 's12-vibration' });
     bus.emit('ui:dialogueEnd', { stepId: 's13-message' });
     bus.emit('ui:phoneAction', { phoneId: 's13-phone', action: 'close' });
@@ -327,6 +330,8 @@ describe('GameEngine URL 直达与隔离调试', () => {
     expect(engine.getDebugSnapshot()).toMatchObject({ sceneId: 'S12', debugSession: true });
     bus.emit('scene:enterZone', { sceneId: 'S12', zoneId: 'canteen-whisper-1' });
     bus.emit('scene:interact', { sceneId: 'S12', targetId: 'window-three' });
+    bus.emit('ui:dialogueEnd', { stepId: 's12-auntie' });
+    bus.emit('ui:chooseOption', { stepId: 's12-auntie-choice', choiceId: 's12-auntie-leave' });
     bus.emit('ui:dialogueEnd', { stepId: 's12-vibration' });
     expect(engine.getDebugSnapshot().sceneId).toBe('S13');
     engine.jumpTo('S12');

@@ -2,7 +2,7 @@
 // 流程：解析 URL → 组装 core 引擎（状态机 / 存档 / 事件）→ 挂载开始页与调试 UI
 // 玩家开始或继续后，再创建 3D 世界；core 的剧情推进不依赖 3D 是否就绪。
 
-import { playAlarm, resetFootsteps, updateFootsteps } from './audio/audioManager';
+import { bindBgmEvents, playAlarm, playCountdownTick, resetFootsteps, updateFootsteps } from './audio/audioManager';
 import { initDebugPanel } from './core/debugPanel';
 import { eventBus } from './core/eventBus';
 import { GameEngine } from './core/gameEngine';
@@ -15,8 +15,11 @@ import { initLiteWorld } from './ui/liteWorld';
 import { initMuteButton } from './ui/muteButton';
 import { initPhonePreview } from './ui/phonePreview';
 import { initStartPage } from './ui/startPage';
+import { installTouchGuards } from './ui/touchGuards';
 import { WorldApp } from './world/WorldApp';
 import './style.css';
+
+installTouchGuards();
 
 const params = parseUrlParams();
 
@@ -57,6 +60,8 @@ if (params.modelViewer) {
   eventBus.on('audio:motion', updateFootsteps);
   eventBus.on('audio:reset', resetFootsteps);
   eventBus.on('audio:alarm', playAlarm);
+  eventBus.on('audio:tick', playCountdownTick);
+  bindBgmEvents(eventBus);
 
   const engine = new GameEngine({ bus: eventBus, params });
   engine.attach();

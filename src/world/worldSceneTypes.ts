@@ -82,6 +82,14 @@ export type ZoneConfig =
       once?: boolean;
     };
 
+export interface SceneLightingSettings {
+  sunDirection: readonly [number, number, number];
+  sunColor: number;
+  sunIntensity: number;
+  ambientColor: number;
+  ambientIntensity: number;
+}
+
 export interface ExitAnchor {
   position: Point3;
   stopDistance: number;
@@ -127,7 +135,12 @@ export interface SceneRuntimeContext {
   /** 当前 2D 阻塞式界面（对话 / 选项 / 手机）是否打开，供场景演出等待对话结束后再启动 */
   isModalBlocked?: () => boolean;
   getPlayerFeet?: (target: THREE.Vector3) => THREE.Vector3;
+  getViewYaw?: () => number;
+  setViewYaw?: (yaw: number) => void;
+  setScriptedLookLocked?: (locked: boolean) => void;
+  isCinematic?: () => boolean;
   setAtmosphereProgress?: (progress: number) => void;
+  setSceneLighting?: (settings: SceneLightingSettings | null) => void;
 }
 
 export interface SceneRuntime {

@@ -516,6 +516,422 @@ export function getStoreInteriorMaterial(options: TiledMaterialOptions = {}): TH
   return material;
 }
 
+/**
+ * 甜品面包店专属 512×512 手绘卡通烘焙展示架贴图（建议 6）：
+ * 三层原木面包展示架 + 顶棚暖黄射灯光晕 + 清晰可辨的手绘卡通法棍/牛角可颂/肉桂卷/吐司/
+ * 草莓奶油蛋糕/纸杯玛芬/瑞士卷/编织面包/蝴蝶酥/碱水扭结包（带深棕轮廓线与烘焙焦糖高光）。
+ */
+function paintBakeryInterior(context: CanvasRenderingContext2D, size: number): void {
+  const outline = '#5a331d';
+
+  // 1. 温暖浅木/奶油暖光背景墙与竖向木纹
+  if (typeof context.createLinearGradient === 'function') {
+    const wallGrad = context.createLinearGradient(0, 0, 0, size);
+    wallGrad.addColorStop(0, '#fff2d8');
+    wallGrad.addColorStop(0.55, '#f2d8b0');
+    wallGrad.addColorStop(1, '#dfc092');
+    context.fillStyle = wallGrad;
+  } else {
+    context.fillStyle = '#f2d8b0';
+  }
+  context.fillRect(0, 0, size, size);
+
+  context.fillStyle = 'rgba(164, 114, 62, 0.08)';
+  for (let x = 24; x < size; x += 48) {
+    context.fillRect(x, 0, 4, size);
+  }
+
+  // 2. 顶部三盏暖黄烘焙射灯与柔和向下照明光晕
+  for (const lx of [100, 256, 412]) {
+    const glow = context.createRadialGradient(lx, 22, 6, lx, 120, 145);
+    glow.addColorStop(0, 'rgba(255, 248, 215, 0.85)');
+    glow.addColorStop(0.4, 'rgba(255, 224, 152, 0.35)');
+    glow.addColorStop(1, 'rgba(255, 212, 130, 0)');
+    context.fillStyle = glow;
+    context.fillRect(lx - 145, 0, 290, 240);
+
+    // 小射灯灯罩
+    context.fillStyle = '#4b3b30';
+    context.fillRect(lx - 18, 4, 36, 12);
+    context.fillStyle = '#fff5cc';
+    context.fillRect(lx - 12, 15, 24, 5);
+  }
+
+  // 3. 三层厚实原木面包展示架板与板下投影
+  const shelfYs = [174, 326, 474];
+  for (const sy of shelfYs) {
+    context.fillStyle = 'rgba(84, 48, 22, 0.24)';
+    context.fillRect(0, sy + 18, size, 16);
+    context.fillStyle = '#b9824a';
+    context.fillRect(0, sy, size, 18);
+    context.fillStyle = '#d4a068';
+    context.fillRect(0, sy, size, 5);
+    context.fillStyle = '#7e5028';
+    context.fillRect(0, sy + 15, size, 4);
+  }
+
+  if (
+    typeof context.beginPath !== 'function'
+    || typeof context.arc !== 'function'
+    || typeof context.ellipse !== 'function'
+    || typeof context.stroke !== 'function'
+    || typeof context.fill !== 'function'
+    || typeof context.save !== 'function'
+  ) {
+    return;
+  }
+
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+
+  // --- 上层货架（基准 y = 174）：金黄斜纹大法棍、弧形牛角可颂、白糖霜肉桂卷、黄金方形大吐司 ---
+  // (1) 金黄斜纹大法棍（左）
+  context.save();
+  context.translate(82, 142);
+  context.rotate(-0.18);
+  context.fillStyle = '#d98f36';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.beginPath();
+  context.ellipse(0, 0, 62, 22, 0, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#f5c76e';
+  for (const sx of [-32, -10, 12, 34]) {
+    context.beginPath();
+    context.ellipse(sx, -4, 11, 5, -0.45, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.restore();
+
+  // (2) 弧形牛角可颂（中左）
+  context.save();
+  context.translate(208, 148);
+  const segs: Array<[number, number, number, number, number]> = [
+    [-34, 10, 14, 11, -0.5],
+    [-18, -2, 18, 15, -0.25],
+    [0, -8, 22, 19, 0],
+    [18, -2, 18, 15, 0.25],
+    [34, 10, 14, 11, 0.5],
+  ];
+  context.strokeStyle = outline;
+  context.lineWidth = 3.5;
+  for (const [x, y, rx, ry, rot] of segs) {
+    context.fillStyle = '#e5a342';
+    context.beginPath();
+    context.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = '#fbd482';
+    context.beginPath();
+    context.ellipse(x, y - ry * 0.32, rx * 0.52, ry * 0.26, rot, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.restore();
+
+  // (3) 白色糖霜肉桂卷（中右）
+  context.save();
+  context.translate(328, 146);
+  context.fillStyle = '#c47533';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.beginPath();
+  context.ellipse(0, 4, 38, 24, 0, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  // 顶部奶油白糖霜垂滴
+  context.fillStyle = '#fff9ee';
+  context.beginPath();
+  context.ellipse(0, -6, 32, 14, 0, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.strokeStyle = '#9c5220';
+  context.lineWidth = 3;
+  context.beginPath();
+  context.arc(0, -6, 16, 0.2, Math.PI * 1.75);
+  context.stroke();
+  context.restore();
+
+  // (4) 黄金方形大吐司（右）
+  context.save();
+  context.translate(440, 140);
+  context.fillStyle = '#d1822d';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.beginPath();
+  context.roundRect?.(-36, -24, 72, 58, [16, 16, 6, 6]);
+  if (!context.roundRect) context.rect(-36, -24, 72, 58);
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#f8e6ba';
+  context.fillRect(-26, -10, 52, 36);
+  context.strokeStyle = '#c98842';
+  context.lineWidth = 2;
+  context.strokeRect(-26, -10, 52, 36);
+  context.restore();
+
+  // --- 中层货架（基准 y = 326）：整只草莓奶油蛋糕、切片奶油蛋糕、粉纸托纸杯玛芬、奶香瑞士卷 ---
+  // (1) 整只草莓奶油大蛋糕（左）
+  context.save();
+  context.translate(92, 294);
+  // 托盘
+  context.fillStyle = '#f5eedf';
+  context.strokeStyle = outline;
+  context.lineWidth = 3;
+  context.beginPath();
+  context.ellipse(0, 28, 56, 10, 0, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  // 乳白蛋糕身
+  context.fillStyle = '#fff8ec';
+  context.lineWidth = 4;
+  context.fillRect(-44, -22, 88, 48);
+  context.strokeRect(-44, -22, 88, 48);
+  // 中间草莓果酱夹层条
+  context.fillStyle = '#f28ca0';
+  context.fillRect(-42, 2, 84, 8);
+  // 顶面与粉色奶油花边
+  context.fillStyle = '#ffdfea';
+  for (let bx = -36; bx <= 36; bx += 18) {
+    context.beginPath();
+    context.arc(bx, -22, 10, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  // 三颗鲜红草莓
+  for (const sx of [-24, 0, 24]) {
+    context.fillStyle = '#de3d50';
+    context.beginPath();
+    context.moveTo(sx, -46);
+    context.lineTo(sx - 10, -26);
+    context.lineTo(sx + 10, -26);
+    context.closePath();
+    context.fill();
+    context.stroke();
+    context.fillStyle = '#4f9c55';
+    context.fillRect(sx - 5, -28, 10, 4);
+  }
+  context.restore();
+
+  // (2) 草莓切片三角形蛋糕（中左）
+  context.save();
+  context.translate(216, 298);
+  context.fillStyle = '#f9db97';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.beginPath();
+  context.moveTo(-36, 26);
+  context.lineTo(36, 26);
+  context.lineTo(36, -24);
+  context.lineTo(-36, -8);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#fff9f0';
+  context.fillRect(-34, 2, 68, 10);
+  context.fillStyle = '#fffaf2';
+  context.beginPath();
+  context.moveTo(-36, -8);
+  context.lineTo(36, -24);
+  context.lineTo(24, -36);
+  context.lineTo(-36, -18);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#de3d50';
+  context.beginPath();
+  context.arc(6, -34, 11, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.restore();
+
+  // (3) 粉白波浪纸托巧克力纸杯玛芬（中右）
+  context.save();
+  context.translate(328, 296);
+  // 蓬松深棕蛋糕顶
+  context.fillStyle = '#a35d34';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.beginPath();
+  context.arc(0, -14, 30, Math.PI, 0);
+  context.arc(-14, -10, 16, Math.PI * 0.6, Math.PI * 1.8);
+  context.arc(14, -10, 16, Math.PI * 1.2, Math.PI * 0.4);
+  context.fill();
+  context.stroke();
+  // 粉白纸杯托
+  context.fillStyle = '#f29cb2';
+  context.beginPath();
+  context.moveTo(-28, -8);
+  context.lineTo(28, -8);
+  context.lineTo(20, 28);
+  context.lineTo(-20, 28);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  context.strokeStyle = '#ffdce5';
+  context.lineWidth = 3;
+  for (const px of [-12, 0, 12]) {
+    context.beginPath();
+    context.moveTo(px, -4);
+    context.lineTo(px * 0.72, 24);
+    context.stroke();
+  }
+  // 顶白糖珠与小樱桃
+  context.fillStyle = '#fff9ee';
+  for (const [dx, dy] of [[-12, -24], [10, -26], [-2, -16], [14, -15]]) {
+    context.beginPath();
+    context.arc(dx, dy, 3.2, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.restore();
+
+  // (4) 奶香瑞士卷（右）
+  context.save();
+  context.translate(442, 296);
+  context.fillStyle = '#f4ca7c';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.beginPath();
+  context.arc(0, 0, 32, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#fff8ea';
+  context.beginPath();
+  context.arc(0, 0, 22, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = '#d29548';
+  context.lineWidth = 4.5;
+  context.beginPath();
+  context.arc(0, 0, 15, 0, Math.PI * 1.65);
+  context.stroke();
+  context.beginPath();
+  context.arc(0, 0, 7, 0.4, Math.PI * 1.85);
+  context.stroke();
+  context.restore();
+
+  // --- 下层货架（基准 y = 474）：焦糖编织面包、心形蝴蝶酥、扭结碱水包、撒糖霜小蛋糕卷 ---
+  // (1) 焦糖光泽编织面包（左）
+  context.save();
+  context.translate(92, 448);
+  context.strokeStyle = outline;
+  context.lineWidth = 3.5;
+  for (const [bx, rot] of [[-32, -0.35], [-10, 0.35], [12, -0.35], [32, 0.35]]) {
+    context.fillStyle = '#cf7f2d';
+    context.beginPath();
+    context.ellipse(bx, 0, 20, 15, rot, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = '#f5be6b';
+    context.beginPath();
+    context.ellipse(bx, -4, 10, 5, rot, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.restore();
+
+  // (2) 心形蝴蝶酥（中左）
+  context.save();
+  context.translate(216, 444);
+  context.fillStyle = '#e5a44c';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.beginPath();
+  context.moveTo(0, 26);
+  context.bezierCurveTo(-40, 4, -38, -28, -12, -24);
+  context.bezierCurveTo(-4, -22, 0, -10, 0, -6);
+  context.bezierCurveTo(0, -10, 4, -22, 12, -24);
+  context.bezierCurveTo(38, -28, 40, 4, 0, 26);
+  context.fill();
+  context.stroke();
+  context.strokeStyle = '#9e5a22';
+  context.lineWidth = 2.5;
+  context.beginPath();
+  context.arc(-14, -10, 7, 0, Math.PI * 1.6);
+  context.stroke();
+  context.beginPath();
+  context.arc(14, -10, 7, Math.PI * 1.4, Math.PI * 3);
+  context.stroke();
+  context.restore();
+
+  // (3) 扭结碱水面包（中右）
+  context.save();
+  context.translate(332, 444);
+  context.strokeStyle = outline;
+  context.lineWidth = 15;
+  context.beginPath();
+  context.arc(-14, -4, 18, 0, Math.PI * 2);
+  context.stroke();
+  context.beginPath();
+  context.arc(14, -4, 18, 0, Math.PI * 2);
+  context.stroke();
+  context.strokeStyle = '#8b4a20';
+  context.lineWidth = 9;
+  context.beginPath();
+  context.arc(-14, -4, 18, 0, Math.PI * 2);
+  context.stroke();
+  context.beginPath();
+  context.arc(14, -4, 18, 0, Math.PI * 2);
+  context.stroke();
+  // 海盐粒
+  context.fillStyle = '#fff9ee';
+  for (const [sx, sy] of [[-24, -12], [22, -14], [0, 8], [-8, 12], [10, -2]]) {
+    context.fillRect(sx - 2, sy - 2, 4, 4);
+  }
+  context.restore();
+
+  // (4) 撒糖霜草莓小蛋糕卷（右）
+  context.save();
+  context.translate(442, 446);
+  context.fillStyle = '#f2b866';
+  context.strokeStyle = outline;
+  context.lineWidth = 4;
+  context.fillRect(-34, -20, 68, 44);
+  context.strokeRect(-34, -20, 68, 44);
+  context.fillStyle = '#fff9f0';
+  context.fillRect(-34, -24, 68, 14);
+  context.strokeRect(-34, -24, 68, 14);
+  context.fillStyle = '#e04a5e';
+  context.beginPath();
+  context.arc(0, -30, 8, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.restore();
+}
+
+export function getBakeryInteriorMaterial(): THREE.MeshStandardMaterial {
+  const key = 'bakery-interior';
+  const cached = materialCache.get(key);
+  if (cached) return cached;
+
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('当前环境不支持 2D Canvas，无法生成程序化贴图');
+  paintBakeryInterior(context, size);
+  canvasCache.set(key, canvas);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = 4;
+  markShared(texture);
+
+  const material = new THREE.MeshStandardMaterial({
+    map: texture,
+    emissive: 0xffd79e,
+    emissiveMap: texture,
+    emissiveIntensity: 0.42,
+    roughness: 0.82,
+    metalness: 0,
+  });
+  markShared(material);
+  materialCache.set(key, material);
+  return material;
+}
+
 export function getDocumentLabelMaterial(): THREE.MeshStandardMaterial {
   const key = 'document-label';
   const cached = materialCache.get(key);

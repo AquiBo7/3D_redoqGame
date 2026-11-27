@@ -25,7 +25,12 @@ export type CharacterModelId =
   | 'studentMale3'
   | 'studentMale4'
   | 'studentFemale3'
-  | 'studentFemale4';
+  | 'studentFemale4'
+  | 'studentFemale1'
+  | 'studentFemale2'
+  | 'canteenAuntie'
+  | 'studentMale5'
+  | 'securityGuard';
 
 export interface CharacterModelEntry {
   id: CharacterModelId;
@@ -53,6 +58,11 @@ export const CHARACTER_MODELS: readonly CharacterModelEntry[] = [
   { id: 'studentMale4', name: '男同学（理性同学）', path: './models/chr_student_male4.glb', heightM: 1.74, frontYawRad: -Math.PI / 2 },
   { id: 'studentFemale3', name: '女同学（冷嘲热讽）', path: './models/chr_student_female3.glb', heightM: 1.64, frontYawRad: -Math.PI / 2 },
   { id: 'studentFemale4', name: '女同学（沉默旁观）', path: './models/chr_student_female4.glb', heightM: 1.63, frontYawRad: -Math.PI / 2 },
+  { id: 'studentFemale1', name: '女同学（备用角色1）', path: './models/chr_student_female1.glb', heightM: 1.64, frontYawRad: -Math.PI / 2 },
+  { id: 'studentFemale2', name: '女同学（备用角色2）', path: './models/chr_student_female2.glb', heightM: 1.65, frontYawRad: -Math.PI / 2 },
+  { id: 'canteenAuntie', name: '女员工（食堂大妈）', path: './models/chr_canteen_auntie.glb', heightM: 1.61, frontYawRad: -Math.PI / 2 },
+  { id: 'studentMale5', name: '男同学（备用角色5）', path: './models/chr_student_male5.glb', heightM: 1.73, frontYawRad: -Math.PI / 2 },
+  { id: 'securityGuard', name: '男员工（保安大爷）', path: './models/chr_security_guard.glb', heightM: 1.72, frontYawRad: -Math.PI / 2 },
 ];
 
 export function getCharacterModel(id: CharacterModelId): CharacterModelEntry {

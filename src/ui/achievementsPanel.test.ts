@@ -325,9 +325,9 @@ describe('展示边界与移动端样式契约', () => {
     expect(source).toContain("import './achievementsPanel.css'");
   });
 
-  it('48px 安全区、44px 触点、横竖屏可滚动、减少动画与 3.2 秒时长', () => {
+  it('56px 安全区、44px 触点、横竖屏可滚动、减少动画与 3.2 秒时长', () => {
     const css = readFileSync(new URL('./achievementsPanel.css', import.meta.url), 'utf8');
-    expect(css).toContain('calc(48px + env(safe-area-inset-bottom))');
+    expect(css).toContain('calc(56px + env(safe-area-inset-bottom))');
     for (const edge of ['left', 'right', 'top']) expect(css).toContain(`safe-area-inset-${edge}`);
     expect(css).toContain('min-height: 44px');
     expect(css).toMatch(/\.achievements__list\s*\{[^}]*overflow: auto/s);

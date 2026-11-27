@@ -278,6 +278,7 @@ export class PhonePanelView {
     this.body.replaceChildren();
     this.body.setAttribute('data-phone-tab', this.activeTab);
     this.shell.setAttribute('data-locked', String(this.view === 'lock'));
+    this.frame.setAttribute('data-locked', String(this.view === 'lock'));
     this.renderTabs();
 
     if (this.view === 'lock') this.renderLockScreen(panel);
@@ -436,9 +437,10 @@ export class PhonePanelView {
   private createSectionRow(section: Exclude<PhoneSection, { kind: 'alarm' | 'notice' | 'photo' | 'post' }>): HTMLButtonElement {
     const row = createButton('phone__row', '');
     const isChat = section.kind === 'chat';
+    const chatTone = isChat ? ` phone__row-icon--chat-${Array.from(section.title).reduce((s, ch) => s + ch.charCodeAt(0), 0) % 3}` : '';
     const icon = createElement(
       'span',
-      `phone__row-icon phone__row-icon--${isChat ? 'chat' : 'memo'}`,
+      `phone__row-icon phone__row-icon--${isChat ? 'chat' : 'memo'}${chatTone}`,
       firstCharacter(section.title, isChat ? '聊' : '备'),
     );
 

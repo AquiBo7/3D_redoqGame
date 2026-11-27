@@ -7,6 +7,11 @@ import type { InteractionHudBridge } from './InteractionSystem';
 const GAZE_RING_RADIUS = 20;
 const GAZE_RING_CIRCUMFERENCE = 2 * Math.PI * GAZE_RING_RADIUS;
 const RELEASE_HINT_DURATION_MS = 2600;
+const LOCK_PROMPT_FIRST_MS = 4000;
+const LOCK_PROMPT_REAPPEAR_MS = 2000;
+const LOCK_PROMPT_FADE_MS = 400;
+const PICKUP_TOAST_DURATION_MS = 1800;
+const RELEASE_TOAST_TEXT = '已释放鼠标（点击画面继续）';
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -21,6 +26,10 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
 
 interface TargetMarkerEntry {
   element: HTMLDivElement;
+  x: number;
+  y: number;
+  clamped: boolean;
+  angleRad: number;
 }
 
 export class WorldHud implements InteractionHudBridge {
@@ -34,7 +43,11 @@ export class WorldHud implements InteractionHudBridge {
   private readonly markerLayer: HTMLDivElement;
   private readonly markers = new Map<string, TargetMarkerEntry>();
   private toastTimer = 0;
+  private lockPromptTimer = 0;
+  private lockPromptFadeTimer = 0;
   private lockPromptDesired = false;
+  private lockPromptDismissed = false;
+  private lockPromptNextDurationMs = LOCK_PROMPT_FIRST_MS;
   private releaseHintVisible = false;
 
   constructor(container: HTMLElement) {
@@ -66,20 +79,31 @@ export class WorldHud implements InteractionHudBridge {
     const dot = createElement('div', 'world-hud__crosshair-dot');
     this.crosshair.append(svg, dot);
 
-    this.hint = createElement('div', 'world-hud__hint', '[E / 左键] 互动');
+    this.hint = createElement('div', 'world-hud__hint');
+    const keyE = createElement('kbd', 'world-hud__kbd', 'E');
+    const hintSep = createElement('span', 'world-hud__hint-sep', '/');
+    const keyClick = createElement('kbd', 'world-hud__kbd', '左键');
+    const hintLabel = createElement('span', 'world-hud__hint-label', '互动');
+    this.hint.append(keyE, hintSep, keyClick, hintLabel);
     this.hint.hidden = true;
 
     this.toast = createElement('div', 'world-hud__toast', '已释放鼠标（点击画面继续）');
     this.toast.hidden = true;
 
-    this.lockPrompt = createElement(
-      'div',
-      'world-hud__lock-prompt',
-      '点击空白画面锁定准星视角（ESC 释放）',
+    this.lockPrompt = createElement('div', 'world-hud__lock-prompt');
+    this.lockPrompt.append(
+      document.createTextNode('点击空白画面锁定准星视角（'),
+      createElement('span', 'world-hud__key-highlight', 'ESC'),
+      document.createTextNode(' 释放）'),
     );
     this.lockPrompt.hidden = true;
 
-    this.sprintHint = createElement('div', 'world-hud__sprint', '疾跑中（按 Shift 关闭）');
+    this.sprintHint = createElement('div', 'world-hud__sprint');
+    this.sprintHint.append(
+      document.createTextNode('疾跑中（按 '),
+      createElement('span', 'world-hud__key-highlight', 'Shift'),
+      document.createTextNode(' 关闭）'),
+    );
     this.sprintHint.hidden = true;
 
     this.markerLayer = createElement('div', 'world-hud__targets');
@@ -129,13 +153,33 @@ export class WorldHud implements InteractionHudBridge {
         const arrow = createElement('div', 'world-hud__target-arrow');
         element.append(dot, arrow);
         this.markerLayer.appendChild(element);
-        entry = { element };
+        entry = {
+          element,
+          x: Number.NaN,
+          y: Number.NaN,
+          clamped: !marker.clamped,
+          angleRad: Number.NaN,
+        };
         this.markers.set(marker.id, entry);
       }
 
-      const rotation = marker.clamped ? ` rotate(${marker.angleRad}rad)` : '';
-      entry.element.style.transform = `translate3d(${marker.x}px, ${marker.y}px, 0)${rotation}`;
-      entry.element.classList.toggle('is-clamped', marker.clamped);
+      const moved =
+        Number.isNaN(entry.x)
+        || Math.abs(marker.x - entry.x) >= 0.2
+        || Math.abs(marker.y - entry.y) >= 0.2
+        || marker.clamped !== entry.clamped
+        || (marker.clamped && Math.abs(marker.angleRad - entry.angleRad) >= 0.004);
+      if (moved) {
+        const rotation = marker.clamped ? ` rotate(${marker.angleRad}rad)` : '';
+        entry.element.style.transform = `translate3d(${marker.x}px, ${marker.y}px, 0)${rotation}`;
+        if (entry.clamped !== marker.clamped) {
+          entry.element.classList.toggle('is-clamped', marker.clamped);
+        }
+        entry.x = marker.x;
+        entry.y = marker.y;
+        entry.clamped = marker.clamped;
+        entry.angleRad = marker.angleRad;
+      }
     }
 
     const staleIds: string[] = [];
@@ -154,9 +198,22 @@ export class WorldHud implements InteractionHudBridge {
     if (!visible) this.hideReleaseHint();
   }
 
-  /** 桌面自由控制态且未锁鼠时的轻量引导 */
+  /** 桌面自由控制态且未锁鼠时的轻量引导：首现 4 秒后渐隐，切换锁鼠态后短显 2 秒自动收起 */
   setLockPromptVisible(visible: boolean): void {
+    const wasDesired = this.lockPromptDesired;
     this.lockPromptDesired = visible;
+    if (!visible) {
+      this.clearLockPromptTimers();
+      this.lockPromptDismissed = false;
+      this.lockPrompt.classList.remove('is-fading');
+      this.lockPrompt.hidden = true;
+      return;
+    }
+    if (!wasDesired) {
+      this.lockPromptDismissed = false;
+      this.scheduleLockPromptFade(this.lockPromptNextDurationMs);
+      this.lockPromptNextDurationMs = LOCK_PROMPT_FIRST_MS;
+    }
     this.updateLockPrompt();
   }
 
@@ -165,14 +222,31 @@ export class WorldHud implements InteractionHudBridge {
     this.sprintHint.hidden = !visible;
   }
 
+  showPickupToast(message = '已放入口袋'): void {
+    this.releaseHintVisible = false;
+    this.toast.textContent = message;
+    this.toast.hidden = false;
+    this.updateLockPrompt();
+    window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => {
+      this.toast.hidden = true;
+      this.toast.textContent = RELEASE_TOAST_TEXT;
+    }, PICKUP_TOAST_DURATION_MS);
+  }
+
   showReleaseHint(): void {
     this.releaseHintVisible = true;
+    this.lockPromptDismissed = false;
+    this.lockPromptNextDurationMs = LOCK_PROMPT_REAPPEAR_MS;
+    this.clearLockPromptTimers();
+    this.toast.textContent = RELEASE_TOAST_TEXT;
     this.toast.hidden = false;
     this.updateLockPrompt();
     window.clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => {
       this.releaseHintVisible = false;
       this.toast.hidden = true;
+      if (this.lockPromptDesired) this.scheduleLockPromptFade(LOCK_PROMPT_REAPPEAR_MS);
       this.updateLockPrompt();
     }, RELEASE_HINT_DURATION_MS);
   }
@@ -181,15 +255,39 @@ export class WorldHud implements InteractionHudBridge {
     window.clearTimeout(this.toastTimer);
     this.releaseHintVisible = false;
     this.toast.hidden = true;
+    this.lockPromptNextDurationMs = LOCK_PROMPT_REAPPEAR_MS;
     this.updateLockPrompt();
   }
 
+  private clearLockPromptTimers(): void {
+    window.clearTimeout(this.lockPromptTimer);
+    window.clearTimeout(this.lockPromptFadeTimer);
+    this.lockPromptTimer = 0;
+    this.lockPromptFadeTimer = 0;
+  }
+
+  private scheduleLockPromptFade(delayMs: number): void {
+    this.clearLockPromptTimers();
+    this.lockPrompt.classList.remove('is-fading');
+    this.lockPromptTimer = window.setTimeout(() => {
+      this.lockPromptTimer = 0;
+      this.lockPrompt.classList.add('is-fading');
+      this.lockPromptFadeTimer = window.setTimeout(() => {
+        this.lockPromptFadeTimer = 0;
+        this.lockPromptDismissed = true;
+        this.lockPrompt.classList.remove('is-fading');
+        this.updateLockPrompt();
+      }, LOCK_PROMPT_FADE_MS);
+    }, delayMs);
+  }
+
   private updateLockPrompt(): void {
-    this.lockPrompt.hidden = !this.lockPromptDesired || this.releaseHintVisible;
+    this.lockPrompt.hidden = !this.lockPromptDesired || this.releaseHintVisible || this.lockPromptDismissed;
   }
 
   dispose(): void {
     window.clearTimeout(this.toastTimer);
+    this.clearLockPromptTimers();
     for (const entry of this.markers.values()) entry.element.remove();
     this.markers.clear();
     this.root.remove();

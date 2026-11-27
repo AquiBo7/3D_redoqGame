@@ -69,6 +69,25 @@ export const chapter2Scenes: Partial<Record<SceneId, SceneDef>> = {
     stageNotes: ['找到三号窗口打饭，不设时间限制。', '沿途有人低头看手机，三五个人凑在一起低声交谈。'],
     steps: [
       { kind: 'wait', id: 's12-window', waitFor: { interactId: 'window-three' } },
+      { kind: 'dialogue', id: 's12-auntie', lines: [
+        { speaker: 'auntie', text: '同学，吃什么？今天青菜炒蛋刚出锅。' },
+        { speaker: 'auntie', text: '新生吧？多吃点，上午赶路累了吧。' },
+      ] },
+      { kind: 'choice', id: 's12-auntie-choice', options: [
+        { id: 's12-auntie-wait', text: '（站在窗口多等了一会儿，看阿姨顺手多盛了一勺菜）', goto: 's12-auntie-story' },
+        { id: 's12-auntie-leave', text: '“谢谢阿姨。”端起餐盘转身离开。', goto: 's12-vibration' },
+      ] },
+      { kind: 'dialogue', id: 's12-auntie-story',
+        effects: {
+          set: { talkedAunt: true },
+          pushDraftReaction: DRAFT_REACTIONS.auntieEgg,
+          log: { type: 'observe', summary: '打饭时多站了一会儿，听食堂阿姨提起那天给林夏多打了个蛋。' },
+        },
+        lines: [
+          { speaker: 'auntie', text: '前几天也有个穿浅黄外套的女娃娃，一瘸一拐的。我看她眼睛红红的，给她多打了个蛋。' },
+          { speaker: 'auntie', text: '小孩刚来学校，吃饱了才扛得住事。' },
+        ] },
+      { kind: 'caption', id: 's12-auntie-caption', tone: 'subtle', text: '……不是所有人都在看手机。', durationMs: 2600 },
       { kind: 'dialogue', id: 's12-vibration', lines: [
         { speaker: null, text: '你端起餐盘，口袋里的手机震动了一下。' },
       ] },

@@ -7,6 +7,7 @@ vi.mock('./materials', () => {
     getPavingMaterial: material, getPlasterMaterial: material,
     getBarkMaterial: material, getFoliageMaterial: material,
     getWindowGlassMaterial: material, getWoodFloorMaterial: material,
+    createContactShadowDiscBatch: () => null,
   };
 });
 vi.mock('./shared', async (importOriginal) => {

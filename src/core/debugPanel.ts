@@ -28,6 +28,10 @@ const STATE_FIELDS: Array<[keyof StoryState, string]> = [
   ['seenCrossedOut', 'seenCrossedOut'],
   ['picked', 'picked'],
   ['seenFatherWatching', 'seenFatherWatching'],
+  ['talkedAunt', 'talkedAunt'],
+  ['talkedGuard', 'talkedGuard'],
+  ['orangeClue', 'orangeClue'],
+  ['guardWilling', 'guardWilling'],
   ['finalAnswer', 'finalAnswer'],
   ['draftReactions', 'draftReactions'],
   ['trust', 'trust'],
@@ -80,9 +84,10 @@ export function initDebugPanel(source: DebugPanelDataSource, bus: EventBus): () 
   const header = createElement('header', 'debug-panel__header');
   const title = createElement('h2', 'debug-panel__title', '调试');
   const status = createElement('span', 'debug-panel__status');
+  const fpsBadge = createElement('span', 'debug-panel__status', 'FPS —');
   const close = createElement('button', 'debug-panel__close', '收起');
   close.type = 'button';
-  header.append(title, status, close);
+  header.append(title, status, fpsBadge, close);
 
   const body = createElement('div', 'debug-panel__body');
   const sceneLine = createElement('div', 'debug-panel__scene');
@@ -246,6 +251,9 @@ export function initDebugPanel(source: DebugPanelDataSource, bus: EventBus): () 
     }),
     bus.on('scene:enterZone', (payload) => {
       pushWorldEvent(`${payload.sceneId} · 进入 ${payload.zoneId}`);
+    }),
+    bus.on('world:fps', ({ fps, degraded }) => {
+      fpsBadge.textContent = degraded ? `${Math.round(fps)} FPS（降级）` : `${Math.round(fps)} FPS`;
     }),
   ];
 

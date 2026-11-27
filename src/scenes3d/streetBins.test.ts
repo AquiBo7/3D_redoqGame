@@ -21,6 +21,7 @@ vi.mock('./materials', () => {
     getFacadeTileMaterial: material,
     getFacadeWindowMaterial: material,
     getStoreInteriorMaterial: material,
+    getBakeryInteriorMaterial: material,
   };
 });
 
@@ -188,7 +189,7 @@ describe('S4 分类垃圾桶几何', () => {
   it('六只桶按原位表摆放：BIN_SPOTS 三点 × 沿街道轴线 ±0.46，两色各三只', () => {
     const bins = buildBins();
     const expected = [
-      { x: -2.1, z: [3.54, 4.46] },
+      { x: -2.1, z: [0.44, 1.36] },
       { x: 2.1, z: [-18.46, -17.54] },
       { x: -2.1, z: [-33.46, -32.54] },
     ];

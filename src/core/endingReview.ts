@@ -40,6 +40,8 @@ export interface EndingReview extends EndingCopy {
   drafts: Array<{ id: string; unlocked: boolean; text: string; assetId?: AssetId }>;
   actions: Array<{ title: string; text: string }>;
   nodeGuides: ReviewNodeGuide[];
+  /** 仅最好结局携带：用于在画作展示与对照屏渲染橙点、保安亭与翻面标记。 */
+  painting?: { hasOrangeDot: boolean; hasGuardBooth: boolean; canFlip: boolean };
 }
 
 /** 计次只接受非负有限整数展示；旧存档中的负值不改变剧情，也不显示为负次数。 */
@@ -94,9 +96,15 @@ export function createEndingReview(state: Readonly<StoryState>): EndingReview {
   if (count(state.canteenSeen) > 0 || hasScene('S12')) {
     add('canteen', `你留意到了 ${count(state.canteenSeen)} 处低语与目光。`);
   }
+  if (state.talkedAunt) add('canteen', '打饭阿姨说起前几天给一个脚崴了的女娃娃多打了个蛋。');
   if (state.postChoice) add('post', `帖子爆发时，你选择了“${REVIEW_LABELS.post[state.postChoice]}”。`);
 
   if (state.foundAyuanWay) add('finding', `你通过这种方式找人：${REVIEW_LABELS.finding[state.foundAyuanWay]}。`);
+  if (state.talkedGuard) {
+    add('finding', state.guardWilling
+      ? '你去校门口问了保安大叔，他记起了橙色手机壳并表示愿意如实作证。'
+      : '你去校门口问了保安大叔，想起了那个拿橙色手机壳的男生。');
+  }
   if (state.foundAyuanWay || count(state.wrongAsks) > 0 || hasScene('C5')) {
     add('finding', `在走廊，你认错了 ${count(state.wrongAsks)} 次人。`);
   }
@@ -173,6 +181,14 @@ export function createEndingReview(state: Readonly<StoryState>): EndingReview {
     });
   }
 
+  const painting = state.ending === 'best'
+    ? {
+        hasOrangeDot: state.joined,
+        hasGuardBooth: state.guardWilling,
+        canFlip: state.trust >= 7,
+      }
+    : undefined;
+
   return {
     ending: state.ending,
     title: copy.title,
@@ -180,6 +196,7 @@ export function createEndingReview(state: Readonly<StoryState>): EndingReview {
     epilogue: [copy.epilogue[0], withoutDrawing ? bestFallback.impact : copy.epilogue[1]],
     insight: copy.insight,
     cg: { ...(withoutDrawing ? bestFallback.cg : copy.cg) },
+    ...(painting ? { painting } : {}),
     ...(copy.retry ? { retry: { ...copy.retry } } : {}),
     footprints,
     drafts,

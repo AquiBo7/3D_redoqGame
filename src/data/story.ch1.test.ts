@@ -87,6 +87,7 @@ describe('第一章剧本结构', () => {
       expect(newsStep.lines).toEqual([
         '……近日，多所学校提醒学生：转发未经核实的内容，同样可能伤害他人。',
         '某学生因一张被断章取义的照片，被围攻数日，最终关闭了账号，也不再出门。',
+        '教育部门同时呼吁：面对网络争议多些宽容与理性核实，不做跟风伤害的推手，共同拒绝网络暴力。',
       ]);
     }
     expect(stepById('S1', 's1-news-thought-1')).toMatchObject({ text: '……又是这种新闻。', tone: 'subtle' });

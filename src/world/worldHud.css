@@ -1,6 +1,6 @@
 /* 第一人称 HUD：准星 / 注视蓄力圈 / 互动提示 / 鼠标释放提示 / 目标指引点 */
 /* HUD 挂载于 #app 内，层级低于 #ui-root，2D 手机与对话框会自然覆盖它。 */
-/* 所有小字去掉胶囊底板，改细下划线 + 近距硬阴影，保证亮天空与暗室内都可读 */
+/* 提示条采用深色半透明胶囊底板 + 暖金快捷键高亮，确保亮天空与高明度室内均一眼可辨 */
 
 .world-hud {
   position: absolute;
@@ -23,6 +23,27 @@
   width: 48px;
   height: 48px;
   transform: translate(-50%, -50%);
+}
+
+/* 瞄准可交互物时外圈显现淡金色瞄准环 */
+.world-hud__crosshair::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 215, 120, 0.85);
+  box-shadow: 0 0 10px rgba(255, 215, 120, 0.45), inset 0 0 6px rgba(255, 215, 120, 0.2);
+  transform: translate(-50%, -50%) scale(0.76);
+  opacity: 0;
+  transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.world-hud__crosshair.is-aimed::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .world-hud__gaze {
@@ -69,7 +90,15 @@
   content: '';
   position: absolute;
   background: rgba(255, 255, 255, 0.94);
-  transition: background 0.16s ease;
+  transition:
+    left 0.14s ease,
+    top 0.14s ease,
+    width 0.14s ease,
+    height 0.14s ease,
+    border-radius 0.14s ease,
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    background 0.14s ease;
 }
 
 .world-hud__crosshair-dot::before {
@@ -88,32 +117,99 @@
 }
 
 .world-hud__crosshair.is-aimed .world-hud__crosshair-dot {
-  transform: scale(1.32);
-  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.92)) drop-shadow(0 0 5px rgba(255, 224, 166, 0.9));
+  transform: scale(1.2);
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 6px rgba(255, 243, 196, 0.85));
 }
 
-.world-hud__crosshair.is-aimed .world-hud__crosshair-dot::before,
+.world-hud__crosshair.is-aimed .world-hud__crosshair-dot::before {
+  left: 5px;
+  top: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff3c4;
+  box-shadow: 0 0 8px rgba(255, 243, 196, 0.9);
+}
+
 .world-hud__crosshair.is-aimed .world-hud__crosshair-dot::after {
-  background: #fff4d6;
+  opacity: 0;
+  transform: scale(0.2);
 }
 
+/* 互动按键徽章提示（仅视觉提醒，不拦截画布点击） */
 .world-hud__hint {
   position: absolute;
   left: 50%;
-  top: calc(50% + 34px);
+  top: calc(50% + 36px);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   transform: translateX(-50%);
-  padding: 4px 2px 5px;
-  border-bottom: 1px solid var(--yt-line-soft);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  line-height: 1.4;
+  padding: 6px 14px;
+  border: 1.5px solid rgba(245, 230, 184, 0.74);
+  border-radius: 10px;
+  background: rgba(16, 22, 28, 0.88);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.44);
+  color: #fffdf7;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.35;
   white-space: nowrap;
-  text-shadow: var(--yt-text-shadow);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.92);
+  animation: world-hud-hint-pop 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.world-hud__kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 250, 234, 0.65);
+  border-radius: 6px;
+  background: linear-gradient(180deg, #faf3dc 0%, #f5e6b8 100%);
+  color: #262b30;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0.03em;
+  text-shadow: none;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.world-hud__hint-sep {
+  color: rgba(245, 230, 184, 0.72);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.world-hud__hint-label {
+  margin-left: 2px;
+  color: #fff9ed;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+@keyframes world-hud-hint-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
 }
 
 .world-hud__hint[hidden] {
   display: none;
+}
+
+.world-hud__key-highlight {
+  color: #ffd89b;
+  font-weight: 700;
 }
 
 .world-hud__toast {
@@ -121,14 +217,18 @@
   left: 50%;
   bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
-  padding: 4px 2px 6px;
-  border-bottom: 1px solid var(--yt-line-soft);
-  color: var(--yt-text);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  padding: 6px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(11, 15, 19, 0.88);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.44);
+  color: rgba(255, 252, 245, 0.96);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   line-height: 1.4;
   white-space: nowrap;
-  text-shadow: var(--yt-text-shadow);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
 .world-hud__toast[hidden] {
@@ -142,15 +242,25 @@
   bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   max-width: calc(100vw - 32px);
-  padding: 4px 2px 6px;
-  border-bottom: 1px solid var(--yt-line-soft);
-  color: var(--yt-text-dim);
-  font-size: 12px;
-  letter-spacing: 0.06em;
+  padding: 6px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(11, 15, 19, 0.88);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.44);
+  color: rgba(255, 252, 245, 0.96);
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
   line-height: 1.4;
   text-align: center;
   white-space: nowrap;
-  text-shadow: var(--yt-text-shadow);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+
+.world-hud__lock-prompt.is-fading {
+  opacity: 0;
 }
 
 .world-hud__lock-prompt[hidden] {
@@ -162,18 +272,31 @@
   position: absolute;
   right: calc(16px + env(safe-area-inset-right, 0px));
   bottom: calc(64px + env(safe-area-inset-bottom, 0px));
-  padding: 4px 0 5px;
-  border-bottom: 1px solid var(--yt-warm-soft);
-  color: var(--yt-warm);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  padding: 6px 16px;
+  border: 1px solid rgba(255, 216, 155, 0.36);
+  border-radius: 999px;
+  background: rgba(11, 15, 19, 0.88);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.44);
+  color: rgba(255, 252, 245, 0.96);
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   line-height: 1.4;
   white-space: nowrap;
-  text-shadow: var(--yt-text-shadow);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
 .world-hud__sprint[hidden] {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-hud__crosshair::after,
+  .world-hud__crosshair-dot,
+  .world-hud__hint {
+    animation: none;
+    transition: none;
+  }
 }
 
 .world-hud__targets {

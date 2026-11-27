@@ -60,13 +60,13 @@ const CANTEEN_STUDENT_CAST: ReadonlyArray<{
   clips: readonly string[];
   seated: boolean;
 }> = [
-  // 靠窗餐桌 3 人（坐姿低语：原生 sit / 原生坐姿接电话 make_a_call_01 / 骨骼坐姿）
-  { modelId: 'studentFemale4', clips: ['sit'], seated: true },
+  // 靠窗餐桌 3 人（使用差异化新角色：女同学1 / 女同学3 / 男同学5，全部使用坐姿剪辑）
+  { modelId: 'studentFemale1', clips: ['sit'], seated: true },
   { modelId: 'studentFemale3', clips: ['make_a_call_01'], seated: true },
-  { modelId: 'studentMale4', clips: [], seated: true },
-  // 过道站姿 3 人（进门直面注视：键盘侠 + 阴阳怪气 + 起哄看热闹，全部使用纯站姿剪辑）
+  { modelId: 'studentMale5', clips: ['sit'], seated: true },
+  // 过道站姿 3 人（进门直面注视：键盘侠 + 女同学2 + 起哄看热闹，全部使用纯站姿剪辑）
   { modelId: 'studentMale2', clips: ['angry_01', 'laugh_02', 'wait'], seated: false },
-  { modelId: 'studentFemale3', clips: ['laugh_01', 'agree', 'swagger'], seated: false },
+  { modelId: 'studentFemale2', clips: ['fold_arms', 'greet_04', 'cheer'], seated: false },
   { modelId: 'studentMale3', clips: ['make_a_call_02', 'cheer', 'wait'], seated: false },
   // 三号窗口旁 3 人（理性同学 + 沉默旁观 + 抱臂议论）
   { modelId: 'studentMale4', clips: ['look_around', 'agree', 'make_a_call_02'], seated: false },
@@ -604,9 +604,9 @@ function terrazzo(): THREE.MeshStandardMaterial {
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.generateMipmaps = true;
   texture.needsUpdate = true;
-  // 傍晚擦亮水磨石：roughness 0.28 + 轻微金属度与环境反射，映出暖金窗光与灯箱微光
+  // 傍晚室内水磨石：哑光去高光（避免回头看入口时室外太阳或高光在地面拉出刺眼白斑）
   const material = new THREE.MeshStandardMaterial({
-    map: texture, roughness: 0.28, metalness: 0.08, envMapIntensity: 0.72, vertexColors: true,
+    map: texture, roughness: 0.78, metalness: 0, envMapIntensity: 0.22, vertexColors: true,
   });
   material.addEventListener('dispose', () => texture.dispose());
   return material;
@@ -810,6 +810,26 @@ function architecture(parent: THREE.Object3D, d: Details, occluders: THREE.Objec
   d.boxes(parent, 'canteen-column-posters', d.matte(0xffffff), posters);
   d.boxes(parent, 'canteen-wall-slogan-frames', d.matte(0x526468, 0.64), sloganFrames);
   d.boxes(parent, 'canteen-wall-slogan-panels', d.matte(0x79839a, 0.85), sloganPanels);
+
+  // 入口右角餐具回收台附件（厨余绿+其他灰脚踏垃圾桶、盘架）、右墙文明用餐几何装饰板及四个窗口前方黄色一米排队引导线（零新增贴图，合批 1 DrawCall）
+  d.boxes(parent, 'canteen-queue-and-recycle-extras', d.matte(0xffffff, 0.72), [
+    // 右墙文明用餐/膳食宝塔几何展示条与底板
+    ...[-4.2, 0.3, 4.5].flatMap((sz, idx) => [
+      { p: [8.795, 2.48, sz] as [number, number, number], s: [0.015, 0.46, 1.92] as [number, number, number], color: 0xedf2ec },
+      { p: [8.785, 2.63, sz] as [number, number, number], s: [0.014, 0.1, 1.88] as [number, number, number], color: [0x3d8259, 0xd48d46, 0x4378a6][idx] },
+      { p: [8.785, 2.42, sz - 0.56] as [number, number, number], s: [0.014, 0.22, 0.24] as [number, number, number], color: [0xe6a145, 0x529c68, 0x5893c4][idx] },
+      { p: [8.785, 2.46, sz + 0.18] as [number, number, number], s: [0.014, 0.05, 1.05] as [number, number, number], color: 0x3b484d },
+      { p: [8.785, 2.36, sz + 0.1] as [number, number, number], s: [0.014, 0.04, 0.88] as [number, number, number], color: 0x627075 },
+    ]),
+    // 绿厨余桶 & 灰其他桶 + 不锈钢盘架
+    { p: [6.48, 0.34, 8.92], s: [0.38, 0.68, 0.38], color: 0x3b8c52 },
+    { p: [6.48, 0.7, 8.92], s: [0.42, 0.05, 0.42], color: 0x266337 },
+    { p: [6.96, 0.34, 8.92], s: [0.38, 0.68, 0.38], color: 0x6f7982 },
+    { p: [6.96, 0.7, 8.92], s: [0.42, 0.05, 0.42], color: 0x485057 },
+    { p: [7.4, 1.12, 8.92], s: [0.82, 0.28, 0.42], color: 0xb7c2c6 },
+    // 打餐窗口前地面一米黄色排队引导线（4 段对齐窗口）
+    ...WINDOWS.map((wx) => ({ p: [wx, 0.006, -6.58] as [number, number, number], s: [3.6, 0.008, 0.08] as [number, number, number], color: 0xd9b34a })),
+  ]);
 
   // 角落饮水机与餐具回收推车，补生活气息。
   const dispenser = group(parent, 'canteen-water-dispenser');
@@ -1239,13 +1259,32 @@ function furniture(parent: THREE.Object3D, d: Details, occluders: THREE.Object3D
   // 成品桌面半宽 1.01m：调料罐从 1.02 内收到 0.92，换桌前后都稳稳落在板面里而不是压在边沿上
   const jarsBatch = d.batch(dining, 'canteen-condiment-jars', new THREE.CylinderGeometry(0.035, 0.028, 0.1, 8),
     d.matte(0x887f72, 0.52), TABLES.map(({ x, z }) => ({ p: [x + 0.92, 0.855, z], s: [1, 1, 1] })));
+  // 餐盘四格饭菜块（青菜绿/番茄红/米饭白/炒蛋黄）、小汤勺及桌中央迷你绿植（合批 1 DrawCall 并入桌面自适应组）
+  const mealDetails: Part[] = [];
+  for (const { x, z } of TABLES) {
+    for (const [tx, tz] of [[x - 0.7, z - 0.08], [x + 0.18, z + 0.14]] as const) {
+      mealDetails.push(
+        { p: [tx - 0.11, 0.834, tz - 0.06], s: [0.13, 0.016, 0.11], color: 0xf7f5ed }, // 米饭
+        { p: [tx + 0.07, 0.834, tz - 0.06], s: [0.12, 0.018, 0.1], color: 0x62a354 },  // 青菜
+        { p: [tx - 0.1, 0.834, tz + 0.07], s: [0.12, 0.018, 0.09], color: 0xd9563c },  // 荤菜
+        { p: [tx + 0.08, 0.834, tz + 0.07], s: [0.11, 0.016, 0.09], color: 0xf2c54b }, // 蛋菜
+        { p: [tx + 0.19, 0.834, tz], s: [0.016, 0.01, 0.15], color: 0xd0d7da },       // 不锈钢汤勺
+      );
+    }
+    // 桌面中央小陶土盆栽
+    mealDetails.push(
+      { p: [x + 0.48, 0.84, z - 0.16], s: [0.11, 0.08, 0.11], color: 0xb36a4a },
+      { p: [x + 0.48, 0.91, z - 0.16], s: [0.15, 0.09, 0.15], color: 0x568c54 },
+    );
+  }
+  const mealDetailsBatch = d.boxes(dining, 'canteen-table-meal-details', d.matte(0xffffff, 0.72), mealDetails);
   occluders.push(dining);
   mountPropTables({
     dining,
     tops: topsBatch,
     legs: legsBatch,
     seats: seatsBatch,
-    tabletopProps: [traysBatch, chopsticksBatch, bowlsBatch, bottlesBatch, phonesBatch, tissueBatch, jarsBatch],
+    tabletopProps: [traysBatch, chopsticksBatch, bowlsBatch, bottlesBatch, phonesBatch, tissueBatch, jarsBatch, mealDetailsBatch],
   });
 
   // 两层低透明度冷灰接触底色，避免没有新增投影时家具像悬浮。
@@ -1750,6 +1789,14 @@ interface CanteenSession {
   clockHour?: THREE.Object3D;
   clockMinute?: THREE.Object3D;
   clockSecond?: THREE.Object3D;
+  staff?: {
+    container: THREE.Group;
+    controller: CharacterAnimationController | null;
+    clips: readonly string[];
+    clipIndex: number;
+    switchTimer: number;
+    switchSec: number;
+  };
   time: number;
   unsubscribe?: () => void;
 }
@@ -1889,9 +1936,62 @@ function updateClock(current: CanteenSession): void {
   current.clockHour.rotation.z = -(hr / 12) * Math.PI * 2;
 }
 
+function mountCanteenStaffAuntie(current: CanteenSession, parent: THREE.Object3D): void {
+  const gen = current.generation;
+  void loadCharacterModel('canteenAuntie').then(() => {
+    if (session !== current || gen !== canteenGeneration || current.staff) return;
+    const entry = getCharacterModel('canteenAuntie');
+    const container = new THREE.Group();
+    container.name = 'canteen-staff-auntie';
+    container.position.set(2.68, 0, -9.56);
+    const pose = new THREE.Group();
+    pose.name = 'canteen-staff-pose';
+    pose.rotation.y = entry.frontYawRad;
+    const model = instantiateCharacterModel('canteenAuntie');
+    model.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        node.castShadow = false;
+        node.receiveShadow = true;
+        node.raycast = NOOP_RAYCAST;
+      }
+    });
+    pose.add(model);
+    container.add(pose);
+    parent.add(container);
+
+    const allClips = getCharacterAnimations('canteenAuntie');
+    const desired = ['wait', 'standing_relax', 'agree', 'greet_01'];
+    const playable = desired.filter((name) => allClips.some((clip) => clip.name === name));
+    let controller: CharacterAnimationController | null = null;
+    if (playable.length > 0) {
+      controller = createCharacterAnimation(model, allClips);
+      controller.play(playable[0], { fadeIn: 0.25, timeScale: 0.85, loop: true });
+      controller.update(0.01);
+    }
+    current.staff = {
+      container,
+      controller,
+      clips: playable,
+      clipIndex: 0,
+      switchTimer: 0,
+      switchSec: 7.5,
+    };
+  }).catch(() => {});
+}
+
 function clearRuntime(): void {
   if (!session) return;
   session.unsubscribe?.();
+  if (session.staff) {
+    session.staff.controller?.dispose();
+    const skeletons = new Set<THREE.Skeleton>();
+    session.staff.container.traverse((node) => {
+      if (node instanceof THREE.SkinnedMesh) skeletons.add(node.skeleton);
+    });
+    skeletons.forEach((skeleton) => skeleton.dispose());
+    session.staff.container.removeFromParent();
+    session.staff = undefined;
+  }
   for (const students of session.groups.values()) for (const record of students) {
     disposeRealRig(record);
     record.motion.rotation.copy(record.rotation);
@@ -1962,6 +2062,7 @@ export const canteenRuntime: SceneRuntime = {
       }
       current.groups.set(id, records);
     }
+    if (shouldMountReal && crowdRoot) mountCanteenStaffAuntie(current, crowdRoot);
     if (context.sceneId !== 'S12') return;
     current.unsubscribe = context.bus.on('scene:enterZone', ({ sceneId, zoneId }) => {
       if (sceneId !== 'S12' || current.context.sceneId !== 'S12') return;
@@ -2029,6 +2130,19 @@ export const canteenRuntime: SceneRuntime = {
     }
     if (session.lightSheets && session.lightSheets.material instanceof THREE.MeshBasicMaterial) {
       session.lightSheets.material.opacity = 0.34 + Math.sin(session.time * 0.85) * 0.03;
+    }
+    if (session.staff?.controller) {
+      if (session.staff.clips.length > 1) {
+        session.staff.switchTimer += dt;
+        if (session.staff.switchTimer >= session.staff.switchSec) {
+          session.staff.switchTimer = 0;
+          session.staff.clipIndex = (session.staff.clipIndex + 1) % session.staff.clips.length;
+          session.staff.controller.play(session.staff.clips[session.staff.clipIndex], {
+            fadeIn: 0.45, timeScale: 0.85, loop: true,
+          });
+        }
+      }
+      session.staff.controller.update(dt);
     }
     updateClock(session);
   },

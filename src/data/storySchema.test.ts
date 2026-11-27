@@ -18,12 +18,12 @@ describe('全五章 schema 契约', () => {
     for (const id of ['S0', 'S15', 'C7', 'D7', 'E2', 's1', 1, null]) expect(isSceneId(id)).toBe(false);
   });
 
-  it('保留八种场景、九位说话人，场景可缺省而角色必须完整', () => {
+  it('保留八种场景、十一位说话人，场景可缺省而角色必须完整', () => {
     expectTypeOf<SceneKey>().toEqualTypeOf<
       'room' | 'street' | 'gate' | 'desk' | 'building' | 'canteen' | 'interior' | 'stage2d'
     >();
     expectTypeOf<SpeakerId>().toEqualTypeOf<
-      'linxia' | 'father' | 'volunteer' | 'mom' | 'xiaochen' | 'ayuan' | 'teacher' | 'admin' | 'passerby'
+      'linxia' | 'father' | 'volunteer' | 'mom' | 'xiaochen' | 'ayuan' | 'teacher' | 'admin' | 'passerby' | 'guard' | 'auntie'
     >();
     expectTypeOf<ChapterStory['scenes']>().toEqualTypeOf<Partial<Record<SceneId, SceneDef>>>();
     expectTypeOf<ChapterStory['characters']>().toEqualTypeOf<Record<SpeakerId, { name: string }>>();

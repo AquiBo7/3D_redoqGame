@@ -151,6 +151,9 @@ export const endingScene: SceneDef = {
     { kind: 'dialogue', id: 'e1-best-father', lines: [
       { speaker: null, text: '远处，爸爸站在校门外稍远的地方。这一次，是她自己走向他。' },
     ] },
+    { kind: 'dialogue', id: 'e1-best-guard', when: { key: 'guardWilling', equals: true }, lines: [
+      { speaker: null, text: '周老师后来专门找校门口那位保安师傅聊了一次，把那天早上发生的每一段都问清了。' },
+    ] },
     { kind: 'phone', id: 'e1-best-message', panel: { id: 'e1-best-phone', closeActionId: 'close', sections: [
       { kind: 'chat', id: 'e1-best-chat', title: '林夏', unread: 1, messages: [
         { id: 'e1-best-arrived', from: '林夏', text: '今天我自己走进教室了。', unread: true },
@@ -197,6 +200,10 @@ export const endingScene: SceneDef = {
       { speaker: 'linxia', emotion: 'sad', text: '……没事。' },
     ] },
     { kind: 'moment', id: 'e1-middle-pause', moment: 'middle-pause', lines: ['……没事。'] },
+    { kind: 'intertitle', id: 'e1-middle-sketch-intro', lines: [
+      '那天放学后的教室早就空了。',
+      '你收拾书包经过最后一排她的空座位时，偶然看见桌上还摊着那本没画完的速写本。',
+    ], lineDurationMs: 2400 },
     { kind: 'art', id: 'e1-middle-sketch', assetId: 'cg_ending_middle_sketch' },
     { kind: 'dialogue', id: 'e1-middle-question-helped', when: explicitlyHelped, lines: [
       { speaker: 'linxia', emotion: 'sad', text: '……那天，你为什么帮我？' },

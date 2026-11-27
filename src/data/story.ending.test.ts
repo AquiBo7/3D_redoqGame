@@ -288,7 +288,7 @@ describe('E1 剧情数据与真实 SceneMachine', () => {
   it.each([
     { seed: { postDeleted: true, joined: false, trust: 10, picked: true }, expectedQuestion: '……那天，你为什么帮我？', answer: 'final-wrong' as const, freeze: '你知道那不对，只是那一天，仍没来得及说完整。' },
     { seed: { postDeleted: true, joined: false, trust: 0 }, expectedQuestion: '……那天，你为什么没走开？', answer: 'final-silent' as const, freeze: '你没有走开，但也什么都没说出口。' },
-  ])('中间结局七行字幕 → “……没事。”停三秒 → 速写 CG → 最后一问($expectedQuestion) → 对应定格', ({ seed, expectedQuestion, answer, freeze }) => {
+  ])('中间结局七行字幕 → “……没事。”停三秒 → 黑屏过渡字幕 → 速写 CG → 最后一问($expectedQuestion) → 对应定格', ({ seed, expectedQuestion, answer, freeze }) => {
     const h = harness(seed);
     expect(h.intertitles[0].lines).toEqual([
       '一个月后。', '帖子早就删了。', '阿远再也没有发过任何东西。', '林夏的脚好了，走路很稳。',
@@ -301,6 +301,12 @@ describe('E1 剧情数据与真实 SceneMachine', () => {
     expect(h.current()?.id).toBe('e1-middle-pause');
     expect(h.moments[0]).toMatchObject({ stepId: 'e1-middle-pause', moment: 'middle-pause' });
     h.machine.onMomentEnd('e1-middle-pause', 'completed');
+    expect(h.current()?.id).toBe('e1-middle-sketch-intro');
+    expect(h.intertitles[1].lines).toEqual([
+      '那天放学后的教室早就空了。',
+      '你收拾书包经过最后一排她的空座位时，偶然看见桌上还摊着那本没画完的速写本。',
+    ]);
+    h.machine.onDialogueEnd('e1-middle-sketch-intro');
     expect(h.current()?.id).toBe('e1-middle-sketch');
     expect(h.arts).toEqual([{ stepId: 'e1-middle-sketch', assetId: 'cg_ending_middle_sketch' }]);
     h.machine.onDialogueEnd('wrong-art');
@@ -309,7 +315,7 @@ describe('E1 剧情数据与真实 SceneMachine', () => {
     const questionDialogue = h.dialogues[h.dialogues.length - 1];
     expect(questionDialogue.lines[0].text).toBe(expectedQuestion);
     h.finish(answer);
-    expect(h.intertitles[1]).toMatchObject({
+    expect(h.intertitles[2]).toMatchObject({
       lines: ['已被转发，无法收回。', freeze], lineDurationMs: 2800, skippable: false,
     });
     expect(h.phones).toHaveLength(0);

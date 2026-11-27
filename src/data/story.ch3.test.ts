@@ -314,4 +314,18 @@ describe('第三章剧本与交互合同', () => {
     h2.choose('c4-response', 'c4-respect');
     expect(h2.machine.getState().draftReactions).toContain('你先问了我。谢谢。');
   });
+
+  it('C5 询问校门口保安大叔会解锁橙色手机壳线索与 guardWilling，并同步解锁备忘录新条目', () => {
+    const h = harness('C5', { noticedTyper: false });
+    h.readThrough();
+    expect(h.machine.getState().clues).toEqual(baseClues);
+    h.choose('c5-find-path', 'ask-guard');
+    expect(h.machine.getState()).toMatchObject({ talkedGuard: true, orangeClue: true, guardWilling: false });
+    expect(h.current()?.id).toBe('c5-guard-ask');
+    h.choose('c5-guard-ask', 'c5-guard-willing-yes');
+    expect(h.machine.getState().guardWilling).toBe(true);
+    h.choose('c5-find-path', 'c5-memo');
+    expect(h.machine.getState().clues).toContain(orangeClue);
+    expect(h.phones[h.phones.length - 1].panel.sections[0]).toMatchObject({ kind: 'memo', items: [...baseClues, orangeClue] });
+  });
 });

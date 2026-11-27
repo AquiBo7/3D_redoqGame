@@ -10,7 +10,7 @@
     "sync:art": "node tools/syncArtAssets.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=2"
   },
   "dependencies": {
     "gsap": "^3.15.1",

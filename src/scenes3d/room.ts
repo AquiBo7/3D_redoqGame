@@ -3,12 +3,16 @@
 
 import * as THREE from 'three';
 import type { SceneId } from '../data/storySchema';
+import { parseUrlParams } from '../core/urlParams';
 import type { ObstacleAabb } from '../world/navMath';
 import type {
   InteractableConfig,
   HotspotConfig,
   NavigationConfig,
+  SceneRuntime,
+  SceneRuntimeContext,
   SceneSpawn,
+  TargetGuideConfig,
   WorldSceneDefinition,
 } from '../world/worldSceneTypes';
 import { addBox, createMatteMaterial } from './shared';
@@ -2364,10 +2368,242 @@ const S3_INTERACTABLES: InteractableConfig[] = [
   { id: 'document-bag', position: { x: 2.7, y: 0.84, z: -2.2 }, maxDistance: 3.5 },
 ];
 
+/** S1 枕边手机指引点：看完新闻后第一时间给出清晰方向提示 */
+const S1_TARGET_GUIDES: TargetGuideConfig[] = [
+  { id: 'phone', position: { x: -2.85, y: 0.86, z: -4.02 } },
+];
+
+/** S3 边缘方向引导点：玩家面朝床与窗时衣柜文化衫在身后，屏幕边缘自动给出暖金色转身箭头，拿走后随交互一并隐藏 */
+const S3_TARGET_GUIDES: TargetGuideConfig[] = [
+  { id: 'culture-shirt', position: { x: SHIRT_ANCHOR.x, y: SHIRT_ANCHOR.y + 0.16, z: SHIRT_ANCHOR.z } },
+  { id: 'document-bag', position: { x: 2.7, y: 0.98, z: -2.2 } },
+];
+
+const OPENING_TURN_DELAY_SEC = 0.25;
+const OPENING_TURN_SEC = 0.7;
+const OPENING_WAIT_SEC = 5;
+const OPENING_BOTH_ITEMS_WAIT_SEC = 2;
+const OPENING_FREEZE_SEC = 0.2;
+const OPENING_MAX_TURN_SPEED = (200 * Math.PI) / 180;
+
+type OpeningPhase = 'idle' | 'delay' | 'turn' | 'countdown' | 'freeze' | 'done';
+
+let roomContext: SceneRuntimeContext | null = null;
+let roomSceneId: SceneId = 'S1';
+let roomUnsubscribers: Array<() => void> = [];
+let openingPhase: OpeningPhase = 'idle';
+let openingPhaseElapsed = 0;
+let openingTurnStart = 0;
+let openingTurnDelta = 0;
+let openingCountdownRemaining = OPENING_WAIT_SEC;
+let openingCountdownTotal = OPENING_WAIT_SEC;
+let openingCountdownEmitElapsed = 0;
+let openingShown = false;
+let openingCancelled = false;
+let openingAutoArmed = false;
+let openingLastWholeSecond = -1;
+const openingHeldItems = new Set<string>();
+
+function releaseOpeningSubscriptions(): void {
+  for (const unsubscribe of roomUnsubscribers) unsubscribe();
+  roomUnsubscribers = [];
+  roomContext?.setScriptedLookLocked?.(false);
+  roomContext = null;
+}
+
+function resetOpeningSequence(): void {
+  roomContext?.setScriptedLookLocked?.(false);
+  openingPhase = 'idle';
+  openingPhaseElapsed = 0;
+  openingCountdownRemaining = OPENING_WAIT_SEC;
+  openingCountdownTotal = OPENING_WAIT_SEC;
+  openingCountdownEmitElapsed = 0;
+  openingShown = false;
+  openingCancelled = false;
+  openingAutoArmed = false;
+  openingLastWholeSecond = -1;
+  openingHeldItems.clear();
+}
+
+function getAutoDepartOverride(): 0 | 2 | null {
+  return typeof window === 'undefined' ? null : parseUrlParams(window.location.search).autoDepartSec;
+}
+
+function emitOpeningCountdown(active: boolean): void {
+  roomContext?.bus.emit('ui:objectiveCountdown', {
+    remaining: Math.max(0, openingCountdownRemaining),
+    total: openingCountdownTotal,
+    active,
+  });
+}
+
+function cancelOpeningSequence(): void {
+  if (openingCancelled || openingPhase === 'idle') return;
+  openingCancelled = true;
+  openingAutoArmed = false;
+  openingPhase = 'done';
+  openingPhaseElapsed = 0;
+  roomContext?.setScriptedLookLocked?.(false);
+  emitOpeningCountdown(false);
+}
+
+function beginOpeningSequence(): void {
+  if (!roomContext || openingShown || openingCancelled) return;
+  openingShown = true;
+  openingPhase = 'delay';
+  openingPhaseElapsed = 0;
+}
+
+function beginOpeningTurn(): void {
+  if (!roomContext || openingCancelled) return;
+  const feet = roomContext.getPlayerFeet?.(new THREE.Vector3());
+  const x = feet?.x ?? SPAWN.x;
+  const z = feet?.z ?? SPAWN.z;
+  const targetYaw = Math.atan2(-(SHIRT_ANCHOR.x - x), -(SHIRT_ANCHOR.z - z));
+  const startYaw = roomContext.getViewYaw?.() ?? SPAWN.yaw ?? 0;
+  let delta = ((targetYaw - startYaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  if (delta > 0) delta -= Math.PI * 2;
+  openingTurnStart = startYaw;
+  openingTurnDelta = delta;
+  openingPhase = 'turn';
+  openingPhaseElapsed = 0;
+  roomContext.setScriptedLookLocked?.(true);
+}
+
+function beginOpeningCountdown(): void {
+  const override = getAutoDepartOverride();
+  openingCountdownTotal = override ?? (openingHeldItems.size === 2 ? OPENING_BOTH_ITEMS_WAIT_SEC : OPENING_WAIT_SEC);
+  openingCountdownRemaining = openingCountdownTotal;
+  openingCountdownEmitElapsed = 0;
+  openingLastWholeSecond = Math.ceil(openingCountdownRemaining);
+  openingPhase = 'countdown';
+  openingPhaseElapsed = 0;
+  emitOpeningCountdown(true);
+}
+
+function beginOpeningFreeze(): void {
+  openingPhase = 'freeze';
+  openingPhaseElapsed = 0;
+  roomContext?.setScriptedLookLocked?.(true);
+  emitOpeningCountdown(false);
+}
+
+/** 匀速峰值受限的对称加减速曲线；0.7 秒内完成衣柜朝向且不超过 200°/s */
+function openingTurnProgress(progress: number): number {
+  const delta = Math.abs(openingTurnDelta);
+  const accel = Math.min(0.45, Math.max(0.12, 1 - delta / (OPENING_MAX_TURN_SPEED * OPENING_TURN_SEC)));
+  const peak = 1 / (1 - accel);
+  if (progress < accel) return progress * progress * peak / (2 * accel);
+  if (progress > 1 - accel) {
+    const remaining = 1 - progress;
+    return 1 - remaining * remaining * peak / (2 * accel);
+  }
+  return peak * (progress - accel / 2);
+}
+
+function tickOpeningSequence(dtSeconds: number): void {
+  const context = roomContext;
+  if (!context || openingCancelled || openingPhase === 'idle' || openingPhase === 'done') return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  if (context.isModalBlocked?.() || context.isCinematic?.()) return;
+
+  openingPhaseElapsed += dtSeconds;
+  if (openingPhase === 'delay') {
+    if (openingPhaseElapsed >= OPENING_TURN_DELAY_SEC) beginOpeningTurn();
+    return;
+  }
+  if (openingPhase === 'turn') {
+    const progress = Math.min(1, openingPhaseElapsed / OPENING_TURN_SEC);
+    context.setViewYaw?.(openingTurnStart + openingTurnDelta * openingTurnProgress(progress));
+    if (progress >= 1) {
+      context.setScriptedLookLocked?.(false);
+      if (getAutoDepartOverride() === 0) {
+        openingPhase = 'done';
+        emitOpeningCountdown(false);
+        return;
+      }
+      beginOpeningCountdown();
+    }
+    return;
+  }
+  if (openingPhase === 'countdown') {
+    if (roomSceneId !== 'S1' && roomSceneId !== 'S3') return;
+    openingCountdownRemaining = Math.max(0, openingCountdownRemaining - dtSeconds);
+    const wholeSecond = Math.ceil(openingCountdownRemaining);
+    if (wholeSecond !== openingLastWholeSecond && wholeSecond >= 1 && wholeSecond <= 2) {
+      openingLastWholeSecond = wholeSecond;
+      context.bus.emit('audio:tick');
+    }
+    openingCountdownEmitElapsed += dtSeconds;
+    if (openingCountdownEmitElapsed >= 0.05 || openingCountdownRemaining === 0) {
+      openingCountdownEmitElapsed = 0;
+      emitOpeningCountdown(true);
+    }
+    if (openingCountdownRemaining > 0) return;
+    if (roomSceneId === 'S1') {
+      openingAutoArmed = true;
+      openingPhase = 'done';
+      emitOpeningCountdown(false);
+    } else {
+      beginOpeningFreeze();
+    }
+    return;
+  }
+  if (openingPhase === 'freeze' && openingPhaseElapsed >= OPENING_FREEZE_SEC) {
+    openingPhase = 'done';
+    context.setScriptedLookLocked?.(false);
+    if (!openingHeldItems.has('document-bag')) {
+      openingHeldItems.add('document-bag');
+      context.setInteractableVisible('document-bag', false);
+    }
+    context.bus.emit('ui:hideObjective');
+    context.bus.emit('scene:cutscene', {
+      stepId: 's3-run',
+      key: 's3-run',
+      durationMs: 3000,
+      skippable: false,
+      immediate: true,
+    });
+  }
+}
+
+/** 卧室轻量运行时：开场提示、向右转向、自动出发倒计时与 S3 拾取反馈 */
+export const roomRuntime: SceneRuntime = {
+  enter(context: SceneRuntimeContext): void {
+    releaseOpeningSubscriptions();
+    roomContext = context;
+    roomSceneId = context.sceneId;
+    if (context.sceneId === 'S3' && openingAutoArmed && !openingCancelled) beginOpeningFreeze();
+
+    roomUnsubscribers = [
+      context.bus.on('game:start', resetOpeningSequence),
+      context.bus.on('world:inputTakeover', cancelOpeningSequence),
+      context.bus.on('ui:showObjective', ({ sceneId, persistent }) => {
+        if (sceneId === 'S1' && persistent) beginOpeningSequence();
+      }),
+      context.bus.on('scene:interact', ({ sceneId, targetId }) => {
+        if (sceneId !== 'S3') return;
+        if (targetId !== 'culture-shirt' && targetId !== 'document-bag') return;
+        openingHeldItems.add(targetId);
+        context.setInteractableVisible(targetId, false);
+        cancelOpeningSequence();
+        context.bus.emit('ui:hideObjective');
+      }),
+    ];
+  },
+  tick(dtSeconds: number): void {
+    if (dtSeconds > 0) tickOpeningSequence(dtSeconds);
+  },
+  exit(): void {
+    releaseOpeningSubscriptions();
+  },
+};
+
 export function createRoomDefinition(sceneId: SceneId): WorldSceneDefinition {
   const interactables =
     sceneId === 'S1' ? S1_INTERACTABLES : sceneId === 'S3' ? S3_INTERACTABLES : [];
   const hotspots = sceneId === 'S1' ? S1_HOTSPOTS : [];
+  const targetGuides = sceneId === 'S1' ? S1_TARGET_GUIDES : sceneId === 'S3' ? S3_TARGET_GUIDES : [];
 
   return {
     sceneKey: 'room',
@@ -2383,6 +2619,7 @@ export function createRoomDefinition(sceneId: SceneId): WorldSceneDefinition {
     requiredModels: [],
     interactables,
     hotspots,
+    targetGuides,
     // 雾只留给窗外：公寓楼（≈28 m）吃一成雾、80 m 外树线吃四成，室内与行道树完全不受雾
     fog: { color: 0xe6dfd2, near: 22, far: 70 },
     build: buildRoom,

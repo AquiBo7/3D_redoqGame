@@ -280,6 +280,19 @@ describe('结局复盘纯模型', () => {
     expect(review.footprints.find((item) => item.id === 'afterwards')?.lines).toContain(
       '面对林夏最后的提问，你的回应：“你那天看起来很累。”',
     );
+    expect(review.painting).toEqual({
+      hasOrangeDot: false,
+      hasGuardBooth: false,
+      canFlip: false,
+    });
+    const bestFull = createEndingReview(state({ ending: 'best', joined: true, guardWilling: true, trust: 7 }));
+    expect(bestFull.painting).toEqual({
+      hasOrangeDot: true,
+      hasGuardBooth: true,
+      canFlip: true,
+    });
+    expect(createEndingReview(state({ ending: 'middle', joined: true, trust: 9 })).painting).toBeUndefined();
+    expect(JSON.stringify(bestFull)).not.toMatch(/harm|trust|yuanScore|伤害值|分数/);
     expect(JSON.stringify(review)).not.toMatch(/harm|trust|yuanScore|伤害值|分数/);
   });
 });

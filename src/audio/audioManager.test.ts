@@ -387,3 +387,123 @@ describe('小游戏消息弹出压迫音效', () => {
     expect(ctx.createOscillator).toHaveBeenCalledTimes(5);
   });
 });
+
+describe('循环背景音乐（BGM）与黑屏/高潮自动暂停', () => {
+  class MockHtmlAudio {
+    src: string;
+    loop = false;
+    preload = '';
+    volume = 1;
+    muted = false;
+    paused = true;
+    currentTime = 0;
+    play = vi.fn(() => {
+      this.paused = false;
+      return Promise.resolve();
+    });
+    pause = vi.fn(() => {
+      this.paused = true;
+    });
+    constructor(src: string) {
+      this.src = src;
+    }
+  }
+
+  it('循环播放且初始轻柔音量，静音开关同步，高潮与黑屏讲解自动暂停、后续剧情续播', async () => {
+    vi.useFakeTimers();
+    try {
+      const instances: MockHtmlAudio[] = [];
+      vi.stubGlobal('Audio', class extends MockHtmlAudio {
+        constructor(src: string) {
+          super(src);
+          instances.push(this);
+        }
+      });
+      const { EventBus } = await import('../core/eventBus');
+      const audio = await import('./audioManager');
+      const bus = new EventBus();
+      const unbind = audio.bindBgmEvents(bus);
+
+      bus.emit('game:start');
+      // 尚未解锁手势时不提前创建或播放音频
+      expect(instances).toHaveLength(0);
+
+      audio.unlockAudio();
+      expect(instances).toHaveLength(1);
+      const bgm = instances[0];
+      expect(bgm.src).toBe('./audio/bgm_sacred_play.mp3');
+      expect(bgm.loop).toBe(true);
+      expect(bgm.volume).toBe(audio.BGM_DEFAULT_VOLUME);
+      expect(bgm.volume).toBeLessThanOrEqual(0.3);
+      expect(bgm.paused).toBe(false);
+
+      // 静音开关控制 BGM 与 SFX 一致
+      audio.setMuted(true);
+      expect(bgm.paused).toBe(true);
+      expect(bgm.muted).toBe(true);
+      audio.setMuted(false);
+      expect(bgm.paused).toBe(false);
+      expect(bgm.muted).toBe(false);
+
+      // 黑屏过渡字幕时自动暂停
+      bus.emit('ui:showIntertitle', { stepId: 's10-days', lines: ['过渡'], lineDurationMs: 2000, skippable: true });
+      expect(bgm.paused).toBe(true);
+
+      // 黑屏紧接高潮演出时防抖取消，不会闪播
+      bus.emit('ui:dialogueEnd', { stepId: 's10-days' });
+      bus.emit('ui:showMoment', { stepId: 'e1-worst-flood', moment: 'worst-flood' });
+      vi.advanceTimersByTime(100);
+      expect(bgm.paused).toBe(true);
+
+      // 高潮结束后进入下一段剧情，BGM 自动恢复播放
+      bus.emit('ui:momentEnd', { stepId: 'e1-worst-flood', outcome: 'completed' });
+      vi.advanceTimersByTime(100);
+      expect(bgm.paused).toBe(false);
+
+      // 高压小游戏期间暂停，结束后恢复
+      bus.emit('ui:showMinigame', { stepId: 's14-bubble', game: 'bubble', joined: false, tries: 0 });
+      expect(bgm.paused).toBe(true);
+      bus.emit('ui:minigameEnd', { stepId: 's14-bubble', hits: 0, kills: 5 });
+      vi.advanceTimersByTime(100);
+      expect(bgm.paused).toBe(false);
+
+      // 返回标题页停止并归零
+      bgm.currentTime = 42;
+      bus.emit('game:title', { hasSave: true });
+      expect(bgm.paused).toBe(true);
+      expect(bgm.currentTime).toBe(0);
+
+      unbind();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('停留开始页解锁音频或打开章节/成就时绝不提前加载或播放 BGM，仅开始游戏后才响起', async () => {
+    const instances: MockHtmlAudio[] = [];
+    vi.stubGlobal('Audio', class extends MockHtmlAudio {
+      constructor(src: string) {
+        super(src);
+        instances.push(this);
+      }
+    });
+    const { EventBus } = await import('../core/eventBus');
+    const audio = await import('./audioManager');
+    const bus = new EventBus();
+    const unbind = audio.bindBgmEvents(bus);
+
+    // 模拟在开始页点击任意空白或菜单打开章节/成就
+    audio.unlockAudio();
+    bus.emit('ui:openChapters');
+    bus.emit('ui:openAchievements');
+    bus.emit('ui:showDialogue', { stepId: 'idle', speakerNames: {}, lines: [] });
+    expect(instances).toHaveLength(0);
+
+    // 点击开始体验正式进入游戏后才创建并播放 BGM
+    bus.emit('game:start');
+    expect(instances).toHaveLength(1);
+    expect(instances[0].paused).toBe(false);
+
+    unbind();
+  });
+});

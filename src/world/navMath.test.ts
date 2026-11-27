@@ -124,6 +124,18 @@ describe('navMath AABB 碰撞', () => {
     expect(result.x).toBeGreaterThan(-2);
     expect(result.x).toBeLessThan(-0.8);
   });
+
+  it('圆形障碍按真实半径碰撞，外接盒角部仍可绕行', () => {
+    const pole: ObstacleAabb = {
+      id: 'round-pole', shape: 'circle', centerX: 0, centerZ: 0, radius: 0.2,
+      minX: -0.2, maxX: 0.2, minZ: -0.2, maxZ: 0.2,
+    };
+    const blocked = resolveMovement({ x: -1, z: 0 }, { x: 2, z: 0 }, bounds, [pole], 0.3);
+    expect(blocked.x).toBeLessThan(-0.5);
+    const aroundCorner = resolveMovement({ x: -0.45, z: -0.45 }, { x: -1, z: -1 }, bounds, [pole], 0.3);
+    expect(aroundCorner.x).toBeCloseTo(-1.45, 5);
+    expect(aroundCorner.z).toBeCloseTo(-1.45, 5);
+  });
 });
 
 describe('navMath 触发区判定', () => {

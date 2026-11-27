@@ -185,6 +185,12 @@ class ElementStub extends TargetStub {
   parent: ElementStub | null = null; hidden = false; disabled = false; tabIndex = -1; type = ''; width = 0; height = 0;
   rect = { width: 800, height: 400, left: 0, top: 0 };
   captures = new Set<number>();
+  private classes = new Set<string>();
+  readonly classList = {
+    add: (...names: string[]) => { for (const name of names) this.classes.add(name); },
+    remove: (...names: string[]) => { for (const name of names) this.classes.delete(name); },
+    contains: (name: string) => this.classes.has(name),
+  };
   constructor(readonly tag: string) { super(); }
   get isConnected(): boolean { return this.tag === 'host' || this.parent?.isConnected === true; }
   append(...children: ElementStub[]): void { for (const child of children) { child.parent = this; this.children.push(child); } }
@@ -283,8 +289,14 @@ describe('CrystalGame 生命周期与双端输入', () => {
     m.player = 0.4; m.enemies = [enemy('small', 2, 1)]; tick(500);
     expect(m.player).toBe(0.4); expect(m.kills).toBe(1);
     fire(ui('canvas'), 'pointerdown', { button: 2, pointerId: 3 }); tick(500); expect(m.kills).toBe(1);
-    fire(ui('attack'), 'pointerdown', { button: 0, pointerId: 4 }); tick(17);
-    fire(win, 'pointerup', { pointerId: 4 }); expect(m.kills).toBe(2);
+    fire(ui('attack'), 'pointerdown', { button: 0, pointerId: 4 });
+    expect(ui('attack').classList.contains('is-pressed')).toBe(true);
+    // 攻击按钮不再挂 click，避免触屏按下一帧触发两次拦截
+    fire(ui('attack'), 'click');
+    tick(17);
+    fire(win, 'pointerup', { pointerId: 4 });
+    expect(ui('attack').classList.contains('is-pressed')).toBe(false);
+    expect(m.kills).toBe(2);
   });
 
   it('失败重试与跳过按钮门槛、独行字幕、焦点循环', () => {

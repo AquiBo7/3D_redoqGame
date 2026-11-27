@@ -160,6 +160,11 @@ export interface ObstacleAabb extends HeightBand {
   maxX: number;
   minZ: number;
   maxZ: number;
+  /** 圆形障碍仍保留外接 AABB，供调试线框与既有遍历使用。 */
+  shape?: 'circle';
+  centerX?: number;
+  centerZ?: number;
+  radius?: number;
   /** 仅用于调试线框高度；碰撞的垂直范围用 minY / maxY */
   height?: number;
 }
@@ -257,6 +262,12 @@ export function clampToNearestWalkable(point: Vec2, bounds: WalkBounds, feetY?: 
 /** 圆（玩家）是否进入扩张后的 AABB（XZ） */
 function isInsideExpandedObstacle(point: Vec2, obstacle: ObstacleAabb, radius: number): boolean {
   const epsilon = 1e-6;
+  if (obstacle.shape === 'circle' && obstacle.centerX !== undefined && obstacle.centerZ !== undefined && obstacle.radius !== undefined) {
+    const dx = point.x - obstacle.centerX;
+    const dz = point.z - obstacle.centerZ;
+    const combinedRadius = obstacle.radius + radius;
+    return dx * dx + dz * dz < combinedRadius * combinedRadius - epsilon;
+  }
   return (
     point.x > obstacle.minX - radius + epsilon &&
     point.x < obstacle.maxX + radius - epsilon &&

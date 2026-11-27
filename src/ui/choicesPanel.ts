@@ -28,6 +28,7 @@ export class ChoicesPanel {
   private stepId = '';
   private active = false;
   private listening = false;
+  private shownAt = Number.NEGATIVE_INFINITY;
   private hint: LegalHint | undefined;
 
   constructor(container: HTMLElement, callbacks: ChoicesPanelCallbacks) {
@@ -64,7 +65,7 @@ export class ChoicesPanel {
     for (const option of payload.options) {
       if (hide3dInteract && option.hasInteract) continue;
       const button = createButton('choices__option', option.text);
-      button.addEventListener('click', () => this.select(option.id));
+      button.addEventListener('click', (event) => this.select(option.id, event));
       this.options.append(button);
     }
 
@@ -73,12 +74,14 @@ export class ChoicesPanel {
     this.closeHint();
     this.setListening(!!this.hint);
 
+    this.shownAt = performance.now();
     this.root.hidden = false;
   }
 
   hide(): void {
     this.active = false;
     this.stepId = '';
+    this.shownAt = Number.NEGATIVE_INFINITY;
     this.hint = undefined;
     this.hintTrigger.hidden = true;
     this.closeHint();
@@ -102,8 +105,10 @@ export class ChoicesPanel {
     return this.hintCard.isVisible;
   }
 
-  private select(choiceId: string): void {
+  private select(choiceId: string, event?: Event): void {
     if (!this.active) return;
+    // 对话刚落幕切换到选项的 150ms 内屏蔽真实连续点击，防止手机端快点误选第一项。
+    if (event?.isTrusted && performance.now() - this.shownAt < 150) return;
     const stepId = this.stepId;
     this.hide();
     this.callbacks.onChoose(stepId, choiceId);

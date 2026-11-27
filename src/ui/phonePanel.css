@@ -15,7 +15,7 @@
   justify-content: center;
   box-sizing: border-box;
   padding: calc(16px + env(safe-area-inset-top, 0px)) calc(18px + env(safe-area-inset-right, 0px))
-    calc(48px + env(safe-area-inset-bottom, 0px)) calc(18px + env(safe-area-inset-left, 0px));
+    calc(56px + env(safe-area-inset-bottom, 0px)) calc(18px + env(safe-area-inset-left, 0px));
   background: rgba(5, 9, 13, .55);
   -webkit-backdrop-filter: blur(6px) brightness(.62);
   backdrop-filter: blur(6px) brightness(.62);
@@ -79,15 +79,45 @@
 .phone__push-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #555; }
 @keyframes phone-push-in { from { transform: translateY(-140%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-/* 锁屏仍以 E 或点击解锁。 */
-.phone__lockscreen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; width: 100%; min-height: 100%; padding: 28px 18px; border: 0; color: #fff; background: radial-gradient(circle at 80% 18%, rgba(238,206,132,.42), transparent 46%), linear-gradient(175deg,#3a4f66,#596f84 42%,#293545); text-align: center; }
-.phone__shell[data-locked='true'] .phone__body { padding: 0; }
-.phone__lock-day { color: #e1e7ed; font-size: 14px; letter-spacing: 1px; }
-.phone__lock-time { font-size: clamp(46px, 10vh, 72px); font-weight: 300; line-height: 1.05; }
-.phone__lock-alarm { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.16); font-size: 12px; color: #fff6d9; }
-.phone__lock-alarm-label { flex-shrink: 0; }
+/* 锁屏仍以 E 或点击解锁；桌面端需显式 flex 伸展，避免 button 收缩露出下方灰底。 */
+.phone__lockscreen {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  padding: 40px 22px 32px;
+  border: 0;
+  color: #fff;
+  background:
+    radial-gradient(circle at 80% 18%, rgba(238, 206, 132, .44), transparent 48%),
+    radial-gradient(circle at 18% 82%, rgba(92, 132, 166, .28), transparent 52%),
+    linear-gradient(175deg, #3a4f66 0%, #52687e 44%, #253242 100%);
+  text-align: center;
+}
+.phone__shell[data-locked='true'] .phone__body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.phone-frame[data-locked='true'] .phone__status {
+  background: #3a4f66;
+  color: #eef3f7;
+}
+.phone-frame[data-locked='true']::before {
+  background: rgba(255, 255, 255, 0.34);
+}
+.phone__lock-day { color: #e1e7ed; font-size: 14px; letter-spacing: 2px; }
+.phone__lock-time { font-size: clamp(48px, 10vh, 76px); font-weight: 300; line-height: 1.05; letter-spacing: 1px; }
+.phone__lock-alarm { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 10px 16px; border: 1px solid rgba(255,255,255,.18); border-radius: 14px; background: rgba(15, 23, 33, .28); font-size: 13px; color: #fff6d9; }
+.phone__lock-alarm-label { flex-shrink: 0; padding: 2px 7px; border-radius: 999px; background: rgba(238, 206, 132, .22); color: #ffe7b3; font-size: 11px; }
 .phone__lock-alarm-text { overflow-wrap: anywhere; }
-.phone__lock-hint { margin-top: 24px; font-size: 12px; color: #e6ebef; }
+.phone__lock-hint { margin-top: 32px; padding: 6px 14px; border-radius: 999px; background: rgba(255, 255, 255, .1); font-size: 12px; letter-spacing: 1.5px; color: #eef3f7; }
 
 .phone__home-head { padding: 14px; border-bottom: 1px solid var(--phone-border); }
 .phone__home-title { margin: 0; font-size: 16px; font-weight: 600; text-align: center; }
@@ -98,7 +128,10 @@
 .phone__row--alarm { background: #faf8f3; }
 button.phone__row:hover { background: #f0f2f4; }
 .phone__row-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 46px; width: 46px; height: 46px; border-radius: 8px; background: var(--phone-accent); color: #fff; font-size: 16px; font-weight: 600; }
-.phone__row-icon--chat { background: #7c749c; }
+.phone__row-icon--chat { background: #5c7686; }
+.phone__row-icon--chat-0 { background: #5c7686; }
+.phone__row-icon--chat-1 { background: #7c749c; }
+.phone__row-icon--chat-2 { background: #8f775d; }
 .phone__row-icon--memo { background: #c7ac68; }
 .phone__row-icon--alarm { background: #d59a70; }
 .phone__row-main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
@@ -161,9 +194,10 @@ button.phone__row:hover { background: #f0f2f4; }
 
 .phone__post { min-width: 0; padding: 14px; background: #fff; border-bottom: 1px solid #ebebeb; overflow-wrap: anywhere; }
 .phone__post-title { margin: 0; font-size: 15px; line-height: 1.6; }
-.phone__post-time, .phone__post-stats, .phone__post-reply-to, .phone__post-likes { color: #888; font-size: 12px; line-height: 1.6; }
+.phone__post-time, .phone__post-reply-to, .phone__post-likes { color: #7a838a; font-size: 12px; line-height: 1.6; }
+.phone__post-stats { color: #56636b; font-size: 12.5px; font-weight: 500; line-height: 1.6; }
 .phone__post-time { margin: 4px 0 12px; }
-.phone__post-stats { margin: 12px 0; padding-top: 8px; border-top: 1px solid #f2f2f2; }
+.phone__post-stats { margin: 12px 0; padding: 9px 10px 6px; border-top: 1px solid #eceff1; border-radius: 6px; background: #f8f9fa; }
 .phone__post-text { margin: 6px 0; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
 .phone__post-images { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
 .phone__post-image { min-width: 0; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: #e5e8ec; aspect-ratio: 4 / 3; }
@@ -179,8 +213,8 @@ button.phone__row:hover { background: #f0f2f4; }
 .phone__post-action { display: block; width: 100%; padding: 10px; border: 1px solid #dcdcdc; border-radius: 10px; background: #fff; color: inherit; font-size: 14px; line-height: 1.7; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
 .phone__post-comment > .phone__post-action { margin-top: 6px; border-color: transparent; }
 .phone__post-action:hover { background: #f7f8fa; }
-.phone__post--deleted { background: #f4f4f5; color: #8a8f99; }
-.phone__post-placeholder { margin: 12px 0; padding: 28px 14px; border: 1px dashed #d0d4da; border-radius: 10px; text-align: center; font-size: 14px; }
+.phone__post--deleted { background: #f3f4f6; color: #7e858f; }
+.phone__post-placeholder { margin: 12px 0; padding: 28px 14px; border: 1px dashed #c8cdd4; border-radius: 10px; background: #fafafa; text-align: center; font-size: 14px; text-decoration: line-through; text-decoration-color: rgba(126, 133, 143, 0.55); }
 
 .phone__photo-card { padding: 12px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
 .phone__chat .phone__photo-card { width: min(260px, 100%); }

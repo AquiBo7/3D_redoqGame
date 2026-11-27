@@ -11,7 +11,10 @@ describe('parseUrlParams', () => {
       role: 'bystander',
       scene: null,
       night: false,
+      autoDepartSec: null,
     });
+    expect(parseUrlParams('?autodepart=0').autoDepartSec).toBe(0);
+    expect(parseUrlParams('?autodepart=2').autoDepartSec).toBe(2);
   });
 
   it('识别 ?night=1 夜色开关且支持关闭值', () => {
